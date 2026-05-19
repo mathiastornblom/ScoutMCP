@@ -1,4 +1,4 @@
-import { Agent } from 'undici';
+import { Agent, fetch } from 'undici';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -142,11 +142,12 @@ export class ScoutClient {
     return res.json() as Promise<T>;
   }
 
-  private async fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  private async fetchWithTimeout(url: string, init: Parameters<typeof fetch>[1]): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      return await fetch(url, { ...init, signal: controller.signal });
+      // Use undici's fetch so the dispatcher option (TLS bypass) is honoured
+      return await fetch(url, { ...init, signal: controller.signal }) as unknown as Response;
     } finally {
       clearTimeout(timer);
     }

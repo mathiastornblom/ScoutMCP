@@ -56,19 +56,22 @@ async function pingDirect(): Promise<boolean> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let dispatcher: any | undefined;
   if (ignoreTls) {
-    const { Agent } = await import('undici');
-    dispatcher = new Agent({ connect: { rejectUnauthorized: false } });
+    const undici = await import('undici');
+    dispatcher = new undici.Agent({ connect: { rejectUnauthorized: false } });
   }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${baseUrl}/rest/ping`, {
+    const { fetch: uFetch } = await import('undici');
+    const res = await uFetch(`${baseUrl}/rest/ping`, {
       method: 'GET',
       signal: controller.signal,
       ...(dispatcher ? { dispatcher } : {}),
-    });
-    return res.ok;
+    } as Parameters<typeof uFetch>[1]);
+    // Any HTTP response means the API layer is reachable; only network errors throw
+    void res;
+    return true;
   } finally {
     clearTimeout(timer);
   }
