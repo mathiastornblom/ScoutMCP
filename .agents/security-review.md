@@ -103,3 +103,46 @@ this.timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0
 - **`method`-parametern valideras inte** — `request(method, path, body)` skickar `method` direkt till `fetch`. Det är en intern API-yta som enbart anropas av verktygsmoduler med hårdkodade strängar (`'GET'`, `'POST'`, etc.), så risken är låg. Ingen åtgärd behövs om mönstret hålls.
 - **Cookie-header interpolation** — `Cookie: ScoutBoardAuthJWT=${this.token}` är säkert eftersom JWT är base64url-kodat (alfanumeriskt + `.`, `-`, `_`) och inte kan innehålla tecken som bryter cookie-syntaxen.
 - **Singleton-livscykel** — `_instance` rensas aldrig. Vid misstänkt kompromettering av token måste processen startas om. Acceptabelt för MCP-serverscenario, men bör dokumenteras i README.
+
+---
+
+## Final Code Review
+Date: 2026-05-19
+Resultat: SECURITY: FINAL APPROVED
+
+### Code-level findings
+
+**1. JWT never logged anywhere in src/ — PASS**
+- `this.token` in `client.ts` is assigned, compared, and inserted into a Cookie header, but never passed to any logging call. Zero `console.*` calls exist anywhere in `src/`. Confirmed by exhaustive grep across all 13 source files.
+
+**2. `confirm: true` enforced for factoryreset and halt — PASS**
+- `command.ts` line 40: `if ((input.command === 'factoryreset' || input.command === 'halt') && input.confirm !== true)` returns a `fail()` response before the HTTP request is made. The check uses strict `!== true`, so `undefined`, `false`, and missing field all block execution. The tool description also contains an explicit `DESTRUCTIVE:` warning. Fully satisfies the design requirement.
+
+**3. `SCOUT_BASE_URL` https:// check in client.ts constructor — PASS**
+- `client.ts` lines 39–41: constructor throws `ScoutError('SCOUT_BASE_URL must use https://')` before any field is assigned. No login or request can proceed without a valid https:// base URL. The integration test suite verifies this check fires correctly (Phase 2a).
+
+**4. TLS bypass uses dispatcher scoped to undici.Agent, NOT global NODE_TLS_REJECT_UNAUTHORIZED — PASS**
+- `client.ts` lines 52–55: `new Agent({ connect: { rejectUnauthorized: false } })` is only created when `SCOUT_IGNORE_TLS === 'true'` and stored as `this.dispatcher`. The dispatcher is passed per-request via the fetch options object. `NODE_TLS_REJECT_UNAUTHORIZED` is set nowhere in `src/`. The same pattern is correctly replicated in `health.ts` `pingDirect()` (lines 57–61).
+
+**5. `dotenv/config` only imported in index.ts — PASS**
+- Only `src/index.ts` line 1 imports `dotenv/config`. No tool file imports dotenv. Confirmed by grep across all files.
+
+**6. No `any` casts without an explaining comment — PASS**
+- Three `as any` / `any` occurrences found: `client.ts:73`, `client.ts:122`, `health.ts:57`. All three are immediately preceded by an `// eslint-disable-next-line @typescript-eslint/no-explicit-any` comment with `client.ts` additionally carrying an inline explanation (`// dispatcher cast: undici fetch accepts dispatcher but @types/node doesn't declare it`). No unexplained `any` casts exist. `z.any()` is not used anywhere.
+
+**7. No hardcoded credentials, URLs, or tokens — PASS**
+- All sensitive values (`SCOUT_BASE_URL`, `SCOUT_USERNAME`, `SCOUT_PASSWORD`) are sourced exclusively from `process.env` with mandatory presence checks that throw on startup. No literal credential strings, no hardcoded hostnames. The only URL construction is from `this.baseUrl` or `process.env.SCOUT_BASE_URL` with path suffixes.
+
+**8. Error responses don't leak stack traces to MCP clients — PASS**
+- `index.ts` lines 68–72: the top-level `CallToolRequestSchema` handler catches all errors and returns only `err.message` (for `Error` instances) or the string `'An unexpected error occurred'` for non-Error throws. Stack traces, file paths, and internal module names are never forwarded. All individual tool execute functions similarly catch errors and call `fail(err.message)`. No `.stack` property is accessed anywhere in `src/`.
+
+**Previous implementation requirement (parseInt validation) — RESOLVED**
+- The `parseInt` / `NaN` issue raised in the interim client review has been fixed in the final code. `client.ts` lines 47–50 now use `Number.isFinite(parsedTimeout) && parsedTimeout > 0` with a fallback to `DEFAULT_TIMEOUT_MS`. Requirement satisfied.
+
+### Non-blocking observations
+
+- **`applicationType` and `section` interpolated directly into URL paths** — In `application.ts` line 70 (`/api/v1/applications/${input.scope}/${input.applicationType}`) and `config.ts` line 55 (`/api/v1/configuration/${input.target}/${input.section}`), user-supplied strings are placed in the URL path without `encodeURIComponent`. Both `scope` and `target` are Zod `z.enum()` values and therefore safe. `applicationType` is a free-form `z.string()` and `section` is a free-form `z.string()`. A caller passing `applicationType: "citrix/../../../other"` could construct unexpected paths. Risk is low in practice because: (a) the server enforces its own routing and auth, (b) MCP callers are trusted AI clients, not anonymous users. Consider wrapping these segments with `encodeURIComponent()` in v2 as a defensive measure.
+
+- **`diagnositics download_url` exposes a raw URL with the note to attach the auth cookie** — `command.ts` lines 112–116 return a downloadUrl string and a note telling the caller to use the `ScoutBoardAuthJWT` cookie. This is correct behaviour (binary download cannot go through MCP), but the returned URL contains no auth material itself. No security issue — just worth documenting in the README that the caller must handle cookie attachment correctly.
+
+- **Test file imports `dotenv/config`** — `tests/integration.ts` line 1 imports `dotenv/config`. This is appropriate for a test runner that reads a local `.env` file in development; it does not affect production behaviour. Not a concern.
