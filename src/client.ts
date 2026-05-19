@@ -130,10 +130,12 @@ export class ScoutClient {
 
     if (!res.ok) {
       const apiError = await this.tryParseError(res);
-      throw new ScoutError(
-        apiError?.message ?? `Request failed (HTTP ${res.status})`,
-        res.status,
-      );
+      // The API sometimes returns {"message":"OK"} on error responses — ignore it.
+      const msg =
+        apiError?.message && apiError.message !== 'OK'
+          ? apiError.message
+          : `Request failed (HTTP ${res.status})`;
+      throw new ScoutError(msg, res.status);
     }
 
     // 204 No Content

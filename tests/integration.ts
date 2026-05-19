@@ -348,8 +348,8 @@ if (!ouMod) {
   await test('ou_get mode=root returns OU data', async () => {
     const result = await ouGet({ mode: 'root' });
     const text = result.content[0]?.text ?? '';
-    // Accept either a valid root OU object or a "No root OU defined" response — both are valid server states
-    const isAcceptable = !result.isError || text.toLowerCase().includes('root') || text.toLowerCase().includes('ok') || text.toLowerCase().includes('not found');
+    // Accept either a valid root OU object or a 404/not-found error — server may have no root OU configured
+    const isAcceptable = !result.isError || text.includes('404') || text.toLowerCase().includes('root') || text.toLowerCase().includes('not found');
     assert(isAcceptable, `ou_get(root) returned unexpected error: ${text}`);
   });
 

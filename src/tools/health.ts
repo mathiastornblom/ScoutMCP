@@ -64,7 +64,7 @@ async function pingDirect(): Promise<boolean> {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const { fetch: uFetch } = await import('undici');
-    const res = await uFetch(`${baseUrl}/rest/ping`, {
+    const res = await uFetch(`${baseUrl}/rest/api/v1/ping`, {
       method: 'GET',
       signal: controller.signal,
       ...(dispatcher ? { dispatcher } : {}),
