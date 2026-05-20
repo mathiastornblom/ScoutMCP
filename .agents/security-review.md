@@ -146,3 +146,46 @@ Resultat: SECURITY: FINAL APPROVED
 - **`diagnositics download_url` exposes a raw URL with the note to attach the auth cookie** — `command.ts` lines 112–116 return a downloadUrl string and a note telling the caller to use the `ScoutBoardAuthJWT` cookie. This is correct behaviour (binary download cannot go through MCP), but the returned URL contains no auth material itself. No security issue — just worth documenting in the README that the caller must handle cookie attachment correctly.
 
 - **Test file imports `dotenv/config`** — `tests/integration.ts` line 1 imports `dotenv/config`. This is appropriate for a test runner that reads a local `.env` file in development; it does not affect production behaviour. Not a concern.
+
+---
+
+## Final Review — Full Codebase (Post-QA Pass)
+Datum: 2026-05-19
+Granskare: Säkerhetsagent
+Resultat: **SECURITY: FINAL APPROVED**
+
+### Alla ursprungliga godkännandekrav uppfyllda i levererad kod
+
+| Krav | Status | Verifiering |
+|------|--------|-------------|
+| JWT in-memory only, aldrig loggad | ✓ | `private token: string | null = null` i `client.ts`; noll `console.*`-anrop i `src/` |
+| TLS bypass per-request, ej global | ✓ | `undici.Agent` scoped till instans; `NODE_TLS_REJECT_UNAUTHORIZED` och `setGlobalDispatcher` används aldrig |
+| Inga hårdkodade credentials eller URL:er | ✓ | Inga literaler utöver prefix-kontrollen `https://` |
+| HTTPS-kontroll vid startup | ✓ | `client.ts:39–41` — kastar innan något fält tilldelas |
+| `confirm: true` för `factoryreset` och `halt` | ✓ | `command.ts:40` — `!== true` blockerar `undefined`, `false`, och saknat fält |
+| Noll `z.any()` utan motivering | ✓ | Grep bekräftar noll förekomster |
+| Inga stack traces till MCP-klient | ✓ | `index.ts:68–72` returnerar bara `err.message`; inget `.stack` används |
+| Destruktiva operationer har guard | ✓ | `ou.ts`, `device.ts` har `assertTestScope`; `device delete` blockad helt i testläge |
+| `SCOUT_ENV` defaultar till production | ✓ | Testläge kräver explicit `SCOUT_ENV=test` |
+| `.env` gitignorerad | ✓ | Bekräftat i `.gitignore` |
+| `parseInt`-validering med fallback | ✓ | `client.ts:47–50` — `Number.isFinite` + positiv guard + fallback till `DEFAULT_TIMEOUT_MS` |
+
+### Icke-blockerande fynd att åtgärda före merge
+
+**1. `.env.example` innehåller riktig infrastruktur**
+`SCOUT_BASE_URL=https://scoutsrv.tornbloms.net:22160` och `SCOUT_USERNAME=administrator@tornbloms.net` är verkliga värden. En `.env.example` ska ha platshållarvärden.
+Åtgärd: byt till `https://your-scout-server:22160` och `admin@example.com`.
+
+**2. Odokumenterade miljövariabler i `.env.example`**
+`SCOUT_AUTH_MODE=basic` och `SCOUT_DIAGNOSTICS_PATH=./diagnostic` finns i `.env.example` men refereras inte i någon källfil och är inte dokumenterade. Bör tas bort.
+
+### Observationer (inga åtgärder krävs)
+
+- `applicationType` och `section` i URL-path-interpolation saknar `encodeURIComponent` — låg risk eftersom `scope`/`target` är Zod enum och servern har egen routing; rekommenderas i v2.
+- `dotenv/config` laddas ovillkorligt även i produktion — no-op om ingen `.env` finns; acceptabelt.
+- `as any`-casts i `client.ts:73,122` har förklarande kommentarer; undici-interop-problem känt och dokumenterat.
+- Labels/rules/schedules/maintenance/notifications har `delete`-åtgärder utan DESTRUCTIVE-text i description — dessa är konfigurationsobjekt, ej enheter/OU:er, och täcks inte av guard-kravet. Rekommenderas i v2.
+
+### Integrationstestverifiering
+
+QA körde 23/23 tester mot live-server inklusive autentisering, OU-skrivoperationer scoped till `/MCP-Test`, cleanup i `finally`-block, och verifiering att token inte exponeras i felsvar.
