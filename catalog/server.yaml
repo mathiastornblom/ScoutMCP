@@ -19,7 +19,7 @@ about:
   icon: https://avatars.githubusercontent.com/u/43036480?v=4
 source:
   project: https://github.com/mathiastornblom/ScoutMCP
-  commit: 8c74097dc0e5f636df7fffeff8e71b49f219d7d2
+  commit: 060f1529baf12c0fedea00a263011ba5e167fd85
 config:
   description: >
     Connect to your Unicorn Scout Board server. Provide the server URL,
