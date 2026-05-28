@@ -7,6 +7,8 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
+import { loadSavedConfig, setSessionConfig } from './session.js';
+import { configureTool } from './tools/configure.js';
 import { healthCheckTool } from './tools/health.js';
 import { ouGetTool, ouManageTool } from './tools/ou.js';
 import { deviceGetTool, deviceManageTool } from './tools/device.js';
@@ -19,7 +21,12 @@ import { scheduleManageTool } from './tools/schedule.js';
 import { maintenanceWindowManageTool } from './tools/maintenance.js';
 import { notificationManageTool } from './tools/notification.js';
 
+// Load persisted credentials from ~/.scout-mcp.json if present
+const savedConfig = loadSavedConfig();
+if (savedConfig) setSessionConfig(savedConfig);
+
 const tools = [
+  configureTool,
   healthCheckTool,
   ouGetTool,
   ouManageTool,

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
+import { resolveConfig } from '../session.js';
 import { ok, fail, buildQuery, type McpToolResult, type HealthCheckResponse } from '../types.js';
 
 const inputSchema = z.object({
@@ -47,10 +48,11 @@ async function execute(raw: unknown): Promise<McpToolResult> {
 }
 
 async function pingDirect(): Promise<boolean> {
-  const baseUrl = process.env.SCOUT_BASE_URL?.replace(/\/$/, '');
-  if (!baseUrl) throw new Error('SCOUT_BASE_URL is required');
+  const config = resolveConfig();
+  if (!config) throw new Error('Scout is not configured. Call scout_configure first.');
 
-  const ignoreTls = process.env.SCOUT_IGNORE_TLS === 'true';
+  const baseUrl = config.baseUrl.replace(/\/$/, '');
+  const ignoreTls = config.ignoreTls ?? false;
   const timeoutMs = parseInt(process.env.SCOUT_REQUEST_TIMEOUT_MS ?? '30000', 10);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
