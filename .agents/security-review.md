@@ -173,7 +173,7 @@ Resultat: **SECURITY: FINAL APPROVED**
 ### Icke-blockerande fynd att åtgärda före merge
 
 **1. `.env.example` innehåller riktig infrastruktur**
-`SCOUT_BASE_URL=https://scoutsrv.tornbloms.net:22160` och `SCOUT_USERNAME=administrator@tornbloms.net` är verkliga värden. En `.env.example` ska ha platshållarvärden.
+`SCOUT_BASE_URL` och `SCOUT_USERNAME` ska ha platshållarvärden i `.env.example`.
 Åtgärd: byt till `https://your-scout-server:22160` och `admin@example.com`.
 
 **2. Odokumenterade miljövariabler i `.env.example`**

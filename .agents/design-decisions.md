@@ -267,7 +267,7 @@ Test code MUST abort immediately if `SCOUT_TEST_OU_PATH` is not set. All write o
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SCOUT_BASE_URL` | yes | — | e.g. `https://scoutsrv.tornbloms.net:22160` |
+| `SCOUT_BASE_URL` | yes | — | e.g. `https://your-scout-server:22160` |
 | `SCOUT_USERNAME` | yes | — | Login username |
 | `SCOUT_PASSWORD` | yes | — | Login password |
 | `SCOUT_DOMAIN` | no | `""` | Login domain (may be empty) |

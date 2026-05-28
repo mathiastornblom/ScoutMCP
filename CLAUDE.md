@@ -115,7 +115,7 @@ När QA lägger en PR (.agents/pr-*.md):
 ## Miljövariabler
 
 ```
-SCOUT_BASE_URL        # https://scoutsrv.tornbloms.net:22160
+SCOUT_BASE_URL        # https://your-scout-server:22160
 SCOUT_USERNAME
 SCOUT_PASSWORD
 SCOUT_TEST_OU_PATH    # /MCP-Test — ALLA destruktiva tester sker här
