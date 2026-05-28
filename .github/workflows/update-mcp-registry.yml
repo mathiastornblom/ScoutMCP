@@ -23,7 +23,6 @@ jobs:
         run: |
           SHORT_SHA="${COMMIT_SHA:0:7}"
 
-          # Clone fork
           git clone "https://x-access-token:${GH_TOKEN}@github.com/mathiastornblom/mcp-registry.git" /tmp/mcp-registry
           cd /tmp/mcp-registry
 
@@ -53,11 +52,19 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Update scout-mcp to ${SHORT_SHA}
-
-${COMMIT_MSG}"
+          git commit -m "Update scout-mcp to ${SHORT_SHA}: ${COMMIT_MSG}"
 
           git push origin update-scout-mcp --force
+
+          # Build PR body into a temp file to avoid YAML indentation issues
+          {
+            echo "Automated update from [ScoutMCP@\`${SHORT_SHA}\`](https://github.com/mathiastornblom/ScoutMCP/commit/${COMMIT_SHA})."
+            echo ""
+            echo "**Commit:** ${COMMIT_MSG}"
+            echo ""
+            echo "---"
+            echo "*Opened automatically by the [update-mcp-registry workflow](https://github.com/mathiastornblom/ScoutMCP/actions/workflows/update-mcp-registry.yml).*"
+          } > /tmp/pr-body.md
 
           # Open a new PR if none is open; existing PRs update automatically via the force push
           EXISTING_PR=$(gh pr list \
@@ -72,12 +79,7 @@ ${COMMIT_MSG}"
               --head "mathiastornblom:update-scout-mcp" \
               --base main \
               --title "Update Scout Board MCP to ${SHORT_SHA}" \
-              --body "Automated update from [ScoutMCP@\`${SHORT_SHA}\`](https://github.com/mathiastornblom/ScoutMCP/commit/${COMMIT_SHA}).
-
-**Commit message:** ${COMMIT_MSG}
-
----
-*Opened automatically by the [update-mcp-registry workflow](https://github.com/mathiastornblom/ScoutMCP/actions/workflows/update-mcp-registry.yml).*"
+              --body-file /tmp/pr-body.md
           else
             echo "PR #${EXISTING_PR} already open — updated via force push."
           fi
