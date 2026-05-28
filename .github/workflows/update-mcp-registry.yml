@@ -66,20 +66,16 @@ jobs:
             echo "*Opened automatically by the [update-mcp-registry workflow](https://github.com/mathiastornblom/ScoutMCP/actions/workflows/update-mcp-registry.yml).*"
           } > /tmp/pr-body.md
 
-          # Open a new PR if none is open; existing PRs update automatically via the force push
-          EXISTING_PR=$(gh pr list \
+          # Create PR — if one already exists the branch update above is sufficient
+          CREATE_OUT=$(gh pr create \
             --repo docker/mcp-registry \
             --head "mathiastornblom:update-scout-mcp" \
-            --json number \
-            --jq '.[0].number' 2>/dev/null)
-
-          if [ -z "$EXISTING_PR" ]; then
-            gh pr create \
-              --repo docker/mcp-registry \
-              --head "mathiastornblom:update-scout-mcp" \
-              --base main \
-              --title "Update Scout Board MCP to ${SHORT_SHA}" \
-              --body-file /tmp/pr-body.md
-          else
-            echo "PR #${EXISTING_PR} already open — updated via force push."
-          fi
+            --base main \
+            --title "Update Scout Board MCP to ${SHORT_SHA}" \
+            --body-file /tmp/pr-body.md 2>&1) && echo "$CREATE_OUT" || {
+            if echo "$CREATE_OUT" | grep -q "already exists"; then
+              echo "PR already open — branch updated via force push."
+            else
+              echo "$CREATE_OUT" && exit 1
+            fi
+          }
