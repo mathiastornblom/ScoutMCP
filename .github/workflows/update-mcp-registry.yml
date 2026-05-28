@@ -1,0 +1,83 @@
+name: Update Docker MCP Registry
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  update-registry:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout ScoutMCP
+        uses: actions/checkout@v4
+
+      - name: Push update to mcp-registry fork and open PR
+        env:
+          GH_TOKEN: ${{ secrets.MCP_REGISTRY_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+
+          # Clone fork
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/mathiastornblom/mcp-registry.git" /tmp/mcp-registry
+          cd /tmp/mcp-registry
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Sync fork main with upstream so we always branch from a clean base
+          git remote add upstream https://github.com/docker/mcp-registry.git
+          git fetch upstream
+          git checkout main
+          git reset --hard upstream/main
+          git push origin main --force
+
+          # Create a fresh update branch on top of upstream main
+          git checkout -B update-scout-mcp
+
+          # Copy latest catalog files from ScoutMCP and inject current commit SHA
+          mkdir -p servers/scout-mcp
+          cp "$GITHUB_WORKSPACE/catalog/server.yaml" servers/scout-mcp/
+          cp "$GITHUB_WORKSPACE/catalog/tools.json" servers/scout-mcp/
+          sed -i "s/  commit: .*/  commit: ${COMMIT_SHA}/" servers/scout-mcp/server.yaml
+
+          git add servers/scout-mcp/
+
+          if git diff --staged --quiet; then
+            echo "Registry entry unchanged — nothing to do."
+            exit 0
+          fi
+
+          git commit -m "Update scout-mcp to ${SHORT_SHA}
+
+${COMMIT_MSG}"
+
+          git push origin update-scout-mcp --force
+
+          # Open a new PR if none is open; existing PRs update automatically via the force push
+          EXISTING_PR=$(gh pr list \
+            --repo docker/mcp-registry \
+            --head "mathiastornblom:update-scout-mcp" \
+            --json number \
+            --jq '.[0].number' 2>/dev/null)
+
+          if [ -z "$EXISTING_PR" ]; then
+            gh pr create \
+              --repo docker/mcp-registry \
+              --head "mathiastornblom:update-scout-mcp" \
+              --base main \
+              --title "Update Scout Board MCP to ${SHORT_SHA}" \
+              --body "Automated update from [ScoutMCP@\`${SHORT_SHA}\`](https://github.com/mathiastornblom/ScoutMCP/commit/${COMMIT_SHA}).
+
+**Commit message:** ${COMMIT_MSG}
+
+---
+*Opened automatically by the [update-mcp-registry workflow](https://github.com/mathiastornblom/ScoutMCP/actions/workflows/update-mcp-registry.yml).*"
+          else
+            echo "PR #${EXISTING_PR} already open — updated via force push."
+          fi
