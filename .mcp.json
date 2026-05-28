@@ -1,15 +1,12 @@
 {
   "mcpServers": {
     "scout": {
-      "command": "node",
-      "args": ["/Users/mathiast/Documents/VSCode/ScoutMCP/dist/index.js"],
-      "env": {
-        "SCOUT_BASE_URL": "https://scoutsrv.tornbloms.net:22160",
-        "SCOUT_USERNAME": "administrator@tornbloms.net",
-        "SCOUT_PASSWORD": "Hajfena22?",
-        "SCOUT_DOMAIN": "",
-        "SCOUT_IGNORE_TLS": "true"
-      }
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "--env-file", "/Users/mathiast/Documents/VSCode/ScoutMCP/.env",
+        "scout-mcp"
+      ]
     }
   }
 }
