@@ -47,6 +47,11 @@ Create catalog/tools.json — an array with one entry per tool:
   ]
 Include every argument from the Zod schema. Use type "object" for z.record() fields.
 
+The title in the Docker MCP Hub must follow the naming convention:
+  "Citrix Unicon Management <ProductName>"
+  Examples: "Citrix Unicon Management Scout", "Citrix Unicon Management ELIAS"
+  Derive <ProductName> from the product this MCP server manages.
+
 Create catalog/server.yaml:
   name: <project-slug>-mcp
   image: mcp/<project-slug>-mcp
@@ -55,7 +60,7 @@ Create catalog/server.yaml:
     category: developer-tools
     tags: [<2-4 relevant tags>]
   about:
-    title: <Human title>
+    title: Citrix Unicon Management <ProductName>
     description: >
       <2-3 sentence description of what the server manages>
     icon: https://avatars.githubusercontent.com/u/<github-org-id>?v=4
@@ -133,33 +138,32 @@ Create .github/workflows/update-mcp-registry.yml:
               exit 0
             fi
 
-            git commit -m "Update <project-slug>-mcp to ${SHORT_SHA}
-
-            ${COMMIT_MSG}"
+            git commit -m "Update <project-slug>-mcp to ${SHORT_SHA}: ${COMMIT_MSG}"
 
             git push origin update-<project-slug>-mcp --force
 
-            EXISTING_PR=$(gh pr list \
+            {
+              echo "Automated update from [<ProductName>@\`${SHORT_SHA}\`](https://github.com/<org>/<repo>/commit/${COMMIT_SHA})."
+              echo ""
+              echo "**Commit:** ${COMMIT_MSG}"
+              echo ""
+              echo "---"
+              echo "*Opened automatically by the [update-mcp-registry workflow](https://github.com/<org>/<repo>/actions/workflows/update-mcp-registry.yml).*"
+            } > /tmp/pr-body.md
+
+            # Create PR — if one already exists the branch update above is sufficient
+            CREATE_OUT=$(gh pr create \
               --repo docker/mcp-registry \
               --head "<github-username>:update-<project-slug>-mcp" \
-              --json number \
-              --jq '.[0].number' 2>/dev/null)
-
-            if [ -z "$EXISTING_PR" ]; then
-              gh pr create \
-                --repo docker/mcp-registry \
-                --head "<github-username>:update-<project-slug>-mcp" \
-                --base main \
-                --title "Update <Human title> MCP to ${SHORT_SHA}" \
-                --body "Automated update from [\`${SHORT_SHA}\`](https://github.com/<org>/<repo>/commit/${COMMIT_SHA}).
-
-            **Commit:** ${COMMIT_MSG}
-
-            ---
-            *Opened automatically by the [update-mcp-registry workflow](https://github.com/<org>/<repo>/actions/workflows/update-mcp-registry.yml).*"
-            else
-              echo "PR #${EXISTING_PR} already open — updated via force push."
-            fi
+              --base main \
+              --title "Update Citrix Unicon Management <ProductName> to ${SHORT_SHA}" \
+              --body-file /tmp/pr-body.md 2>&1) && echo "$CREATE_OUT" || {
+              if echo "$CREATE_OUT" | grep -q "already exists"; then
+                echo "PR already open — branch updated via force push."
+              else
+                echo "$CREATE_OUT" && exit 1
+              fi
+            }
 
 Fill in all <placeholders> with real values derived from the project (package.json, git remote, GitHub org).
 
@@ -183,12 +187,12 @@ Clone the fork, create the submission branch, run the build validator, and open 
   task build -- --tools <project-slug>-mcp
   task catalog -- <project-slug>-mcp
   git add servers/<project-slug>-mcp/
-  git commit -m "Add <Human title> MCP server"
+  git commit -m "Add Citrix Unicon Management <ProductName> MCP server"
   git push origin add-<project-slug>-mcp
   gh pr create \
     --repo docker/mcp-registry \
     --head "<github-username>:add-<project-slug>-mcp" \
-    --title "Add <Human title> MCP server" \
+    --title "Add Citrix Unicon Management <ProductName> MCP server" \
     --body "..."
 
 The `task build -- --tools <project-slug>-mcp` step reads tools.json instead of running the server live,
@@ -200,9 +204,9 @@ so no credentials are needed at submission time.
 
 After the workflow is committed, tell the user:
 
-1. Create a GitHub fine-grained PAT at https://github.com/settings/personal-access-tokens/new
-   - Repository access: only `<github-username>/mcp-registry`
-   - Permissions: Contents (read/write), Pull requests (read/write)
+1. Create a GitHub classic PAT at https://github.com/settings/tokens/new
+   - Scope: public_repo (required for cross-org PR creation to docker/mcp-registry)
+   - Do NOT use a fine-grained PAT — it cannot open PRs on repos in other organisations
 
 2. Add it as a secret named `MCP_REGISTRY_TOKEN` at:
    https://github.com/<org>/<repo>/settings/secrets/actions/new
