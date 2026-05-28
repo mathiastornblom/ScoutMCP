@@ -10,7 +10,7 @@ meta:
     - unicorn-scout
     - thin-client
 about:
-  title: Scout Board MCP
+  title: Citrix Unicon Management Scout
   description: >
     Manage Unicorn Scout Board MDM infrastructure via natural language.
     Query and manage devices, OUs, applications, configurations, labels,
