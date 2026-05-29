@@ -66,15 +66,22 @@ jobs:
             echo "*Opened automatically by the [update-mcp-registry workflow](https://github.com/mathiastornblom/ScoutMCP/actions/workflows/update-mcp-registry.yml).*"
           } > /tmp/pr-body.md
 
-          # Create PR — if one already exists the branch update above is sufficient
+          PR_TITLE="Update Citrix Unicon Management Scout to ${SHORT_SHA}"
+
+          # Create PR or update title/body if one already exists
           CREATE_OUT=$(gh pr create \
             --repo docker/mcp-registry \
             --head "mathiastornblom:update-scout-mcp" \
             --base main \
-            --title "Update Scout Board MCP to ${SHORT_SHA}" \
+            --title "${PR_TITLE}" \
             --body-file /tmp/pr-body.md 2>&1) && echo "$CREATE_OUT" || {
             if echo "$CREATE_OUT" | grep -q "already exists"; then
-              echo "PR already open — branch updated via force push."
+              gh pr edit \
+                --repo docker/mcp-registry \
+                $(gh pr list --repo docker/mcp-registry --head "mathiastornblom:update-scout-mcp" --json number --jq '.[0].number') \
+                --title "${PR_TITLE}" \
+                --body-file /tmp/pr-body.md
+              echo "PR updated — title and body refreshed."
             else
               echo "$CREATE_OUT" && exit 1
             fi
