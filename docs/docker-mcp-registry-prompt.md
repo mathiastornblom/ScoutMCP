@@ -198,6 +198,24 @@ Clone the fork, create the submission branch, run the build validator, and open 
 The `task build -- --tools <project-slug>-mcp` step reads tools.json instead of running the server live,
 so no credentials are needed at submission time.
 
+After opening the PR, add a comment explaining why test credentials cannot be provided:
+
+  gh pr comment <pr-number> --repo docker/mcp-registry --body "Hi Docker team 👋
+
+  We're unable to provide test credentials for this submission. **<ProductName>** is an
+  on-premise enterprise server by Unicon/Citrix — there is no public cloud instance or
+  sandbox environment. Testing requires a full on-premise installation within a
+  customer's own infrastructure.
+
+  We have included \`tools.json\` with all tools statically defined, so
+  \`task build --tools <project-slug>-mcp\` completes successfully without a live server.
+  The full source code is open for review at https://github.com/<org>/<repo>.
+
+  Happy to answer any questions about the implementation or the platform."
+
+Do NOT submit the Docker test credentials Google Form — it is intended for cloud services
+with shareable API keys, not on-premise enterprise servers.
+
 ---
 
 ## Step 5 — Secret setup (tell the user)
