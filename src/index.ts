@@ -7,6 +7,7 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
+import { fetch } from 'undici';
 import { loadSavedConfig, setSessionConfig, clearSessionConfig, resolveConfig } from './session.js';
 import { getClient } from './client.js';
 import { configureTool } from './tools/configure.js';
@@ -21,6 +22,7 @@ import { ruleManageTool } from './tools/rule.js';
 import { scheduleManageTool } from './tools/schedule.js';
 import { maintenanceWindowManageTool } from './tools/maintenance.js';
 import { notificationManageTool } from './tools/notification.js';
+import { updateTool } from './tools/update.js';
 
 // Load persisted credentials from ~/.scout-mcp.json if present
 const savedConfig = loadSavedConfig();
@@ -51,6 +53,30 @@ if (startupConfig) {
   );
 }
 
+// Non-blocking background update check — logs to stderr if a newer commit exists on main.
+void (async () => {
+  const currentVersion = process.env.SCOUT_VERSION;
+  if (!currentVersion || currentVersion === 'dev') return;
+  try {
+    const res = await fetch('https://api.github.com/repos/mathiastornblom/ScoutMCP/commits/main', {
+      headers: { Accept: 'application/vnd.github.v3+json' },
+    });
+    if (!res.ok) return;
+    const data = (await res.json()) as { sha?: string };
+    const latestSha = data.sha;
+    if (!latestSha) return;
+    const upToDate = latestSha.startsWith(currentVersion) || currentVersion === latestSha;
+    if (!upToDate) {
+      process.stderr.write(
+        `[scout-mcp] Update available: ${currentVersion.slice(0, 7)} → ${latestSha.slice(0, 7)}. ` +
+          'Use the scout_update tool with action=apply for instructions.\n',
+      );
+    }
+  } catch {
+    // Network errors are non-fatal — skip silently
+  }
+})();
+
 const tools = [
   configureTool,
   healthCheckTool,
@@ -69,6 +95,7 @@ const tools = [
   scheduleManageTool,
   maintenanceWindowManageTool,
   notificationManageTool,
+  updateTool,
 ];
 
 const toolMap = new Map(tools.map((t) => [t.name, t]));

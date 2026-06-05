@@ -1,5 +1,5 @@
 name: scout-mcp
-image: mcp/scout-mcp
+image: ghcr.io/mathiastornblom/scoutmcp:latest
 type: server
 meta:
   category: developer-tools
