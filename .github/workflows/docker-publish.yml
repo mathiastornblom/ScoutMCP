@@ -45,3 +45,13 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             GIT_SHA=${{ github.sha }}
+
+      - name: Make GHCR package public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PATCH \
+            /user/packages/container/scoutmcp \
+            -f visibility=public \
+            --silent && echo "Package visibility set to public" \
+            || echo "Could not set package visibility (may already be public or requires a PAT)"
