@@ -2,6 +2,8 @@ import { Agent, fetch } from 'undici';
 import { type ScoutConfig, resolveConfig } from './session.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+/** Renew token this many ms before its actual expiry to avoid race windows. */
+const TOKEN_RENEW_BEFORE_MS = 60_000;
 
 interface ApiError {
   code?: string | number;
@@ -18,11 +20,27 @@ export class ScoutError extends Error {
   }
 }
 
+/** Decode the `exp` claim from a JWT without verifying the signature. */
+function parseJwtExpiry(token: string): number | null {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const json = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8')) as {
+      exp?: unknown;
+    };
+    return typeof json.exp === 'number' ? json.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 export class ScoutClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly dispatcher: Agent | undefined;
   private token: string | null = null;
+  /** Unix timestamp (ms) when the current token expires, or null if unknown. */
+  private tokenExpiresAt: number | null = null;
 
   constructor(private readonly config: ScoutConfig) {
     if (!config.baseUrl.startsWith('https://')) {
@@ -64,6 +82,7 @@ export class ScoutClient {
     const data = (await res.json()) as { token: string };
     if (!data.token) throw new ScoutError('Login response missing token');
     this.token = data.token;
+    this.tokenExpiresAt = parseJwtExpiry(data.token);
   }
 
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -72,11 +91,25 @@ export class ScoutClient {
   }
 
   isAuthenticated(): boolean {
-    return this.token !== null;
+    return this.token !== null && !this.isTokenExpired();
+  }
+
+  /** Unix ms when the active token expires, or null if unknown / no token. */
+  tokenExpiry(): number | null {
+    return this.token ? this.tokenExpiresAt : null;
+  }
+
+  private isTokenExpired(): boolean {
+    if (!this.tokenExpiresAt) return false;
+    return Date.now() >= this.tokenExpiresAt - TOKEN_RENEW_BEFORE_MS;
   }
 
   private async ensureAuth(): Promise<void> {
-    if (!this.token) await this.login();
+    if (!this.token || this.isTokenExpired()) {
+      this.token = null;
+      this.tokenExpiresAt = null;
+      await this.login();
+    }
   }
 
   private async doRequest<T>(
@@ -104,6 +137,7 @@ export class ScoutClient {
 
     if (res.status === 401 && !isRetry) {
       this.token = null;
+      this.tokenExpiresAt = null;
       await this.login();
       return this.doRequest<T>(method, path, body, true);
     }

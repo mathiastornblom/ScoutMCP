@@ -7,7 +7,8 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { loadSavedConfig, setSessionConfig } from './session.js';
+import { loadSavedConfig, setSessionConfig, clearSessionConfig, resolveConfig } from './session.js';
+import { getClient } from './client.js';
 import { configureTool } from './tools/configure.js';
 import { healthCheckTool } from './tools/health.js';
 import { ouGetTool, ouManageTool } from './tools/ou.js';
@@ -24,6 +25,31 @@ import { notificationManageTool } from './tools/notification.js';
 // Load persisted credentials from ~/.scout-mcp.json if present
 const savedConfig = loadSavedConfig();
 if (savedConfig) setSessionConfig(savedConfig);
+
+// Verify auth against the backend before accepting tool calls.
+// If credentials are present but invalid, clear them and warn so the AI
+// knows to ask the user to run scout_configure.
+const startupConfig = resolveConfig();
+if (startupConfig) {
+  try {
+    await getClient().login();
+    process.stderr.write(
+      `[scout-mcp] Authenticated — connected to ${startupConfig.baseUrl} as ${startupConfig.username}\n`,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `[scout-mcp] WARNING: Startup auth failed (${msg}). ` +
+        'Credentials cleared — use scout_configure to reconnect.\n',
+    );
+    clearSessionConfig();
+  }
+} else {
+  process.stderr.write(
+    '[scout-mcp] No credentials configured. ' +
+      'Use the scout_configure tool with action=set, baseUrl, username, and password to connect.\n',
+  );
+}
 
 const tools = [
   configureTool,

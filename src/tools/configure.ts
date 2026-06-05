@@ -9,7 +9,7 @@ import {
   deleteSavedConfig,
   loadSavedConfig,
 } from '../session.js';
-import { ScoutClient } from '../client.js';
+import { ScoutClient, getClient } from '../client.js';
 
 const inputSchema = z.object({
   action: z
@@ -101,16 +101,25 @@ async function execute(raw: unknown): Promise<McpToolResult> {
     if (!config) {
       return ok({
         status: 'not_configured',
-        message: 'Call scout_configure with action=set to configure credentials.',
+        message:
+          'No credentials configured. Call scout_configure with action=set, ' +
+          'providing baseUrl, username, and password.',
       });
     }
+    const client = getClient();
+    const expiry = client.tokenExpiry();
+    const expiresAt = expiry ? new Date(expiry).toISOString() : null;
+    const secondsLeft = expiry ? Math.round((expiry - Date.now()) / 1000) : null;
     return ok({
       status: 'configured',
+      authenticated: client.isAuthenticated(),
       baseUrl: config.baseUrl,
       username: config.username,
       domain: config.domain || '(none)',
       ignoreTls: config.ignoreTls ?? false,
       hasSavedFile: loadSavedConfig() !== null,
+      tokenExpiresAt: expiresAt,
+      tokenSecondsRemaining: secondsLeft,
     });
   }
 
