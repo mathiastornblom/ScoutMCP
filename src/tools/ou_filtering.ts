@@ -98,12 +98,18 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
       }
 
       case 'set_settings': {
-        const body: Record<string, unknown> = {};
-        if (input.ou_filter_type !== undefined) body['OUFilterType'] = input.ou_filter_type;
-        if (input.ou_filter_ignore_default !== undefined)
-          body['OUFilterIgnoreDefault'] = input.ou_filter_ignore_default;
-        if (Object.keys(body).length === 0)
+        if (input.ou_filter_type === undefined && input.ou_filter_ignore_default === undefined)
           return fail('set_settings requires at least one of: ou_filter_type, ou_filter_ignore_default');
+        // Both fields must be sent together — read current values and merge.
+        log(tool, 'GET', '/api/v1/oufilter/settings');
+        const current = await client.rawRequest<Array<{ OUFilterType: number; OUFilterIgnoreDefault: number }>>(
+          'GET', '/api/v1/oufilter/settings',
+        );
+        const existing = Array.isArray(current) ? current[0] : current as { OUFilterType: number; OUFilterIgnoreDefault: number };
+        const body = {
+          OUFilterType: input.ou_filter_type ?? existing.OUFilterType,
+          OUFilterIgnoreDefault: input.ou_filter_ignore_default ?? Boolean(existing.OUFilterIgnoreDefault),
+        };
         log(tool, 'POST', '/api/v1/oufilter/setSettings', body);
         const data = await client.rawRequest<unknown>('POST', '/api/v1/oufilter/setSettings', body);
         logOk(tool);
