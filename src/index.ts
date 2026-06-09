@@ -23,6 +23,16 @@ import { scheduleManageTool } from './tools/schedule.js';
 import { maintenanceWindowManageTool } from './tools/maintenance.js';
 import { notificationManageTool } from './tools/notification.js';
 import { updateTool } from './tools/update.js';
+import { ouFilterManageTool, newDeviceOptionsTool } from './tools/ou_filtering.js';
+import { systemInfoTool } from './tools/system_info.js';
+import { systemSettingsTool } from './tools/system_settings.js';
+import { predefinedCommandsTool } from './tools/predefined_commands.js';
+import { predefinedPathsTool } from './tools/predefined_paths.js';
+import { predefinedImagesTool } from './tools/predefined_images.js';
+import { licenseManageTool } from './tools/license.js';
+import { adminManageTool } from './tools/admins.js';
+import { serverInstancesTool } from './tools/server_instances.js';
+import { dbCleanupTool } from './tools/db_cleanup.js';
 
 // Load persisted credentials from ~/.scout-mcp.json if present
 const savedConfig = loadSavedConfig();
@@ -77,6 +87,11 @@ void (async () => {
   }
 })();
 
+const privateEndpointsEnabled = process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS === 'true';
+if (privateEndpointsEnabled) {
+  process.stderr.write('[scout-mcp] Private endpoints enabled (SCOUT_ENABLE_PRIVATE_ENDPOINTS=true)\n');
+}
+
 const tools = [
   configureTool,
   healthCheckTool,
@@ -96,6 +111,21 @@ const tools = [
   maintenanceWindowManageTool,
   notificationManageTool,
   updateTool,
+  ...(privateEndpointsEnabled
+    ? [
+        ouFilterManageTool,
+        newDeviceOptionsTool,
+        systemInfoTool,
+        systemSettingsTool,
+        predefinedCommandsTool,
+        predefinedPathsTool,
+        predefinedImagesTool,
+        licenseManageTool,
+        adminManageTool,
+        serverInstancesTool,
+        dbCleanupTool,
+      ]
+    : []),
 ];
 
 const toolMap = new Map(tools.map((t) => [t.name, t]));

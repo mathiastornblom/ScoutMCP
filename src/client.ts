@@ -90,6 +90,12 @@ export class ScoutClient {
     return this.doRequest<T>(method, path, body, false);
   }
 
+  /** Like request(), but skips the /rest prefix — for private endpoints served outside /rest/. */
+  async rawRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+    await this.ensureAuth();
+    return this.doRawRequest<T>(method, path, body, false);
+  }
+
   isAuthenticated(): boolean {
     return this.token !== null && !this.isTokenExpired();
   }
@@ -153,6 +159,50 @@ export class ScoutClient {
     }
 
     // 204 No Content
+    if (res.status === 204) return undefined as T;
+
+    return res.json() as Promise<T>;
+  }
+
+  private async doRawRequest<T>(
+    method: string,
+    path: string,
+    body: unknown,
+    isRetry: boolean,
+  ): Promise<T> {
+    const url = `${this.baseUrl}${path}`;
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.token}`,
+      Accept: 'application/json',
+    };
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    const res = await this.fetchWithTimeout(url, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...(this.dispatcher ? { dispatcher: this.dispatcher as any } : {}),
+    });
+
+    if (res.status === 401 && !isRetry) {
+      this.token = null;
+      this.tokenExpiresAt = null;
+      await this.login();
+      return this.doRawRequest<T>(method, path, body, true);
+    }
+
+    if (!res.ok) {
+      const apiError = await this.tryParseError(res);
+      const msg =
+        apiError?.message && apiError.message !== 'OK'
+          ? apiError.message
+          : `Request failed (HTTP ${res.status})`;
+      throw new ScoutError(msg, res.status);
+    }
+
     if (res.status === 204) return undefined as T;
 
     return res.json() as Promise<T>;

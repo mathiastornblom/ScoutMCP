@@ -99,13 +99,21 @@ function assertUnderTestScope(path: string): void {
 // Using dynamic import so the test file compiles and reports SKIP even when
 // individual tool modules haven't been written yet.
 
+interface ScoutConfigLike {
+  baseUrl: string;
+  username: string;
+  password: string;
+  domain?: string;
+  ignoreTls?: boolean;
+}
 interface ClientModule {
-  ScoutClient: new () => {
+  ScoutClient: new (config: ScoutConfigLike) => {
     login(): Promise<void>;
     isAuthenticated(): boolean;
     request<T>(method: string, path: string, body?: unknown): Promise<T>;
   };
   ScoutError: new (message: string, statusCode?: number) => Error & { statusCode?: number };
+  getClient(): { request<T>(method: string, path: string, body?: unknown): Promise<T> };
 }
 
 interface ZodSchema { parse(v: unknown): unknown; safeParse(v: unknown): { success: boolean } }
@@ -246,63 +254,25 @@ await test('GET /ping returns HTTP 200', async () => {
 
 console.log('\nPhase 2a — Client constructor validation');
 
+// ScoutClient takes an explicit config object — credential env vars are resolved by
+// resolveConfig() in session.ts, not by the constructor itself.  The only constructor-
+// level guard is that baseUrl must use https://.
+
 if (!clientMod) {
-  await skip('ScoutClient rejects missing SCOUT_BASE_URL', 'client module not available');
-  await skip('ScoutClient rejects missing SCOUT_USERNAME', 'client module not available');
-  await skip('ScoutClient rejects missing SCOUT_PASSWORD', 'client module not available');
   await skip('ScoutClient rejects http:// base URL', 'client module not available');
 } else {
   const { ScoutClient, ScoutError } = clientMod;
 
-  await test('ScoutClient rejects missing SCOUT_BASE_URL', async () => {
-    const saved = process.env.SCOUT_BASE_URL!;
-    delete process.env.SCOUT_BASE_URL;
-    try {
-      const err = await mustThrow(() => new ScoutClient());
-      assert(err instanceof ScoutError, `Expected ScoutError, got ${String(err)}`);
-      assert(err.message.includes('SCOUT_BASE_URL'), `Message should name the var: "${err.message}"`);
-    } finally {
-      process.env.SCOUT_BASE_URL = saved;
-    }
-  });
-
-  await test('ScoutClient rejects missing SCOUT_USERNAME', async () => {
-    const saved = process.env.SCOUT_USERNAME!;
-    delete process.env.SCOUT_USERNAME;
-    try {
-      const err = await mustThrow(() => new ScoutClient());
-      assert(err instanceof ScoutError, `Expected ScoutError, got ${String(err)}`);
-      assert(err.message.includes('SCOUT_USERNAME'), `Message should name the var: "${err.message}"`);
-    } finally {
-      process.env.SCOUT_USERNAME = saved;
-    }
-  });
-
-  await test('ScoutClient rejects missing SCOUT_PASSWORD', async () => {
-    const saved = process.env.SCOUT_PASSWORD!;
-    delete process.env.SCOUT_PASSWORD;
-    try {
-      const err = await mustThrow(() => new ScoutClient());
-      assert(err instanceof ScoutError, `Expected ScoutError, got ${String(err)}`);
-      assert(err.message.includes('SCOUT_PASSWORD'), `Message should name the var: "${err.message}"`);
-    } finally {
-      process.env.SCOUT_PASSWORD = saved;
-    }
-  });
-
   await test('ScoutClient rejects http:// base URL', async () => {
-    const saved = process.env.SCOUT_BASE_URL!;
-    process.env.SCOUT_BASE_URL = saved.replace('https://', 'http://');
-    try {
-      const err = await mustThrow(() => new ScoutClient());
-      assert(err instanceof ScoutError, `Expected ScoutError, got ${String(err)}`);
-      assert(
-        err.message.toLowerCase().includes('https'),
-        `Error message should mention https: "${err.message}"`,
-      );
-    } finally {
-      process.env.SCOUT_BASE_URL = saved;
-    }
+    const httpUrl = BASE_URL!.replace('https://', 'http://');
+    const err = await mustThrow(
+      () => new ScoutClient({ baseUrl: httpUrl, username: 'u', password: 'p' }),
+    );
+    assert(err instanceof ScoutError, `Expected ScoutError, got ${String(err)}`);
+    assert(
+      err.message.toLowerCase().includes('https'),
+      `Error message should mention https: "${err.message}"`,
+    );
   });
 }
 
@@ -348,9 +318,17 @@ if (!clientMod) {
   await skip('request() propagates ScoutError when re-auth fails', 'client module not available');
 } else {
   const { ScoutClient, ScoutError } = clientMod;
+  const ignoreTls = process.env.SCOUT_IGNORE_TLS === 'true';
+  const validConfig: ScoutConfigLike = {
+    baseUrl: BASE_URL!,
+    username: process.env.SCOUT_USERNAME!,
+    password: process.env.SCOUT_PASSWORD!,
+    domain: process.env.SCOUT_DOMAIN ?? '',
+    ignoreTls,
+  };
 
   // Shared authenticated client, reused in Phase 3 to avoid redundant logins.
-  const sharedClient = new ScoutClient();
+  const sharedClient = new ScoutClient(validConfig);
 
   await test('ScoutClient.login() with valid credentials sets authenticated state', async () => {
     assert(!sharedClient.isAuthenticated(), 'Client should start unauthenticated');
@@ -359,14 +337,12 @@ if (!clientMod) {
   });
 
   await test('ScoutClient.login() with bad credentials throws ScoutError(401)', async () => {
-    const savedUser = process.env.SCOUT_USERNAME!;
-    const savedPass = process.env.SCOUT_PASSWORD!;
-    process.env.SCOUT_USERNAME = 'bad-user-' + Date.now();
-    process.env.SCOUT_PASSWORD = 'bad-password';
-    const badClient = new ScoutClient();
-    process.env.SCOUT_USERNAME = savedUser;
-    process.env.SCOUT_PASSWORD = savedPass;
-
+    const badClient = new ScoutClient({
+      baseUrl: BASE_URL!,
+      username: 'bad-user-' + Date.now(),
+      password: 'bad-password',
+      ignoreTls,
+    });
     const err = await mustThrow(() => badClient.login());
     assert(err instanceof ScoutError, `Expected ScoutError, got ${String(err)}`);
     // Server may return 4xx (401/412 depending on version) — just confirm it's a client error
@@ -374,15 +350,13 @@ if (!clientMod) {
   });
 
   await test('Login error does not expose plaintext password', async () => {
-    const savedUser = process.env.SCOUT_USERNAME!;
-    const savedPass = process.env.SCOUT_PASSWORD!;
     const badPassword = 'unique-wrong-' + Date.now();
-    process.env.SCOUT_USERNAME = 'bad-user';
-    process.env.SCOUT_PASSWORD = badPassword;
-    const badClient = new ScoutClient();
-    process.env.SCOUT_USERNAME = savedUser;
-    process.env.SCOUT_PASSWORD = savedPass;
-
+    const badClient = new ScoutClient({
+      baseUrl: BASE_URL!,
+      username: 'bad-user',
+      password: badPassword,
+      ignoreTls,
+    });
     const err = await mustThrow(() => badClient.login());
     assert(err instanceof Error, 'Expected Error to be thrown');
     assert(!err.message.includes(badPassword), 'Error message must not contain the plaintext password');
@@ -396,7 +370,7 @@ if (!clientMod) {
   // The re-login-and-retry branch is verified via code review of doRequest().
 
   await test('request() auto-logins on a fresh client before the first HTTP call', async () => {
-    const freshClient = new ScoutClient();
+    const freshClient = new ScoutClient(validConfig);
     assert(!freshClient.isAuthenticated(), 'Fresh client should have no token');
     const data = await freshClient.request<Record<string, unknown>>('GET', '/api/v1/healthcheck');
     assert(typeof data === 'object' && data !== null, 'Expected object response from /api/v1/healthcheck');
@@ -404,14 +378,12 @@ if (!clientMod) {
   });
 
   await test('request() propagates ScoutError when re-auth login fails', async () => {
-    const savedUser = process.env.SCOUT_USERNAME!;
-    const savedPass = process.env.SCOUT_PASSWORD!;
-    process.env.SCOUT_USERNAME = 'bad-user-' + Date.now();
-    process.env.SCOUT_PASSWORD = 'bad-password';
-    const badClient = new ScoutClient();
-    process.env.SCOUT_USERNAME = savedUser;
-    process.env.SCOUT_PASSWORD = savedPass;
-
+    const badClient = new ScoutClient({
+      baseUrl: BASE_URL!,
+      username: 'bad-user-' + Date.now(),
+      password: 'bad-password',
+      ignoreTls,
+    });
     const err = await mustThrow(() => badClient.request('GET', '/api/v1/healthcheck'));
     assert(err instanceof ScoutError, `Expected ScoutError, got ${String(err)}`);
     // Server may return 4xx (401/412 depending on version) — just confirm it's a client error
@@ -718,6 +690,328 @@ if (!configMod) {
     const isAcceptable = !result.isError || text.includes('not OK') || text.includes('500') || text.includes('firmware');
     assert(isAcceptable, `config_get(base/firmware) returned unexpected error: ${text}`);
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 7 — OU filtering (private endpoints, gated by SCOUT_ENABLE_PRIVATE_ENDPOINTS)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\nPhase 7 — OU filtering (private endpoints)');
+
+const privateEndpointsEnabled = process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS === 'true';
+
+interface OuFilteringModule {
+  ouFilterManageTool: { execute: ToolExecute };
+  newDeviceOptionsTool: { execute: ToolExecute };
+}
+
+let ouFilteringMod: OuFilteringModule | null = null;
+
+if (privateEndpointsEnabled) {
+  try {
+    ouFilteringMod = (await import('../src/tools/ou_filtering.js')) as OuFilteringModule;
+  } catch {
+    console.warn('  WARN: src/tools/ou_filtering.js not importable — phase 7 will be skipped');
+  }
+} else {
+  console.log('  (SKIP: set SCOUT_ENABLE_PRIVATE_ENDPOINTS=true to run phase 7)');
+}
+
+if (!ouFilteringMod) {
+  const skipReason = privateEndpointsEnabled
+    ? 'ou_filtering module not available'
+    : 'SCOUT_ENABLE_PRIVATE_ENDPOINTS not set to true';
+  await skip('ou_filter_manage action=get_settings reads global settings', skipReason);
+  await skip('ou_filter_manage action=list returns filter list', skipReason);
+  await skip('ou_filter_manage action=add creates test filter entry', skipReason);
+  await skip('ou_filter_manage action=list shows new test entry', skipReason);
+  await skip('ou_filter_manage action=modify updates test entry', skipReason);
+  await skip('ou_filter_manage action=list reflects modification', skipReason);
+  await skip('ou_filter_manage action=delete removes test entry', skipReason);
+  await skip('ou_filter_manage action=list confirms entry removed', skipReason);
+  await skip('new_device_options action=get returns enrollment settings', skipReason);
+  await skip('ou_filter_manage: add without entries[] returns isError', skipReason);
+  await skip('ou_filter_manage: modify without entry_id returns isError', skipReason);
+  await skip('ou_filter_manage: delete without entry_id returns isError', skipReason);
+  await skip('ou_filter_manage: set_settings with no fields returns isError', skipReason);
+} else {
+  const ouFilter = ouFilteringMod.ouFilterManageTool.execute;
+  const newDevOpts = ouFilteringMod.newDeviceOptionsTool.execute;
+
+  // ── Input validation (no HTTP) ────────────────────────────────────────────
+
+  async function toolFail7(label: string, fn: ToolExecute, args: unknown): Promise<string> {
+    const result = await fn(args);
+    assert(
+      result.isError === true,
+      `${label} expected isError=true but tool returned success: ${result.content[0]?.text}`,
+    );
+    return result.content[0]?.text ?? '';
+  }
+
+  await test('ou_filter_manage: add without entries[] returns isError', async () => {
+    const msg = await toolFail7('ou_filter_manage(add/no-entries)', ouFilter, { action: 'add' });
+    assert(msg.toLowerCase().includes('entries'), `Expected error about entries: ${msg}`);
+  });
+
+  await test('ou_filter_manage: modify without entry_id in entries returns isError', async () => {
+    const msg = await toolFail7('ou_filter_manage(modify/no-entry_id)', ouFilter, {
+      action: 'modify',
+      entries: [{ subnet_address: '192.0.2.0/30', active: true }],
+    });
+    assert(
+      msg.toLowerCase().includes('entry_id') || msg.toLowerCase().includes('entryid'),
+      `Expected error about entry_id: ${msg}`,
+    );
+  });
+
+  await test('ou_filter_manage: delete without entry_id in entries returns isError', async () => {
+    const msg = await toolFail7('ou_filter_manage(delete/no-entry_id)', ouFilter, {
+      action: 'delete',
+      entries: [{ subnet_address: '192.0.2.0/30' }],
+    });
+    assert(
+      msg.toLowerCase().includes('entry_id') || msg.toLowerCase().includes('entryid'),
+      `Expected error about entry_id: ${msg}`,
+    );
+  });
+
+  await test('ou_filter_manage: set_settings with no fields returns isError', async () => {
+    const msg = await toolFail7('ou_filter_manage(set_settings/empty)', ouFilter, {
+      action: 'set_settings',
+    });
+    assert(
+      msg.toLowerCase().includes('ou_filter_type') || msg.toLowerCase().includes('requires'),
+      `Expected error about missing fields: ${msg}`,
+    );
+  });
+
+  // ── Live tests — preflight first ─────────────────────────────────────────
+  // Private endpoints may not be present on all Scout Board versions.
+  // A 404 ("Not found") means the feature is not installed on this server — all
+  // live tests for that feature are then SKIPPED rather than FAILED.
+
+  function isNotFound(msg: string): boolean {
+    return msg.toLowerCase().includes('not found') || msg.includes('404');
+  }
+
+  let filterEndpointsAvailable = false;
+
+  await test(
+    'ou_filter_manage action=get_settings (404 = feature not installed, not a failure)',
+    async () => {
+      const result = await ouFilter({ action: 'get_settings' });
+      if (result.isError) {
+        const msg = result.content[0]?.text ?? '';
+        if (isNotFound(msg)) {
+          console.log(
+            '    NOTE: OU filter endpoints return 404 — feature not available on this Scout Board version',
+          );
+          return; // PASS — endpoint is simply absent
+        }
+        throw new Error(`get_settings returned unexpected error: ${msg}`);
+      }
+      filterEndpointsAvailable = true;
+      const data: unknown = JSON.parse(result.content[0]?.text ?? 'null');
+      assert(data !== null, 'Expected non-null response from get_settings');
+    },
+  );
+
+  if (!filterEndpointsAvailable) {
+    const notAvail = 'ou_filter endpoints returned 404 — feature not installed on this Scout Board version';
+    await skip('ou_filter_manage action=list returns filter list', notAvail);
+    await skip(`ou_filter_manage action=add creates test filter`, notAvail);
+    await skip('ou_filter_manage action=list shows new test entry', notAvail);
+    await skip('ou_filter_manage action=modify updates test entry', notAvail);
+    await skip('ou_filter_manage action=list reflects modification', notAvail);
+    await skip('ou_filter_manage action=delete removes test entry', notAvail);
+    await skip('ou_filter_manage action=list confirms test entry removed', notAvail);
+  } else {
+    await test('ou_filter_manage action=list returns filter list', async () => {
+      const text = await toolOk('ou_filter_manage(list)', ouFilter, { action: 'list' });
+      const data: unknown = JSON.parse(text);
+      assert(data !== null, 'Expected non-null response from list');
+    });
+
+    // ── Write tests: add → verify → modify → verify → delete → verify ─────
+    // Uses 192.0.2.0/30 from RFC 5737 TEST-NET-1 — documentation range, never routable.
+
+    const testSubnet = '192.0.2.0/30';
+    const testSubnetModified = '192.0.2.4/30';
+    let testEntryId: number | null = null;
+    let filterAdded = false;
+
+    const findEntryId = (obj: unknown): number | null => {
+      if (typeof obj === 'object' && obj !== null) {
+        for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+          if ((k === 'EntryId' || k === 'entryId') && typeof v === 'number') return v;
+          const nested = findEntryId(v);
+          if (nested !== null) return nested;
+        }
+      }
+      if (Array.isArray(obj)) {
+        for (const item of obj) {
+          const nested = findEntryId(item);
+          if (nested !== null) return nested;
+        }
+      }
+      return null;
+    };
+
+    try {
+      await test(`ou_filter_manage action=add creates test filter (${testSubnet})`, async () => {
+        const result = await ouFilter({
+          action: 'add',
+          entries: [{ filter_type: 1, subnet_address: testSubnet, active: false }],
+        });
+        assert(!result.isError, `add returned error: ${result.content[0]?.text}`);
+        try {
+          testEntryId = findEntryId(JSON.parse(result.content[0]?.text ?? 'null'));
+        } catch {
+          // will try to find id from list response
+        }
+        filterAdded = true;
+      });
+
+      if (filterAdded) {
+        await test('ou_filter_manage action=list shows new test entry', async () => {
+          const text = await toolOk('ou_filter_manage(list-after-add)', ouFilter, { action: 'list' });
+          assert(
+            text.includes(testSubnet),
+            `Expected ${testSubnet} in filter list after add, got: ${text.slice(0, 200)}`,
+          );
+          if (testEntryId === null) {
+            try {
+              const parsed = JSON.parse(text);
+              const arr = Array.isArray(parsed)
+                ? parsed
+                : ((parsed as Record<string, unknown[]>)['value'] ?? []);
+              const entry = (arr as Array<Record<string, unknown>>).find(
+                (e) => e['SubnetAddress'] === testSubnet || e['subnetAddress'] === testSubnet,
+              );
+              if (entry) {
+                testEntryId =
+                  (entry['EntryId'] as number | undefined) ??
+                  (entry['entryId'] as number | undefined) ??
+                  null;
+              }
+            } catch {
+              // ignore
+            }
+          }
+        });
+
+        if (testEntryId !== null) {
+          await test(
+            `ou_filter_manage action=modify updates subnet to ${testSubnetModified}`,
+            async () => {
+              const result = await ouFilter({
+                action: 'modify',
+                entries: [
+                  { entry_id: testEntryId!, filter_type: 1, subnet_address: testSubnetModified, active: false },
+                ],
+              });
+              assert(!result.isError, `modify returned error: ${result.content[0]?.text}`);
+            },
+          );
+
+          await test('ou_filter_manage action=list reflects modification', async () => {
+            const text = await toolOk('ou_filter_manage(list-after-modify)', ouFilter, { action: 'list' });
+            assert(
+              text.includes(testSubnetModified),
+              `Expected ${testSubnetModified} in list after modify, got: ${text.slice(0, 200)}`,
+            );
+          });
+        } else {
+          await skip('ou_filter_manage action=modify (EntryId unknown)', 'EntryId not in add or list response');
+          await skip('ou_filter_manage action=list reflects modification', 'modify was skipped');
+        }
+      }
+    } finally {
+      // Always clean up the test filter entry.
+      let cleanupId = testEntryId;
+
+      if (cleanupId === null && filterAdded) {
+        try {
+          const text = await toolOk('ou_filter_manage(list-for-cleanup)', ouFilter, { action: 'list' });
+          const parsed = JSON.parse(text);
+          const arr = Array.isArray(parsed)
+            ? parsed
+            : ((parsed as Record<string, unknown[]>)['value'] ?? []);
+          const entry = (arr as Array<Record<string, unknown>>).find(
+            (e) =>
+              e['SubnetAddress'] === testSubnet ||
+              e['SubnetAddress'] === testSubnetModified ||
+              e['subnetAddress'] === testSubnet ||
+              e['subnetAddress'] === testSubnetModified,
+          );
+          if (entry) {
+            cleanupId =
+              (entry['EntryId'] as number | undefined) ??
+              (entry['entryId'] as number | undefined) ??
+              null;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (cleanupId !== null) {
+        await test(`ou_filter_manage action=delete removes test entry (id=${cleanupId})`, async () => {
+          const result = await ouFilter({ action: 'delete', entries: [{ entry_id: cleanupId! }] });
+          assert(!result.isError, `delete returned error: ${result.content[0]?.text}`);
+        });
+
+        await test('ou_filter_manage action=list confirms test entry removed', async () => {
+          const text = await toolOk('ou_filter_manage(list-after-delete)', ouFilter, { action: 'list' });
+          assert(
+            !text.includes(testSubnet) && !text.includes(testSubnetModified),
+            `Test subnets still present after delete: ${text.slice(0, 200)}`,
+          );
+        });
+      } else if (filterAdded) {
+        await test('ou_filter_manage cleanup — delete test entry', async () => {
+          throw new Error(
+            `CLEANUP REQUIRED: test filter "${testSubnet}" was added but EntryId is unknown. ` +
+              'Remove it manually from Scout Board OU filter settings.',
+          );
+        });
+      } else {
+        await skip('ou_filter_manage action=delete (cleanup)', 'no filter was added');
+        await skip('ou_filter_manage action=list confirms removal', 'no filter was added');
+      }
+    }
+  }
+
+  // ── NewDeviceOptions ──────────────────────────────────────────────────────
+
+  await test(
+    'new_device_options action=get returns enrollment settings (404 = feature not installed)',
+    async () => {
+      const result = await newDevOpts({ action: 'get' });
+      if (result.isError) {
+        const msg = result.content[0]?.text ?? '';
+        if (isNotFound(msg)) {
+          console.log(
+            '    NOTE: NewDeviceOptions endpoint returns 404 — feature not available on this Scout Board version',
+          );
+          return; // PASS
+        }
+        throw new Error(`new_device_options(get) returned unexpected error: ${msg}`);
+      }
+      const data: unknown = JSON.parse(result.content[0]?.text ?? 'null');
+      assert(data !== null && typeof data === 'object', 'Expected object from new_device_options(get)');
+    },
+  );
+
+  // new_device_options action=set is intentionally skipped because:
+  //   • Changing accept_only_known_devices or deactivate_new_devices affects live enrollment.
+  //   • The API may not provide a rollback/restore endpoint.
+  //   • Operators should test set manually with full awareness of the impact.
+  await skip(
+    'new_device_options action=set (intentionally skipped)',
+    'changing enrollment policy affects live devices — test manually with explicit rollback plan',
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

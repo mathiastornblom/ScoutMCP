@@ -88,6 +88,7 @@ Add to your MCP client config:
 | `SCOUT_REQUEST_TIMEOUT_MS` | no | HTTP timeout in ms (default: 30000) |
 | `SCOUT_TEST_OU_PATH` | tests only | OU path for integration tests, e.g. `/MCP-Test` |
 | `SCOUT_ENV` | tests only | Set `test` to restrict destructive operations to `SCOUT_TEST_OU_PATH` |
+| `SCOUT_ENABLE_PRIVATE_ENDPOINTS` | no | `true` to expose 11 additional private endpoint tools (see below) |
 
 > **Note:** You can also configure credentials at runtime using the `scout_configure` tool — no `.env` file needed.
 
@@ -95,7 +96,7 @@ Add to your MCP client config:
 
 ---
 
-## Available Tools (17)
+## Available Tools (17 public + 11 private)
 
 | Tool | Description |
 |------|-------------|
@@ -116,6 +117,26 @@ Add to your MCP client config:
 | `schedule_manage` | View and manage scheduled commands for OUs and devices |
 | `maintenance_window_manage` | CRUD maintenance windows |
 | `notification_manage` | Set and delete notifications for devices, OUs, and groups |
+
+### Private endpoint tools (opt-in)
+
+These tools target Scout Board internal endpoints discovered from browser network traffic — they are **not** in the public OpenAPI spec. They are **hidden by default** and must be enabled with `SCOUT_ENABLE_PRIVATE_ENDPOINTS=true`.
+
+> **Warning:** These endpoints are unsupported and undocumented. They may change or disappear in future Scout Board releases without notice.
+
+| Tool | Actions | Description |
+|------|---------|-------------|
+| `system_info` | `status_summary`, `device_count`, `device_distribution`, `device_image_files`, `recovery_settings`, `db_diags`, `system_check`, `tree_filter`, `missed_notifications`, `auth_user` | Read-only system status and diagnostic data |
+| `system_settings` | `get_logging` / `set_logging`, `get_discover` / `set_discover`, `get_retain_local_config` / `set_retain_local_config`, `get_device_name_options`, `set_device_password` | Read and write server-wide settings |
+| `predefined_commands` | `list`, `add`, `modify`, `delete`, `auth`, `list_templates`, `modify_templates` | Manage predefined device commands |
+| `predefined_paths` | `list`, `add`, `delete` | Manage predefined firmware update paths |
+| `predefined_images` | `list_images`, `list_uefi` | List predefined IDF images and UEFI files |
+| `license_manage` | `get`, `check_availability`, `reconfigure` | Read and reconfigure Scout Board licensing |
+| `admin_manage` | `list`, `permissions`, `advanced_rights`, `configuration_rights`, `update_rights` | Read admin accounts and UI permissions |
+| `server_instances` | `list`, `modify`, `delete` | Manage Scout Board server instances |
+| `db_cleanup` | `list` | List database record counts by type for cleanup |
+| `ou_filter_manage` | `get_settings`, `list`, `set_settings`, `add`, `modify`, `delete` | Manage OU IP subnet filter rules |
+| `new_device_options` | `get`, `set` | Read or update new device enrollment options |
 
 ### Destructive operation safeguards
 
@@ -151,7 +172,7 @@ src/
   client.ts       ScoutClient — JWT cookie auth, undici TLS control
   session.ts      Runtime credential store and ~/.scout-mcp.json persistence
   types.ts        Shared helpers: ok(), fail(), buildQuery()
-  tools/          One file per functional group (17 tools total)
+  tools/          One file per functional group (17 public + 11 private endpoint tools)
 catalog/
   server.yaml     Docker MCP Registry submission metadata
   tools.json      Static tool list for registry build validation
