@@ -152,6 +152,16 @@ These tools target Scout Board internal endpoints discovered from browser networ
 | `ou_filter_manage` | `get_settings`, `list`, `set_settings`, `add`, `modify`, `delete` | Manage OU filter rules — **subnet filter** (IP network, e.g. `192.168.1.0/24`) and **user-defined filter** (ELUX_* property expressions with `=`, `!=`, `>`, `<`, `*` wildcard) |
 | `new_device_options` | `get`, `set` | Read or update new device enrollment options |
 
+### Response enrichment
+
+Tool responses that contain numeric OUID fields (e.g. `device_get`, `device_manage`) are automatically annotated with human-readable `_OUIDName` and `_OUIDPath` siblings, so the AI has full context without a follow-up `ou_get` call:
+
+```json
+{ "Name": "Thin01", "OUID": 42, "_OUIDName": "Berlin Office", "_OUIDPath": "/Enterprise/Germany/Berlin", "Status": "active" }
+```
+
+The enrichment is best-effort — if the OU tree cannot be fetched the original response is returned unchanged. The OU map is cached for 5 minutes and invalidated automatically after any `ou_manage` mutation.
+
 ### Destructive operation safeguards
 
 - `device_command` with `factoryreset` or `halt` requires `confirm: true`

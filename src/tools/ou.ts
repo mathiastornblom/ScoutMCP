@@ -3,6 +3,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { resolveOuRef, invalidateOuCache } from '../resolver.js';
+import { enrich, invalidateEnrichmentCache } from '../enricher.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -104,7 +105,7 @@ async function ouGetExecute(raw: unknown): Promise<McpToolResult> {
         const ouPath = input.ouPath ?? resolvedPath;
         const qs = buildQuery({ ouPath, ouId, includeSubOus: input.includeSubOus });
         const data = await client.request<unknown>('GET', `/api/v1/ou/device/status${qs}`);
-        return ok(data);
+        return ok(await enrich(data));
       }
     }
   } catch (err) {
@@ -206,6 +207,10 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
         const qs = buildQuery({ destoupath: resolvedDestPath, destouid: resolvedDestId, name: input.name });
         result = await client.request<unknown>('POST', `/api/v1/ou${qs}`);
         break;
+        const qs = buildQuery({ destoupath: input.destoupath, destouid: input.destouid, name: input.name });
+        const data = await client.request<unknown>('POST', `/api/v1/ou${qs}`);
+        invalidateEnrichmentCache();
+        return ok(data);
       }
 
       case 'rename': {
@@ -213,6 +218,10 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
         const qs = buildQuery({ path: resolvedPath, id: resolvedId, newname: input.newname });
         result = await client.request<unknown>('PUT', `/api/v1/ou${qs}`);
         break;
+        const qs = buildQuery({ path: input.path, id: input.id, newname: input.newname });
+        const data = await client.request<unknown>('PUT', `/api/v1/ou${qs}`);
+        invalidateEnrichmentCache();
+        return ok(data);
       }
 
       case 'delete': {
@@ -223,6 +232,9 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
         });
         result = await client.request<unknown>('DELETE', `/api/v1/ou${qs}`);
         break;
+        const data = await client.request<unknown>('DELETE', `/api/v1/ou${qs}`);
+        invalidateEnrichmentCache();
+        return ok(data);
       }
 
       case 'move': {
@@ -240,6 +252,16 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
         const qs = buildQuery({ path: resolvedPath, id: resolvedId });
         result = await client.request<unknown>('PUT', `/api/v1/ou/converttobase${qs}`);
         break;
+        const data = await client.request<unknown>('PUT', `/api/v1/ou/move${qs}`);
+        invalidateEnrichmentCache();
+        return ok(data);
+      }
+
+      case 'converttobase': {
+        const qs = buildQuery({ path: input.path, id: input.id });
+        const data = await client.request<unknown>('PUT', `/api/v1/ou/converttobase${qs}`);
+        invalidateEnrichmentCache();
+        return ok(data);
       }
 
       case 'structure_export': {
@@ -261,6 +283,9 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
         const body = { ...input.importPayload, dryRun: input.dryRun };
         result = await client.request<unknown>('POST', '/api/v1/ou/structure/import', body);
         break;
+        const data = await client.request<unknown>('POST', '/api/v1/ou/structure/import', body);
+        invalidateEnrichmentCache();
+        return ok(data);
       }
     }
 

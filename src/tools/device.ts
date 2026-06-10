@@ -3,6 +3,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { resolveOuRef } from '../resolver.js';
+import { enrich } from '../enricher.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ async function deviceGetExecute(raw: unknown): Promise<McpToolResult> {
           properties: input.properties,
         });
         const data = await client.request<unknown>('GET', `/api/v1/device${qs}`);
-        return ok(data);
+        return ok(await enrich(data));
       }
 
       case 'search': {
@@ -84,7 +85,7 @@ async function deviceGetExecute(raw: unknown): Promise<McpToolResult> {
           limit: input.limit,
         });
         const data = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
-        return ok(data);
+        return ok(await enrich(data));
       }
 
       case 'status': {
@@ -95,7 +96,7 @@ async function deviceGetExecute(raw: unknown): Promise<McpToolResult> {
           clientid: input.clientid,
         });
         const data = await client.request<unknown>('GET', `/api/v1/device/status${qs}`);
-        return ok(data);
+        return ok(await enrich(data));
       }
 
       case 'configOrigins': {
@@ -106,7 +107,7 @@ async function deviceGetExecute(raw: unknown): Promise<McpToolResult> {
           clientid: input.clientid,
         });
         const data = await client.request<unknown>('GET', `/api/v1/device/configOrigins${qs}`);
-        return ok(data);
+        return ok(await enrich(data));
       }
     }
   } catch (err) {
@@ -191,7 +192,7 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           mac: input.newDeviceMac,
         });
         const data = await client.request<unknown>('POST', `/api/v1/device${qs}`);
-        return ok(data);
+        return ok(await enrich(data));
       }
 
       case 'rename': {
@@ -228,7 +229,7 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           destouid: resolvedDestId,
         });
         const data = await client.request<unknown>('PUT', `/api/v1/device/move${qs}`);
-        return ok(data);
+        return ok(await enrich(data));
       }
     }
   } catch (err) {

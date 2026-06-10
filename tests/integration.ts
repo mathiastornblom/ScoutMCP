@@ -1447,6 +1447,134 @@ if (!workflowMod) {
     assert(data.status === 'dry_run', `Expected status=dry_run, got ${data.status}`);
     assert(data.command === 'restart', `Expected command=restart, got ${data.command}`);
     console.log(`    NOTE: ${data.matched} device(s) would receive restart`);
+// Phase 10 — Response enrichment (unit + live)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\nPhase 10 — Response enrichment');
+
+interface EnricherModule {
+  enrich(data: unknown): Promise<unknown>;
+  invalidateEnrichmentCache(): void;
+}
+
+let enricherMod: EnricherModule | null = null;
+try {
+  enricherMod = (await import('../src/enricher.js')) as EnricherModule;
+} catch {
+  console.warn('  WARN: src/enricher.js not importable — enrichment tests will be skipped');
+}
+
+if (!enricherMod) {
+  for (const name of [
+    'enrich() passes through primitives without throwing',
+    'enrich() passes through null without throwing',
+    'invalidateEnrichmentCache() does not throw',
+    'enrich() annotates OUID when OU map is available',
+    'device_get response includes _OUIDName / _OUIDPath annotations',
+  ]) {
+    await skip(name, 'enricher module not importable');
+  }
+} else {
+  const { enrich, invalidateEnrichmentCache } = enricherMod;
+
+  // ── Unit tests (no HTTP needed — enrich is best-effort; returns original on error) ──
+
+  await test('enrich() passes through primitives without throwing', async () => {
+    const n = await enrich(42);
+    assert(n === 42, 'number should be returned as-is');
+    const s = await enrich('hello');
+    assert(s === 'hello', 'string should be returned as-is');
+    const b = await enrich(true);
+    assert(b === true, 'boolean should be returned as-is');
+  });
+
+  await test('enrich() passes through null without throwing', async () => {
+    const result = await enrich(null);
+    assert(result === null, 'null should be returned as-is');
+  });
+
+  await test('invalidateEnrichmentCache() does not throw', async () => {
+    invalidateEnrichmentCache(); // PASS if no exception
+  });
+
+  // ── Live tests — require server connectivity ──────────────────────────────
+
+  await test('enrich() annotates OUID when OU map is available', async () => {
+    if (!clientMod) {
+      console.log('    NOTE: client module unavailable — skipping live enrichment test');
+      return;
+    }
+    // Fetch the root OU to get a real OUID value, then enrich a synthetic object.
+    const client = clientMod.getClient();
+    let rootOuid: number | null = null;
+    try {
+      const root = await client.request<{ OUID?: number }>('GET', '/api/v1/ou/root');
+      if (typeof root.OUID === 'number') rootOuid = root.OUID;
+    } catch {
+      console.log('    NOTE: fetch failed — enrichment live test skipped (server unreachable)');
+      return;
+    }
+
+    if (rootOuid === null) {
+      console.log('    NOTE: root OU returned no OUID — skipping live enrichment assertion');
+      return;
+    }
+
+    invalidateEnrichmentCache(); // ensure we exercise a fresh fetch
+    const synthetic = { DeviceName: 'Test01', OUID: rootOuid, Status: 'active' };
+    const enriched = (await enrich(synthetic)) as Record<string, unknown>;
+
+    assert(
+      typeof enriched['_OUIDName'] === 'string' && enriched['_OUIDName'] !== '',
+      `Expected _OUIDName string on enriched response, got: ${JSON.stringify(enriched)}`,
+    );
+    assert(
+      typeof enriched['_OUIDPath'] === 'string' && enriched['_OUIDPath'] !== '',
+      `Expected _OUIDPath string on enriched response, got: ${JSON.stringify(enriched)}`,
+    );
+    // Original fields must still be present
+    assert(enriched['DeviceName'] === 'Test01', 'Original DeviceName field preserved');
+    assert(enriched['OUID'] === rootOuid, 'Original OUID field preserved');
+  });
+
+  await test('device_get response includes _OUIDName / _OUIDPath annotations', async () => {
+    if (!deviceMod) {
+      console.log('    NOTE: device module unavailable — skipping');
+      return;
+    }
+    const result = await deviceMod.deviceGetTool.execute({
+      mode: 'search',
+      ouPath: TEST_OU_PATH,
+      searchTerm: '*',
+    });
+    if (result.isError) {
+      const msg = result.content[0]?.text ?? '';
+      if (msg.includes('fetch failed') || msg.includes('ECONNREFUSED')) {
+        console.log('    NOTE: fetch failed — enrichment integration test skipped (server unreachable)');
+        return;
+      }
+      throw new Error(`device_get(search) error: ${msg}`);
+    }
+    const payload: unknown = JSON.parse(result.content[0]?.text ?? 'null');
+    const devices = Array.isArray(payload) ? payload : [];
+    const withOuid = (devices as Array<Record<string, unknown>>).filter(
+      (d) => typeof d['OUID'] === 'number',
+    );
+    if (withOuid.length === 0) {
+      console.log(
+        `    NOTE: no devices with OUID found in ${TEST_OU_PATH} — enrichment check skipped`,
+      );
+      return;
+    }
+    const first = withOuid[0]!;
+    assert(
+      typeof first['_OUIDName'] === 'string',
+      `First device with OUID missing _OUIDName annotation: ${JSON.stringify(first).slice(0, 200)}`,
+    );
+    assert(
+      typeof first['_OUIDPath'] === 'string',
+      `First device with OUID missing _OUIDPath annotation: ${JSON.stringify(first).slice(0, 200)}`,
+    );
   });
 }
 
