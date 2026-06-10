@@ -161,6 +161,21 @@ Tool responses that contain numeric OUID fields (e.g. `device_get`, `device_mana
 ```
 
 The enrichment is best-effort — if the OU tree cannot be fetched the original response is returned unchanged. The OU map is cached for 5 minutes and invalidated automatically after any `ou_manage` mutation.
+### Fuzzy suggestions on failure
+
+When an `ou_get` or `ou_manage` call returns HTTP 404 (OU not found), the error automatically includes a ranked "Did you mean?" list of similar OUs from the cached OU tree:
+
+```
+ou_get failed: OU not found at path "/Enterprise/Germany/Berln" (HTTP 404)
+
+Did you mean one of these OUs?
+  • "Berlin Office"  →  /Enterprise/Germany/Berlin
+  • "Berlin HQ"      →  /Enterprise/Germany/BerlinHQ
+```
+
+Matching ranks by: exact → prefix → substring → edit-distance similarity. The suggestion list is cached alongside the enricher OU map (5-minute TTL) and never causes a tool call to fail.
+
+When a `device_get` or `device_manage` call returns 404, the error includes a hint to use `device_get mode=search` to locate the device by partial name.
 
 ### Destructive operation safeguards
 

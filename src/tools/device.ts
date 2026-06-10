@@ -4,6 +4,7 @@ import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { resolveOuRef } from '../resolver.js';
 import { enrich } from '../enricher.js';
+import { isNotFound } from '../fuzzy.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -111,7 +112,15 @@ async function deviceGetExecute(raw: unknown): Promise<McpToolResult> {
       }
     }
   } catch (err) {
-    return fail(`device_get failed: ${err instanceof Error ? err.message : String(err)}`);
+    const baseMsg = `device_get failed: ${err instanceof Error ? err.message : String(err)}`;
+    if (isNotFound(err) && (input.mode === 'get' || input.mode === 'status' || input.mode === 'configOrigins')) {
+      const identifier = input.name ?? input.mac ?? input.id ?? input.clientid;
+      const hint = identifier
+        ? `\n\nHint: device "${identifier}" was not found. Use device_get mode=search with ouPath and searchTerm to locate devices by partial name.`
+        : '';
+      return fail(baseMsg + hint);
+    }
+    return fail(baseMsg);
   }
 }
 
@@ -233,7 +242,15 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
       }
     }
   } catch (err) {
-    return fail(`device_manage failed: ${err instanceof Error ? err.message : String(err)}`);
+    const baseMsg = `device_manage failed: ${err instanceof Error ? err.message : String(err)}`;
+    if (isNotFound(err)) {
+      const identifier = input.name ?? input.mac ?? input.id ?? input.clientid;
+      const hint = identifier
+        ? `\n\nHint: device "${identifier}" was not found. Use device_get mode=search with ouPath and searchTerm to locate devices by partial name.`
+        : '';
+      return fail(baseMsg + hint);
+    }
+    return fail(baseMsg);
   }
 }
 

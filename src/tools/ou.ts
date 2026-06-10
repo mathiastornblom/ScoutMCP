@@ -4,6 +4,7 @@ import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { resolveOuRef, invalidateOuCache } from '../resolver.js';
 import { enrich, invalidateEnrichmentCache } from '../enricher.js';
+import { suggestOus, formatOuSuggestions, isNotFound } from '../fuzzy.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -50,6 +51,14 @@ type OuGetInput = z.infer<typeof ouGetSchema>;
 async function ouGetExecute(raw: unknown): Promise<McpToolResult> {
   const input = ouGetSchema.parse(raw) as OuGetInput;
   const client = getClient();
+
+  // Capture the lookup key so suggestions can be generated on 404.
+  const lookupQuery: string | null =
+    input.mode === 'get' || input.mode === 'subordinate'
+      ? (input.path ?? (input.id !== undefined ? String(input.id) : null))
+      : input.mode === 'search'
+      ? (input.searchTerm ?? null)
+      : null;
 
   try {
     // Resolve ouRef into concrete path/id when provided
@@ -109,7 +118,12 @@ async function ouGetExecute(raw: unknown): Promise<McpToolResult> {
       }
     }
   } catch (err) {
-    return fail(`ou_get failed: ${err instanceof Error ? err.message : String(err)}`);
+    const baseMsg = `ou_get failed: ${err instanceof Error ? err.message : String(err)}`;
+    if (isNotFound(err) && lookupQuery) {
+      const suggestions = await suggestOus(lookupQuery);
+      return fail(baseMsg + formatOuSuggestions(suggestions));
+    }
+    return fail(baseMsg);
   }
 }
 
@@ -173,6 +187,18 @@ type OuManageInput = z.infer<typeof ouManageSchema>;
 async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
   const input = ouManageSchema.parse(raw) as OuManageInput;
   const client = getClient();
+
+  // For add, the relevant lookup is the destination; for all other actions, the target.
+  const lookupQuery: string | null =
+    input.action === 'add'
+      ? (input.destoupath ?? (input.destouid !== undefined ? String(input.destouid) : null))
+      : (input.path ?? (input.id !== undefined ? String(input.id) : null));
+
+  // Destructive guard: delete and move can remove or rearrange OUs in test mode
+  if (input.action === 'delete' && input.path) {
+    const err = assertTestScope(input.path);
+    if (err) return fail(err);
+  }
 
   try {
     // Resolve ouRef → target OU
@@ -296,7 +322,12 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
 
     return ok(result);
   } catch (err) {
-    return fail(`ou_manage failed: ${err instanceof Error ? err.message : String(err)}`);
+    const baseMsg = `ou_manage failed: ${err instanceof Error ? err.message : String(err)}`;
+    if (isNotFound(err) && lookupQuery) {
+      const suggestions = await suggestOus(lookupQuery);
+      return fail(baseMsg + formatOuSuggestions(suggestions));
+    }
+    return fail(baseMsg);
   }
 }
 
