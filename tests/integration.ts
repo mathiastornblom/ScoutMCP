@@ -1269,6 +1269,185 @@ if (!resourcesMod) {
       `Expected "Unknown Scout resource URI" in message, got: ${(err as Error).message}`,
     );
   });
+// Phase 9 — Workflow tools (Item #3: composite multi-step operations)
+//
+// BEFORE: common tasks required several tool round-trips
+//   Onboard new branch: ou_manage(add) + ou_filter_manage(add)           → 2 calls → 1
+//   Move devices:       device_get(search) + N×device_manage(move)       → N+1 → 1
+//   Bulk command:       device_get(search) + N×device_command(restart)   → N+1 → 1
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\nPhase 9 — Workflow tools');
+
+interface WorkflowModule {
+  onboardBranchTool: { execute: ToolExecute };
+  moveDevicesByFilterTool: { execute: ToolExecute };
+  bulkCommandTool: { execute: ToolExecute };
+}
+
+let workflowMod: WorkflowModule | null = null;
+try {
+  workflowMod = (await import('../src/tools/workflow.js')) as WorkflowModule;
+} catch {
+  console.warn('  WARN: src/tools/workflow.js not importable — workflow tests will be skipped');
+}
+
+if (!workflowMod) {
+  await skip('workflow input validation tests', 'module not available');
+} else {
+  const onboard = workflowMod.onboardBranchTool.execute;
+  const moveDevices = workflowMod.moveDevicesByFilterTool.execute;
+  const bulkCmd = workflowMod.bulkCommandTool.execute;
+
+  // ── onboard_branch input validation ──────────────────────────────────────
+
+  await test('onboard_branch: missing parentOuPath and parentOuId returns isError', async () => {
+    const result = await onboard({ name: 'TestBranch' });
+    assert(result.isError === true, 'Expected isError=true when no parent provided');
+    assert(result.content[0]?.text.includes('parentOuPath'), 'Expected message mentioning parentOuPath');
+  });
+
+  await test('onboard_branch: outside TEST_OU_PATH is blocked in SCOUT_ENV=test', async () => {
+    const result = await onboard({ name: 'TestBranch', parentOuPath: '/Enterprise/SomeOtherOU' });
+    assert(result.isError === true, 'Expected isError=true for out-of-scope parent OU');
+    assert(
+      result.content[0]?.text.includes('SCOUT_TEST_OU_PATH'),
+      `Expected SCOUT_TEST_OU_PATH mention, got: ${result.content[0]?.text}`,
+    );
+  });
+
+  // ── move_devices_by_filter input validation ───────────────────────────────
+
+  await test('move_devices_by_filter: missing sourceOuPath returns isError', async () => {
+    const result = await moveDevices({ searchTerm: '*', destOuPath: TEST_OU_PATH });
+    assert(result.isError === true, 'Expected isError=true when sourceOuPath missing');
+  });
+
+  await test('move_devices_by_filter: missing destOuPath returns isError', async () => {
+    const result = await moveDevices({ searchTerm: '*', sourceOuPath: TEST_OU_PATH });
+    assert(result.isError === true, 'Expected isError=true when destOuPath missing');
+  });
+
+  await test('move_devices_by_filter: confirm not set returns isError (not dryRun)', async () => {
+    const result = await moveDevices({
+      searchTerm: '*',
+      sourceOuPath: TEST_OU_PATH,
+      destOuPath: TEST_OU_PATH,
+    });
+    assert(result.isError === true, 'Expected isError=true when confirm missing');
+    assert(
+      result.content[0]?.text.includes('confirm=true'),
+      `Expected "confirm=true" in error, got: ${result.content[0]?.text}`,
+    );
+  });
+
+  await test('move_devices_by_filter: dryRun=true does NOT require confirm', async () => {
+    // dryRun=true should pass validation and try to search (fails with fetch error if server down)
+    const result = await moveDevices({
+      searchTerm: 'nonexistent-device-xyz',
+      sourceOuPath: TEST_OU_PATH,
+      destOuPath: TEST_OU_PATH,
+      dryRun: true,
+    });
+    // Either: success (dry run, no matches) OR: fetch failed (server down) — NOT a confirm error
+    const text = result.content[0]?.text ?? '';
+    assert(
+      !text.includes('confirm=true'),
+      `dryRun=true should not require confirm, got: ${text}`,
+    );
+  });
+
+  // ── bulk_command input validation ─────────────────────────────────────────
+
+  await test('bulk_command: missing sourceOuPath returns isError', async () => {
+    const result = await bulkCmd({ searchTerm: '*', command: 'restart' });
+    assert(result.isError === true, 'Expected isError=true when sourceOuPath missing');
+  });
+
+  await test('bulk_command: confirm not set returns isError (not dryRun)', async () => {
+    const result = await bulkCmd({ searchTerm: '*', sourceOuPath: TEST_OU_PATH, command: 'restart' });
+    assert(result.isError === true, 'Expected isError=true when confirm missing');
+    assert(
+      result.content[0]?.text.includes('confirm=true'),
+      `Expected "confirm=true" in error, got: ${result.content[0]?.text}`,
+    );
+  });
+
+  await test('bulk_command: factoryreset without confirm returns isError', async () => {
+    const result = await bulkCmd({
+      searchTerm: '*',
+      sourceOuPath: TEST_OU_PATH,
+      command: 'factoryreset',
+      dryRun: false,
+    });
+    assert(result.isError === true, 'Expected isError=true for factoryreset without confirm');
+    assert(
+      result.content[0]?.text.includes('confirm=true'),
+      `Expected "confirm=true" in error for factoryreset, got: ${result.content[0]?.text}`,
+    );
+  });
+
+  await test('bulk_command: dryRun=true does NOT require confirm (AFTER: preview before commit)', async () => {
+    // BEFORE: user had to manually filter devices and count before deciding
+    // AFTER: dryRun=true shows exactly what would be affected — confirm=true on same call to execute
+    const result = await bulkCmd({
+      searchTerm: 'nonexistent-device-xyz',
+      sourceOuPath: TEST_OU_PATH,
+      command: 'restart',
+      dryRun: true,
+    });
+    const text = result.content[0]?.text ?? '';
+    assert(
+      !text.includes('confirm=true'),
+      `dryRun=true should not require confirm, got: ${text}`,
+    );
+  });
+
+  // ── Live end-to-end (dryRun only — no actual device mutations) ────────────
+
+  await test('move_devices_by_filter dryRun=true: shows matched devices in TEST_OU_PATH (AFTER: 1 call)', async () => {
+    // BEFORE: needed device_get(search) → inspect results → decide → N×device_manage(move)
+    // AFTER: one dryRun call shows what would move, same call with confirm=true to execute
+    const result = await moveDevices({
+      searchTerm: '*',
+      sourceOuPath: TEST_OU_PATH,
+      destOuPath: TEST_OU_PATH,
+      dryRun: true,
+    });
+    if (result.isError) {
+      const msg = result.content[0]?.text ?? '';
+      if (msg.includes('fetch failed')) {
+        console.log('    NOTE: server not reachable — skipping live dryRun test');
+        return;
+      }
+      throw new Error(`move_devices_by_filter(dryRun) returned error: ${msg}`);
+    }
+    const data = JSON.parse(result.content[0]?.text ?? '{}') as { status?: string; matched?: number };
+    assert(data.status === 'dry_run', `Expected status=dry_run, got ${data.status}`);
+    assert(typeof data.matched === 'number', 'Expected numeric matched count');
+    console.log(`    NOTE: ${data.matched} device(s) found in TEST_OU_PATH`);
+  });
+
+  await test('bulk_command dryRun=true: shows targeted devices in TEST_OU_PATH (AFTER: 1 call)', async () => {
+    const result = await bulkCmd({
+      searchTerm: '*',
+      sourceOuPath: TEST_OU_PATH,
+      command: 'restart',
+      dryRun: true,
+    });
+    if (result.isError) {
+      const msg = result.content[0]?.text ?? '';
+      if (msg.includes('fetch failed')) {
+        console.log('    NOTE: server not reachable — skipping live dryRun test');
+        return;
+      }
+      throw new Error(`bulk_command(dryRun) returned error: ${msg}`);
+    }
+    const data = JSON.parse(result.content[0]?.text ?? '{}') as { status?: string; matched?: number; command?: string };
+    assert(data.status === 'dry_run', `Expected status=dry_run, got ${data.status}`);
+    assert(data.command === 'restart', `Expected command=restart, got ${data.command}`);
+    console.log(`    NOTE: ${data.matched} device(s) would receive restart`);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

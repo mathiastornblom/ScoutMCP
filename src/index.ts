@@ -27,6 +27,7 @@ import { scheduleManageTool } from './tools/schedule.js';
 import { maintenanceWindowManageTool } from './tools/maintenance.js';
 import { notificationManageTool } from './tools/notification.js';
 import { updateTool } from './tools/update.js';
+import { onboardBranchTool, moveDevicesByFilterTool, bulkCommandTool } from './tools/workflow.js';
 import { ouFilterManageTool, newDeviceOptionsTool } from './tools/ou_filtering.js';
 import { systemInfoTool } from './tools/system_info.js';
 import { systemSettingsTool } from './tools/system_settings.js';
@@ -115,6 +116,9 @@ const tools = [
   maintenanceWindowManageTool,
   notificationManageTool,
   updateTool,
+  onboardBranchTool,
+  moveDevicesByFilterTool,
+  bulkCommandTool,
   ...(privateEndpointsEnabled
     ? [
         ouFilterManageTool,
