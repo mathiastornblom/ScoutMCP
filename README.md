@@ -135,7 +135,7 @@ These tools target Scout Board internal endpoints discovered from browser networ
 | `admin_manage` | `list`, `permissions`, `advanced_rights`, `configuration_rights`, `update_rights` | Read admin accounts and UI permissions |
 | `server_instances` | `list`, `modify`, `delete` | Manage Scout Board server instances |
 | `db_cleanup` | `list` | List database record counts by type for cleanup |
-| `ou_filter_manage` | `get_settings`, `list`, `set_settings`, `add`, `modify`, `delete` | Manage OU IP subnet filter rules |
+| `ou_filter_manage` | `get_settings`, `list`, `set_settings`, `add`, `modify`, `delete` | Manage OU filter rules — **subnet filter** (IP network, e.g. `192.168.1.0/24`) and **user-defined filter** (ELUX_* property expressions with `=`, `!=`, `>`, `<`, `*` wildcard) |
 | `new_device_options` | `get`, `set` | Read or update new device enrollment options |
 
 ### Destructive operation safeguards
