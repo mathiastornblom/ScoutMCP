@@ -138,6 +138,22 @@ These tools target Scout Board internal endpoints discovered from browser networ
 | `ou_filter_manage` | `get_settings`, `list`, `set_settings`, `add`, `modify`, `delete` | Manage OU IP subnet filter rules |
 | `new_device_options` | `get`, `set` | Read or update new device enrollment options |
 
+### Fuzzy suggestions on failure
+
+When an `ou_get` or `ou_manage` call returns HTTP 404 (OU not found), the error automatically includes a ranked "Did you mean?" list of similar OUs from the cached OU tree:
+
+```
+ou_get failed: OU not found at path "/Enterprise/Germany/Berln" (HTTP 404)
+
+Did you mean one of these OUs?
+  • "Berlin Office"  →  /Enterprise/Germany/Berlin
+  • "Berlin HQ"      →  /Enterprise/Germany/BerlinHQ
+```
+
+Matching ranks by: exact → prefix → substring → edit-distance similarity. The suggestion list is cached alongside the enricher OU map (5-minute TTL) and never causes a tool call to fail.
+
+When a `device_get` or `device_manage` call returns 404, the error includes a hint to use `device_get mode=search` to locate the device by partial name.
+
 ### Destructive operation safeguards
 
 - `device_command` with `factoryreset` or `halt` requires `confirm: true`

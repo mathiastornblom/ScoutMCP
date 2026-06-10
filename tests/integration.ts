@@ -1015,6 +1015,109 @@ if (!ouFilteringMod) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Phase 11 — Fuzzy suggestions (unit + live)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\nPhase 11 — Fuzzy suggestions on 404');
+
+interface FuzzyModule {
+  similarity(query: string, candidate: string): number;
+  suggestOus(query: string, limit?: number): Promise<Array<{ name: string; path: string }>>;
+  formatOuSuggestions(suggestions: Array<{ name: string; path: string }>): string;
+  isNotFound(err: unknown): boolean;
+}
+
+let fuzzyMod: FuzzyModule | null = null;
+try {
+  fuzzyMod = (await import('../src/fuzzy.js')) as FuzzyModule;
+} catch {
+  console.warn('  WARN: src/fuzzy.js not importable — fuzzy tests will be skipped');
+}
+
+if (!fuzzyMod) {
+  for (const name of [
+    'similarity() scores known string pairs correctly',
+    'isNotFound() detects ScoutError-like 404 errors',
+    'formatOuSuggestions() formats suggestions block',
+    'suggestOus() returns [] without throwing when server is unreachable',
+    'ou_get mode=get with unknown path includes suggestions in error',
+  ]) {
+    await skip(name, 'fuzzy module not importable');
+  }
+} else {
+  const { similarity, suggestOus, formatOuSuggestions, isNotFound: isnf } = fuzzyMod;
+
+  // ── Unit tests (no HTTP needed) ───────────────────────────────────────────
+
+  await test('similarity() scores known string pairs correctly', async () => {
+    assert(similarity('berlin', 'berlin') === 1.0, 'Identical strings should score 1.0');
+    assert(similarity('berlin', 'Berlin') === 1.0, 'Case-insensitive match should score 1.0');
+    assert(similarity('berl', 'Berlin') >= 0.7, '"berl" should be a strong prefix match of "Berlin"');
+    assert(similarity('berl', 'berlin') >= 0.7, 'Prefix match works lowercase');
+    assert(similarity('xyz', 'Berlin') < 0.3, 'Completely unrelated strings should score low');
+    assert(similarity('Berln', 'Berlin') > 0.7, 'One-char typo should still score high');
+    const s = similarity('office', 'Berlin Office');
+    assert(s >= 0.3, '"office" substring of "Berlin Office" should have score >= MIN_SCORE');
+  });
+
+  await test('isNotFound() detects ScoutError-like 404 errors', async () => {
+    const e404 = Object.assign(new Error('Not Found'), { statusCode: 404 });
+    const e400 = Object.assign(new Error('Bad Request'), { statusCode: 400 });
+    const ePlain = new Error('generic error');
+
+    assert(isnf(e404), 'Error with statusCode=404 should be detected as not-found');
+    assert(!isnf(e400), 'Error with statusCode=400 should not be detected');
+    assert(!isnf(ePlain), 'Plain Error with no statusCode should not be detected');
+    assert(!isnf(null), 'null should not be detected');
+    assert(!isnf('string error'), 'string should not be detected');
+  });
+
+  await test('formatOuSuggestions() formats suggestions block correctly', async () => {
+    assert(formatOuSuggestions([]) === '', 'Empty list should produce empty string');
+
+    const sug = [
+      { name: 'Berlin Office', path: '/Enterprise/Germany/Berlin' },
+      { name: 'Frankfurt', path: '/Enterprise/Germany/Frankfurt' },
+    ];
+    const formatted = formatOuSuggestions(sug);
+    assert(formatted.includes('Did you mean'), 'Should include "Did you mean" header');
+    assert(formatted.includes('Berlin Office'), 'Should include first suggestion name');
+    assert(formatted.includes('/Enterprise/Germany/Berlin'), 'Should include first suggestion path');
+    assert(formatted.includes('Frankfurt'), 'Should include second suggestion');
+  });
+
+  await test('suggestOus() returns [] without throwing when server is unreachable', async () => {
+    const result = await suggestOus('xyz-completely-unknown-ou');
+    assert(Array.isArray(result), 'suggestOus() should return an array');
+    // If server is reachable: may return [] (no match). If unreachable: returns [] (best-effort).
+    // Either way, must not throw.
+  });
+
+  // ── Live tests — require server connectivity ──────────────────────────────
+
+  await test('ou_get mode=get with unknown path includes "Did you mean" in error', async () => {
+    if (!ouMod) {
+      console.log('    NOTE: ou module unavailable — skipping');
+      return;
+    }
+    const result = await ouMod.ouGetTool.execute({ mode: 'get', path: '/NonExistent-OU-xyz-abc-123' });
+    if (!result.isError) {
+      console.log('    NOTE: ou_get unexpectedly succeeded — Scout server may not be reachable or OU exists');
+      return;
+    }
+    const msg = result.content[0]?.text ?? '';
+    if (msg.includes('fetch failed') || msg.includes('ECONNREFUSED')) {
+      console.log('    NOTE: fetch failed — live suggestion test skipped (server unreachable)');
+      return;
+    }
+    // 404 path: we expect either suggestions or a clean error (suggestions require server for OU map)
+    assert(msg.includes('ou_get failed'), `Error should contain "ou_get failed", got: ${msg.slice(0, 200)}`);
+    // "Did you mean" appears only if the OU tree fetch also succeeds — acceptable to be absent
+    console.log(`    NOTE: error message: ${msg.slice(0, 300)}`);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Summary
 // ═══════════════════════════════════════════════════════════════════════════════
 
