@@ -96,7 +96,7 @@ Add to your MCP client config:
 
 ---
 
-## Available Tools (17 public + 11 private)
+## Available Tools (20 public + 11 private)
 
 | Tool | Description |
 |------|-------------|
@@ -117,6 +117,9 @@ Add to your MCP client config:
 | `schedule_manage` | View and manage scheduled commands for OUs and devices |
 | `maintenance_window_manage` | CRUD maintenance windows |
 | `notification_manage` | Set and delete notifications for devices, OUs, and groups |
+| `onboard_branch` | Create a new OU + optional subnet filter rule in one call |
+| `move_devices_by_filter` | Search devices in an OU and bulk-move to destination (dryRun + confirm) |
+| `bulk_command` | Search devices and send a command to all matches (dryRun + confirm) |
 
 ### Private endpoint tools (opt-in)
 
