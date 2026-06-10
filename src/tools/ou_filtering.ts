@@ -5,12 +5,17 @@
  * They are guarded by SCOUT_ENABLE_PRIVATE_ENDPOINTS=true — if that flag is absent or
  * false, the tools are not registered and will not appear in the tool list.
  *
+ * Two filter types (FilterType in the API):
+ *   FilterType: 1  Subnet filter      — matches device by IP network (SubnetAddress field)
+ *   FilterType: 2  User-defined filter — matches device by ELUX_* property expression (CustomFilter field)
+ *
  * Field name mapping (MCP → API):
- *   ou_id            → OUID
- *   entry_id         → EntryId
- *   subnet_address   → SubnetAddress
- *   filter_type      → FilterType
- *   active           → Active
+ *   ou_id          → OUID
+ *   entry_id       → EntryId
+ *   subnet_address → SubnetAddress   (FilterType 1)
+ *   custom_filter  → CustomFilter    (FilterType 2)
+ *   active         → Active
+ *   order          → OrderNumber
  */
 
 import { z } from 'zod';
@@ -37,11 +42,42 @@ function logErr(tool: string, err: unknown): void {
 // ── ou_filter_manage ──────────────────────────────────────────────────────────
 
 const filterEntrySchema = z.object({
-  entry_id: z.number().int().optional().describe('Filter entry ID — required for modify and delete'),
-  filter_type: z.number().int().optional().describe('Filter type (1 = IP subnet)'),
-  subnet_address: z.string().optional().describe('Subnet in CIDR notation, e.g. "192.168.1.0/24"'),
+  entry_id: z.number().int().optional().describe(
+    'Filter entry ID — required for modify and delete',
+  ),
+
+  // Subnet filter (FilterType 1)
+  subnet_address: z.string().optional().describe(
+    'CIDR network address for a subnet filter, e.g. "192.168.1.0/24". ' +
+    'Provide this field (instead of custom_filter) to create/update a subnet-based rule.',
+  ),
+
+  // User-defined filter (FilterType 2)
+  custom_filter: z.string().optional().describe(
+    'Property expression for a user-defined filter, matched against the device at enrollment. ' +
+    'Format: PROPERTY OPERATOR value. Supported operators: = (equals), != (not equals), ' +
+    '> (greater than), < (less than). Wildcard * is supported in values, e.g. "Hostn*". ' +
+    'Available properties: ' +
+    'ELUX_IP (IP address), ELUX_MAC (MAC address), ' +
+    'ELUX_NETADDR (network address, e.g. "192.168.1.0"), ' +
+    'ELUX_NETCIDR (prefix length as integer, e.g. "24"), ' +
+    'ELUX_NETMASK (netmask, e.g. "255.255.255.0"), ' +
+    'ELUX_BROADCAST (broadcast address), ELUX_DOMAIN (DNS domain), ' +
+    'ELUX_HOSTNAME (hostname), ' +
+    'ELUX_SERIAL (serial number), ELUX_DEVICETYPE (device model), ' +
+    'ELUX_PRODUCT (BIOS product name), ELUX_SUPPLIER (manufacturer), ' +
+    'ELUX_BIOS (BIOS version), ELUX_CPU (CPU frequency MHz), ' +
+    'ELUX_MEMORY (RAM in MiB), ELUX_FLASH (system disk name), ' +
+    'ELUX_FLASHSIZE (storage in MiB), ELUX_GRAPHICS (GPU name(s)), ' +
+    'ELUX_OSNAME (OS name), ELUX_OSVERSION (OS version), ' +
+    'ELUX_KERNEL (kernel version), ELUX_IDF (firmware image name). ' +
+    'Multiple entries for the same OU are ANDed at evaluation time. ' +
+    'Provide this field (instead of subnet_address) to create/update a user-defined rule.',
+  ),
+
   active: z.boolean().optional().describe('Whether the filter entry is active'),
-  ou_id: z.number().int().optional().describe('Numeric ID of the target OU'),
+  ou_id: z.number().int().optional().describe('Numeric ID of the destination OU'),
+  order: z.number().int().optional().describe('Sequence number for rule evaluation order'),
 });
 
 const ouFilterManageSchema = z.object({
@@ -119,12 +155,27 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
       case 'add': {
         if (!input.entries || input.entries.length === 0)
           return fail('add requires at least one entry in entries[]');
+        for (const e of input.entries) {
+          if (!e.subnet_address && !e.custom_filter)
+            return fail(
+              'Each add entry must include either subnet_address (subnet filter) ' +
+              'or custom_filter (user-defined filter)',
+            );
+        }
         const requestValues = input.entries.map((e) => {
           const entry: Record<string, unknown> = {};
-          if (e.filter_type !== undefined) entry['FilterType'] = e.filter_type;
-          if (e.subnet_address !== undefined) entry['SubnetAddress'] = e.subnet_address;
+          if (e.subnet_address) {
+            // FilterType 1 = subnet filter
+            entry['FilterType'] = 1;
+            entry['SubnetAddress'] = e.subnet_address;
+          } else {
+            // FilterType 2 = user-defined expression filter
+            entry['FilterType'] = 2;
+            entry['CustomFilter'] = e.custom_filter;
+          }
           if (e.active !== undefined) entry['Active'] = e.active;
           if (e.ou_id !== undefined) entry['OUID'] = e.ou_id;
+          if (e.order !== undefined) entry['OrderNumber'] = e.order;
           return entry;
         });
         const body = { requestValues };
@@ -141,10 +192,16 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
         if (missingId) return fail('Every entry in modify must include entry_id');
         const requestValues = input.entries.map((e) => {
           const entry: Record<string, unknown> = { EntryId: e.entry_id };
-          if (e.filter_type !== undefined) entry['FilterType'] = e.filter_type;
-          if (e.subnet_address !== undefined) entry['SubnetAddress'] = e.subnet_address;
+          if (e.subnet_address !== undefined) {
+            entry['FilterType'] = 1;
+            entry['SubnetAddress'] = e.subnet_address;
+          } else if (e.custom_filter !== undefined) {
+            entry['FilterType'] = 2;
+            entry['CustomFilter'] = e.custom_filter;
+          }
           if (e.active !== undefined) entry['Active'] = e.active;
           if (e.ou_id !== undefined) entry['OUID'] = e.ou_id;
+          if (e.order !== undefined) entry['OrderNumber'] = e.order;
           return entry;
         });
         const body = { requestValues };
@@ -178,10 +235,18 @@ export const ouFilterManageTool = {
   description:
     '[PRIVATE ENDPOINT — not in public OpenAPI spec. Enabled via SCOUT_ENABLE_PRIVATE_ENDPOINTS=true.] ' +
     'Manage Scout Board OU filter rules and global settings. ' +
-    'Actions: get_settings (read global filter config), list (all filter rules), ' +
-    'set_settings (update OUFilterType / OUFilterIgnoreDefault), ' +
-    'add (new filter rules with subnet_address, filter_type, active, ou_id), ' +
-    'modify (update existing rules by entry_id), ' +
+    'Two filter rule types are supported: ' +
+    '(1) Subnet filter (FilterType 1) — matches enrolling devices by IP network; uses subnet_address e.g. "192.168.1.0/24". ' +
+    '(2) User-defined filter (FilterType 2) — matches by ELUX_* device property expression; uses custom_filter e.g. "ELUX_NETADDR=192.168.1.0". ' +
+    'custom_filter format: PROPERTY OPERATOR value. Operators: = != > <. Wildcards supported, e.g. "Hostn*". ' +
+    'Available properties: ELUX_IP, ELUX_MAC, ELUX_NETADDR, ELUX_NETCIDR, ' +
+    'ELUX_NETMASK, ELUX_BROADCAST, ELUX_DOMAIN, ELUX_HOSTNAME, ELUX_SERIAL, ELUX_DEVICETYPE, ' +
+    'ELUX_PRODUCT, ELUX_SUPPLIER, ELUX_BIOS, ELUX_CPU, ELUX_MEMORY, ELUX_FLASH, ELUX_FLASHSIZE, ' +
+    'ELUX_GRAPHICS, ELUX_OSNAME, ELUX_OSVERSION, ELUX_KERNEL, ELUX_IDF. ' +
+    'Multiple rules targeting the same OU are ANDed at evaluation time. ' +
+    'Actions: get_settings, list, set_settings, ' +
+    'add (each entry requires subnet_address OR custom_filter; optional: active, ou_id, order), ' +
+    'modify (update rules by entry_id — optional: subnet_address, custom_filter, active, ou_id, order), ' +
     'delete (remove rules by entry_id). ' +
     'DESTRUCTIVE: modify/delete/set_settings permanently alter OU filter configuration.',
   inputSchema: zodToJsonSchema(ouFilterManageSchema),
