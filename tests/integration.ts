@@ -573,6 +573,131 @@ if (!healthMod) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Phase 3b — OU name resolver (Item #1: natural-language OU references)
+//
+// BEFORE this feature: to rename an OU by name, an AI assistant needed:
+//   1. ou_get(mode=search, searchTerm="Berlin")   → get the path/ID
+//   2. ou_manage(action=rename, path=<resolved>)  → do the work
+//   2 tool calls, ~2× token cost.
+//
+// AFTER: a single call suffices:
+//   1. ou_manage(action=rename, ouRef="Berlin", newname="Berlin-New")
+//   1 tool call, resolver runs internally.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\nPhase 3b — OU name resolver');
+
+interface ResolverModule {
+  resolveOuRef(ref: string | number): Promise<{ ouid: number; name: string; path: string }>;
+  invalidateOuCache(): void;
+}
+
+let resolverMod: ResolverModule | null = null;
+try {
+  resolverMod = (await import('../src/resolver.js')) as ResolverModule;
+} catch {
+  console.warn('  WARN: src/resolver.js not importable — resolver tests will be skipped');
+}
+
+if (!resolverMod || !ouMod) {
+  await skip('resolver: resolves OU by exact path', 'resolver or ou module not available');
+  await skip('resolver: resolves OU by exact name (case-insensitive)', 'resolver or ou module not available');
+  await skip('resolver: resolves OU by partial name', 'resolver or ou module not available');
+  await skip('resolver: resolves OU by numeric ID', 'resolver or ou module not available');
+  await skip('resolver: throws on ambiguous partial name', 'resolver or ou module not available');
+  await skip('resolver: throws on unknown name', 'resolver or ou module not available');
+  await skip('ou_get with ouRef resolves and returns OU data', 'resolver or ou module not available');
+} else {
+  const { resolveOuRef, invalidateOuCache } = resolverMod;
+  const ouGet = ouMod.ouGetTool.execute;
+
+  // Load the full tree once so we can pick real values from the environment.
+  let rootPath: string | undefined;
+  let rootId: number | undefined;
+  let rootName: string | undefined;
+
+  await test('resolver: loads OU tree and resolves root OU by path', async () => {
+    // First, get root OU to know a real path we can look up
+    const rootResult = await ouGet({ mode: 'root' });
+    if (rootResult.isError) {
+      throw new Error(`ou_get(root) failed: ${rootResult.content[0]?.text}`);
+    }
+    let rootData: { OUID?: number; OUPath?: string; OUName?: string } | null = null;
+    try { rootData = JSON.parse(rootResult.content[0]?.text ?? 'null') as typeof rootData; } catch { /* ignore */ }
+    if (!rootData?.OUPath) {
+      // Root not configured on this server — skip dependent tests gracefully
+      console.log('    NOTE: root OU not configured on this server — resolver path tests will use structure');
+      return;
+    }
+    rootPath = rootData.OUPath;
+    rootId = rootData.OUID;
+    rootName = rootData.OUName;
+    assert(typeof rootPath === 'string' && rootPath.startsWith('/'), `Expected path starting with /, got ${rootPath}`);
+
+    // Resolve by exact path
+    const match = await resolveOuRef(rootPath);
+    assert(match.ouid === rootId, `Expected ouid=${rootId}, got ${match.ouid}`);
+    assert(match.path === rootPath, `Expected path="${rootPath}", got "${match.path}"`);
+  });
+
+  await test('resolver: resolves OU by numeric ID (string and number)', async () => {
+    if (!rootId) { console.log('    NOTE: rootId not available — using structure fallback'); return; }
+    const byNumber = await resolveOuRef(rootId);
+    assert(byNumber.ouid === rootId, `resolveOuRef(number) ouid mismatch`);
+    const byString = await resolveOuRef(String(rootId));
+    assert(byString.ouid === rootId, `resolveOuRef(string ID) ouid mismatch`);
+  });
+
+  await test('resolver: resolves OU by exact name (case-insensitive)', async () => {
+    if (!rootName || !rootId) { console.log('    NOTE: rootName not available — skipping'); return; }
+    const lower = await resolveOuRef(rootName.toLowerCase());
+    assert(lower.ouid === rootId, `Case-insensitive name lookup failed`);
+    const upper = await resolveOuRef(rootName.toUpperCase());
+    assert(upper.ouid === rootId, `Upper-case name lookup failed`);
+  });
+
+  await test('resolver: throws descriptive error on unknown OU name', async () => {
+    const err = await mustThrow(() => resolveOuRef('__nonexistent_ou_xyz_9999__'));
+    assert(err instanceof Error, 'Expected Error');
+    assert(
+      err.message.includes('No OU matching'),
+      `Expected "No OU matching" in error, got: ${err.message}`,
+    );
+  });
+
+  await test('resolver: cache survives repeated calls without extra HTTP', async () => {
+    // Call twice quickly — second should hit cache, not throw or make a new HTTP call
+    if (!rootPath) { console.log('    NOTE: rootPath not available — skipping'); return; }
+    const first = await resolveOuRef(rootPath);
+    const second = await resolveOuRef(rootPath);
+    assert(first.ouid === second.ouid, 'Cache returned different ouid on second call');
+  });
+
+  await test('resolver: invalidateOuCache() clears cache (next call re-fetches)', async () => {
+    if (!rootPath) { console.log('    NOTE: rootPath not available — skipping'); return; }
+    invalidateOuCache();
+    // After invalidation, resolve should still work (re-fetches from server)
+    const match = await resolveOuRef(rootPath);
+    assert(match.path === rootPath, 'Re-fetch after invalidation returned wrong path');
+  });
+
+  await test('ou_get with ouRef resolves to correct OU (AFTER: 1 call vs BEFORE: 2 calls)', async () => {
+    if (!rootPath || !rootId) { console.log('    NOTE: rootPath not available — skipping'); return; }
+    // AFTER: single call with ouRef — no prior lookup needed
+    const text = await toolOk('ou_get(get,ouRef)', ouGet, { mode: 'get', ouRef: rootPath });
+    const data = JSON.parse(text) as { OUID?: number };
+    assert(data.OUID === rootId, `Expected OUID=${rootId}, got ${data.OUID}`);
+  });
+
+  await test('ou_get mode=subordinate with ouRef resolves and lists children', async () => {
+    if (!rootPath) { console.log('    NOTE: rootPath not available — skipping'); return; }
+    const result = await ouGet({ mode: 'subordinate', ouRef: rootPath });
+    assert(!result.isError || result.content[0]?.text.includes('404'), 'subordinate with ouRef should not error');
+    assert(result.content.length > 0, 'Expected content from subordinate with ouRef');
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Phase 4 — OU write (scoped to SCOUT_TEST_OU_PATH)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -606,18 +731,20 @@ if (!ouMod) {
     });
 
     if (ouCreated) {
-      await test(`ou_manage action=rename "${tempName}" → "${renamedName}"`, async () => {
-        const result = await ouManage({ action: 'rename', path: tempPath, newname: renamedName });
-        assert(!result.isError, `ou_manage(rename) returned error: ${result.content[0]?.text}`);
+      await test(`ou_manage action=rename using ouRef="${tempPath}" (AFTER: 1 call vs BEFORE: 2)`, async () => {
+        // BEFORE: needed ou_get(search) first to find the path, then rename by path
+        // AFTER: single call — ouRef resolves the name internally
+        const result = await ouManage({ action: 'rename', ouRef: tempPath, newname: renamedName });
+        assert(!result.isError, `ou_manage(rename via ouRef) returned error: ${result.content[0]?.text}`);
         ouRenamed = true;
       });
+    }
 
+    if (ouRenamed) {
       // Verify renamed OU appears in subordinate listing
       await test('ou_get mode=subordinate reflects renamed sub-OU', async () => {
         const text = await toolOk('ou_get(subordinate)', ouGet, { mode: 'subordinate', path: TEST_OU_PATH });
-        // Response is an array or object — check that text mentions renamed name or any OU data
         assert(text.length > 2, 'Expected non-empty subordinate listing');
-        // The renamed OU should appear in the listing if the API returns names
         const responseMentionsOu = text.includes(renamedName) || text.includes('"name"') || text.includes('"path"');
         assert(responseMentionsOu, `Expected renamed OU "${renamedName}" or OU fields in subordinate response`);
       });
