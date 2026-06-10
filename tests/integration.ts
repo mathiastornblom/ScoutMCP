@@ -1310,6 +1310,8 @@ if (!resourcesMod) {
 //   Bulk command:       device_get(search) + N×device_command(restart)   → N+1 → 1
 // ═══════════════════════════════════════════════════════════════════════════════
 
+}
+
 console.log('\nPhase 9 — Workflow tools');
 
 interface WorkflowModule {
@@ -1480,6 +1482,10 @@ if (!workflowMod) {
     assert(data.status === 'dry_run', `Expected status=dry_run, got ${data.status}`);
     assert(data.command === 'restart', `Expected command=restart, got ${data.command}`);
     console.log(`    NOTE: ${data.matched} device(s) would receive restart`);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Phase 10 — Response enrichment (unit + live)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1528,7 +1534,11 @@ if (!enricherMod) {
 
   await test('invalidateEnrichmentCache() does not throw', async () => {
     invalidateEnrichmentCache(); // PASS if no exception
-// Phase 11 — Fuzzy suggestions (unit + live)
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 11 — Fuzzy suggestions on 404
 // ═══════════════════════════════════════════════════════════════════════════════
 
 console.log('\nPhase 11 — Fuzzy suggestions on 404');
@@ -1647,6 +1657,9 @@ if (!fuzzyMod) {
   });
 
   await test('device_get response includes _OUIDName / _OUIDPath annotations', async () => {
+  });
+}
+
 // Phase 12 — Session context (working OU)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1781,7 +1794,7 @@ if (!ctxMod || !ctxToolMod) {
     );
   });
 
-  await test('ou_get mode=subordinate error mentions scout_context when no path available', async () => {
+  await test('ou_get mode=get on nonexistent path returns fuzzy suggestions', async () => {
     clearWorkingOu();
     if (!ouMod) {
       console.log('    NOTE: ou module unavailable — skipping');
@@ -1801,6 +1814,14 @@ if (!ctxMod || !ctxToolMod) {
     assert(msg.includes('ou_get failed'), `Error should contain "ou_get failed", got: ${msg.slice(0, 200)}`);
     // "Did you mean" appears only if the OU tree fetch also succeeds — acceptable to be absent
     console.log(`    NOTE: error message: ${msg.slice(0, 300)}`);
+  });
+
+  await test('ou_get mode=subordinate error mentions scout_context when no path available', async () => {
+    clearWorkingOu();
+    if (!ouMod) {
+      console.log('    NOTE: ou module unavailable — skipping');
+      return;
+    }
     const result = await ouMod.ouGetTool.execute({ mode: 'subordinate' });
     assert(result.isError === true, 'Expected isError=true when neither path nor working OU is set');
     const msg = result.content[0]?.text ?? '';
@@ -1856,6 +1877,10 @@ if (!ctxMod || !ctxToolMod) {
     );
     const ou = (data as Record<string, unknown>)['workingOu'];
     assert(ou !== null && typeof ou === 'object', 'workingOu should be set in response');
+  });
+  });
+}
+
 // Phase 13 — MCP Prompts
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2007,6 +2032,9 @@ if (!promptsMod) {
       threw = true;
     }
     assert(threw, 'Should throw for unknown prompt name');
+  });
+}
+
 // Phase 8 — Private endpoint write operations (schema validation, no live writes)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2195,6 +2223,9 @@ if (!systemSettingsMod) {
       console.log(`    NOTE: get_recovery_settings returned error: ${msg}`);
     }
     // PASS regardless — request was made, schema validated
+  });
+}
+
 // Phase 8 — Progress reporting and device_diagnostics action=run
 // ═══════════════════════════════════════════════════════════════════════════════
 

@@ -26,33 +26,24 @@ const ouGetSchema = z.object({
     'get=single OU by path/id; root=root OU; search=search OUs by term; subordinate=direct children; structure=full tree; device_status=device statuses in OU',
   ),
   // Friendly resolver — accepts name, partial name, full path, or numeric ID.
-  // Preferred over path/id for natural-language requests.
   ouRef: z.string().optional().describe(
     'OU name, partial name, full path, or numeric ID — resolved automatically. ' +
     'Examples: "Berlin", "03 - LU Berlin", "/Enterprise/Germany/Berlin", "42". ' +
     'Preferred over path/id for natural-language requests.',
   ),
-  // get / subordinate / structure
-  path: z.string().optional().describe('OU path (e.g. /Enterprise/SubOU) — use ouRef for name-based lookup'),
+  // get / subordinate / structure — defaults to working OU for subordinate/device_status
+  path: z.string().optional().describe(
+    'OU path (e.g. /Enterprise/SubOU); for subordinate/device_status defaults to working OU if not provided',
+  ),
   id: z.number().int().optional().describe('OU numeric ID — use ouRef for name-based lookup'),
-  path: z
-    .string()
-    .optional()
-    .describe('OU path (e.g. /Enterprise/SubOU); for subordinate/device_status defaults to working OU if not provided'),
-  id: z.number().int().optional().describe('OU numeric ID'),
   properties: z.string().optional().describe('Comma-separated list of extra properties to return'),
   // search
   searchTerm: z.string().optional().describe('Search term (required for mode=search)'),
   searchFields: z.string().optional().describe('Comma-separated fields to search in'),
   // structure
   onlyFirstLevel: z.boolean().optional().describe('Return only first level of structure tree'),
-  // device_status
-  ouPath: z.string().optional().describe('OU path for device_status mode — use ouRef for name-based lookup'),
-  ouId: z.string().optional().describe('OU ID for device_status mode — use ouRef for name-based lookup'),
-  ouPath: z
-    .string()
-    .optional()
-    .describe('OU path for device_status mode; defaults to working OU if not provided'),
+  // device_status (ouPath/ouId are aliases for path/id, kept for compatibility)
+  ouPath: z.string().optional().describe('OU path for device_status mode; defaults to working OU if not provided'),
   ouId: z.string().optional().describe('OU ID for device_status mode'),
   includeSubOus: z.boolean().optional().describe('Include sub-OUs in device_status results'),
 });
@@ -72,10 +63,10 @@ async function ouGetExecute(raw: unknown): Promise<McpToolResult> {
       : null;
 
   try {
-    // Resolve ouRef into concrete path/id when provided
+    // Resolve ouRef — only for modes that consume the resolved id/path
     let resolvedId: number | undefined = input.id;
     let resolvedPath: string | undefined = input.path;
-    if (input.ouRef !== undefined) {
+    if (input.ouRef !== undefined && input.mode !== 'root' && input.mode !== 'search') {
       const match = await resolveOuRef(input.ouRef);
       resolvedId = match.ouid;
       resolvedPath = match.path;
@@ -105,15 +96,15 @@ async function ouGetExecute(raw: unknown): Promise<McpToolResult> {
       }
 
       case 'subordinate': {
-        const qs = buildQuery({ path: resolvedPath, id: resolvedId, properties: input.properties });
-        const path = input.path ?? (input.id === undefined ? getWorkingOu()?.path : undefined);
-        if (!path && input.id === undefined) {
+        // ouRef resolution takes priority; otherwise use path/id with working OU fallback
+        const effectivePath = resolvedPath ?? (resolvedId === undefined ? getWorkingOu()?.path : undefined);
+        if (!effectivePath && resolvedId === undefined) {
           return fail(
             'path or id is required for mode=subordinate. ' +
               'Set a working OU with scout_context action=set_ou to use it as default.',
           );
         }
-        const qs = buildQuery({ path, id: input.id, properties: input.properties });
+        const qs = buildQuery({ path: effectivePath, id: resolvedId, properties: input.properties });
         const data = await client.request<unknown>('GET', `/api/v1/ou/subordinate${qs}`);
         return ok(data);
       }
@@ -129,14 +120,13 @@ async function ouGetExecute(raw: unknown): Promise<McpToolResult> {
       }
 
       case 'device_status': {
-        const ouId = input.ouId ?? (resolvedId !== undefined ? String(resolvedId) : undefined);
-        const ouPath = input.ouPath ?? resolvedPath;
-        const qs = buildQuery({ ouPath, ouId, includeSubOus: input.includeSubOus });
-        const effectiveOuPath =
-          input.ouPath ?? input.path ?? getWorkingOu()?.path;
+        // Merge ouPath/path and ouId/id, then fall back to working OU
+        const effectiveOuPath = input.ouPath ?? resolvedPath ?? getWorkingOu()?.path;
+        const effectiveOuId =
+          input.ouId ?? (resolvedId !== undefined ? String(resolvedId) : undefined);
         const qs = buildQuery({
           ouPath: effectiveOuPath,
-          ouId: input.ouId ?? (input.id !== undefined ? String(input.id) : undefined),
+          ouId: effectiveOuId,
           includeSubOus: input.includeSubOus,
         });
         const data = await client.request<unknown>('GET', `/api/v1/ou/device/status${qs}`);
@@ -185,7 +175,7 @@ const ouManageSchema = z.object({
     'Resolved automatically. Preferred over destoupath/destouid.',
   ),
 
-  // add
+  // add / move
   destoupath: z.string().optional().describe('Destination OU path (add/move) — use destouRef for name-based lookup'),
   destouid: z.number().int().optional().describe('Destination OU ID (add/move) — use destouRef for name-based lookup'),
   name: z.string().optional().describe('New OU name (add) or current name for rename target'),
@@ -220,12 +210,6 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
       ? (input.destoupath ?? (input.destouid !== undefined ? String(input.destouid) : null))
       : (input.path ?? (input.id !== undefined ? String(input.id) : null));
 
-  // Destructive guard: delete and move can remove or rearrange OUs in test mode
-  if (input.action === 'delete' && input.path) {
-    const err = assertTestScope(input.path);
-    if (err) return fail(err);
-  }
-
   try {
     // Resolve ouRef → target OU
     let resolvedId: number | undefined = input.id;
@@ -245,7 +229,7 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
       resolvedDestPath = match.path;
     }
 
-    // Destructive guard: delete and move can remove or rearrange OUs in test mode
+    // Destructive guard: delete restricted to test scope
     if (input.action === 'delete' && resolvedPath) {
       const err = assertTestScope(resolvedPath);
       if (err) return fail(err);
@@ -259,10 +243,6 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
         const qs = buildQuery({ destoupath: resolvedDestPath, destouid: resolvedDestId, name: input.name });
         result = await client.request<unknown>('POST', `/api/v1/ou${qs}`);
         break;
-        const qs = buildQuery({ destoupath: input.destoupath, destouid: input.destouid, name: input.name });
-        const data = await client.request<unknown>('POST', `/api/v1/ou${qs}`);
-        invalidateEnrichmentCache();
-        return ok(data);
       }
 
       case 'rename': {
@@ -270,10 +250,6 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
         const qs = buildQuery({ path: resolvedPath, id: resolvedId, newname: input.newname });
         result = await client.request<unknown>('PUT', `/api/v1/ou${qs}`);
         break;
-        const qs = buildQuery({ path: input.path, id: input.id, newname: input.newname });
-        const data = await client.request<unknown>('PUT', `/api/v1/ou${qs}`);
-        invalidateEnrichmentCache();
-        return ok(data);
       }
 
       case 'delete': {
@@ -284,9 +260,6 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
         });
         result = await client.request<unknown>('DELETE', `/api/v1/ou${qs}`);
         break;
-        const data = await client.request<unknown>('DELETE', `/api/v1/ou${qs}`);
-        invalidateEnrichmentCache();
-        return ok(data);
       }
 
       case 'move': {
@@ -304,16 +277,6 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
         const qs = buildQuery({ path: resolvedPath, id: resolvedId });
         result = await client.request<unknown>('PUT', `/api/v1/ou/converttobase${qs}`);
         break;
-        const data = await client.request<unknown>('PUT', `/api/v1/ou/move${qs}`);
-        invalidateEnrichmentCache();
-        return ok(data);
-      }
-
-      case 'converttobase': {
-        const qs = buildQuery({ path: input.path, id: input.id });
-        const data = await client.request<unknown>('PUT', `/api/v1/ou/converttobase${qs}`);
-        invalidateEnrichmentCache();
-        return ok(data);
       }
 
       case 'structure_export': {
@@ -335,15 +298,13 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
         const body = { ...input.importPayload, dryRun: input.dryRun };
         result = await client.request<unknown>('POST', '/api/v1/ou/structure/import', body);
         break;
-        const data = await client.request<unknown>('POST', '/api/v1/ou/structure/import', body);
-        invalidateEnrichmentCache();
-        return ok(data);
       }
     }
 
-    // Invalidate resolver cache after any mutation
-    if (!['structure_export'].includes(input.action)) {
+    // Invalidate resolver + enrichment cache after any mutation
+    if (input.action !== 'structure_export') {
       invalidateOuCache();
+      invalidateEnrichmentCache();
     }
 
     return ok(result);
