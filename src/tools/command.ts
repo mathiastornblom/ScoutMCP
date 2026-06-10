@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
+import { resolveOuRef } from '../resolver.js';
 
 // ── device_command ────────────────────────────────────────────────────────────
 
@@ -20,9 +21,17 @@ const deviceCommandSchema = z.object({
   id: z.string().optional().describe('Device ID (target=device)'),
   clientid: z.string().optional().describe('Client identifier UUID (target=device)'),
 
+  // --- ou target: identify the OU ---
+  ouRef: z.string().optional().describe(
+    'Target OU (target=ou) — name, partial name, full path, or numeric ID. ' +
+    'Resolved automatically and injected as ouId into the request body. ' +
+    'Examples: "Berlin", "/Enterprise/Germany/Berlin", "42".',
+  ),
+
   // --- body: scheduling / inform user ---
   body: z.record(z.unknown()).optional().describe(
-    'Optional JSON body: InformUser fields (informUser.title/text/...) and/or Schedule fields',
+    'Optional JSON body: ouPath/ouId for target=ou (or use ouRef instead), ' +
+    'InformUser fields (informUser.title/text/...), and/or Schedule fields',
   ),
 
   // Safety confirmation required for irreversible commands
@@ -54,7 +63,15 @@ async function deviceCommandExecute(raw: unknown): Promise<McpToolResult> {
       : '';
 
   try {
-    const data = await client.request<unknown>('POST', `${path}${qs}`, input.body);
+    let body = input.body;
+
+    // Resolve ouRef and inject into body for target=ou
+    if (input.target === 'ou' && input.ouRef !== undefined) {
+      const match = await resolveOuRef(input.ouRef);
+      body = { ouId: match.ouid, ...body };
+    }
+
+    const data = await client.request<unknown>('POST', `${path}${qs}`, body);
     return ok(data);
   } catch (err) {
     return fail(`device_command failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -66,6 +83,7 @@ export const deviceCommandTool = {
   description:
     'Send a command to a device, device list, OU, or DDG. ' +
     'Commands: restart, halt, start, factoryreset, update, updateuefi, custom, predefined, delivery, message. ' +
+    'For target=ou, use ouRef to identify the OU by name — it is automatically resolved and injected into the request. ' +
     'DESTRUCTIVE: factoryreset and halt require confirm=true. factoryreset wipes device configuration.',
   inputSchema: zodToJsonSchema(deviceCommandSchema),
   execute: deviceCommandExecute,
