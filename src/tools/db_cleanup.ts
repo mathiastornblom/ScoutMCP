@@ -29,15 +29,26 @@ function logErr(tool: string, err: unknown): void {
 // ── db_cleanup ────────────────────────────────────────────────────────────────
 
 const dbCleanupSchema = z.object({
-  action: z.enum(['list']).describe('list=list database cleanup entries, optionally filtered'),
+  action: z
+    .enum(['list', 'delete'])
+    .describe(
+      'list=list database cleanup entries, optionally filtered; ' +
+        'delete=DESTRUCTIVE: permanently delete records matching filter (requires confirm=true)',
+    ),
 
   filter: z
     .string()
     .optional()
     .describe(
       'JSON array filter string, e.g. \'[{"name":"SomeField","filter":"value"}]\'. ' +
-        'If omitted, defaults to an empty filter (returns all entries).',
+        'For list: defaults to empty filter (returns all entries). ' +
+        'For delete: required — specifies which records to delete.',
     ),
+
+  confirm: z
+    .boolean()
+    .optional()
+    .describe('Must be true to execute delete (required safety guard for destructive operation)'),
 });
 
 type DbCleanupInput = z.infer<typeof dbCleanupSchema>;
@@ -57,6 +68,16 @@ async function dbCleanupExecute(raw: unknown): Promise<McpToolResult> {
         logOk(tool);
         return ok(data);
       }
+
+      case 'delete': {
+        if (!input.confirm) return fail('db_cleanup action=delete requires confirm=true (destructive operation)');
+        if (!input.filter) return fail('db_cleanup action=delete requires filter to specify which records to delete');
+        const path = `/api/v1/dbCleanUp?filter=${encodeURIComponent(input.filter)}`;
+        log(tool, 'DELETE', path);
+        const data = await client.rawRequest<unknown>('DELETE', path);
+        logOk(tool);
+        return ok(data);
+      }
     }
   } catch (err) {
     logErr(tool, err);
@@ -68,9 +89,9 @@ export const dbCleanupTool = {
   name: 'db_cleanup',
   description:
     '[PRIVATE ENDPOINT — not in public OpenAPI spec. Enabled via SCOUT_ENABLE_PRIVATE_ENDPOINTS=true.] ' +
-    'List Scout Board database cleanup entries. ' +
-    'Action: list (fetch cleanup records, optionally filtered via a JSON array string in the filter field; ' +
-    'defaults to an empty filter which returns all entries).',
+    'Inspect and clean up Scout Board database records. ' +
+    'Actions: list (fetch cleanup records, optionally filtered via a JSON array string; defaults to all entries), ' +
+    'delete (DESTRUCTIVE: permanently delete records matching filter — requires confirm=true and filter).',
   inputSchema: zodToJsonSchema(dbCleanupSchema),
   execute: dbCleanupExecute,
 };

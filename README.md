@@ -143,15 +143,17 @@ These tools target Scout Board internal endpoints discovered from browser networ
 | Tool | Actions | Description |
 |------|---------|-------------|
 | `system_info` | `status_summary`, `device_count`, `device_distribution`, `device_image_files`, `recovery_settings`, `db_diags`, `system_check`, `tree_filter`, `missed_notifications`, `auth_user` | Read-only system status and diagnostic data |
-| `system_settings` | `get_logging` / `set_logging`, `get_discover` / `set_discover`, `get_retain_local_config` / `set_retain_local_config`, `get_device_name_options`, `set_device_password` | Read and write server-wide settings |
+| `system_settings` | `get_logging` / `set_logging`, `get_discover` / `set_discover`, `get_retain_local_config` / `set_retain_local_config`, `get_device_name_options` / `set_device_name_options`, `get_recovery_settings` / `set_recovery_settings`, `set_device_password` | Read and write server-wide settings |
 | `predefined_commands` | `list`, `add`, `modify`, `delete`, `auth`, `list_templates`, `modify_templates` | Manage predefined device commands |
 | `predefined_paths` | `list`, `add`, `delete` | Manage predefined firmware update paths |
 | `predefined_images` | `list_images`, `list_uefi` | List predefined IDF images and UEFI files |
 | `license_manage` | `get`, `check_availability`, `reconfigure` | Read and reconfigure Scout Board licensing |
-| `admin_manage` | `list`, `permissions`, `advanced_rights`, `configuration_rights`, `update_rights` | Read admin accounts and UI permissions |
+| `admin_manage` | `list`, `permissions`, `advanced_rights`, `configuration_rights`, `update_rights`, `add_admin`, `update_admin`, `delete_admin` | Read and write admin accounts and UI permissions |
 | `server_instances` | `list`, `modify`, `delete` | Manage Scout Board server instances |
 | `db_cleanup` | `list` | List database record counts by type for cleanup |
 | `ou_filter_manage` | `get_settings`, `list`, `set_settings`, `add`, `modify`, `delete` | Manage OU filter rules — **subnet filter** (IP network, e.g. `192.168.1.0/24`) and **user-defined filter** (ELUX_* property expressions with `=`, `!=`, `>`, `<`, `*` wildcard) |
+| `db_cleanup` | `list`, `delete` | List and delete database records by filter |
+| `ou_filter_manage` | `get_settings`, `list`, `set_settings`, `add`, `modify`, `delete` | Manage OU IP subnet filter rules |
 | `new_device_options` | `get`, `set` | Read or update new device enrollment options |
 
 ### Response enrichment
