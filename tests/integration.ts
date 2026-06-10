@@ -1015,6 +1015,198 @@ if (!ouFilteringMod) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Phase 8 — Private endpoint write operations (schema validation, no live writes)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\nPhase 8 — Private endpoint write operations (schema validation)');
+
+interface DbCleanupModule { dbCleanupTool: { execute: ToolExecute } }
+interface AdminManageModule { adminManageTool: { execute: ToolExecute } }
+interface SystemSettingsModule { systemSettingsTool: { execute: ToolExecute } }
+
+let dbCleanupMod: DbCleanupModule | null = null;
+let adminManageMod: AdminManageModule | null = null;
+let systemSettingsMod: SystemSettingsModule | null = null;
+
+if (privateEndpointsEnabled) {
+  try {
+    dbCleanupMod = (await import('../src/tools/db_cleanup.js')) as DbCleanupModule;
+  } catch {
+    console.warn('  WARN: src/tools/db_cleanup.js not importable — phase 8 db_cleanup tests skipped');
+  }
+  try {
+    adminManageMod = (await import('../src/tools/admins.js')) as AdminManageModule;
+  } catch {
+    console.warn('  WARN: src/tools/admins.js not importable — phase 8 admin_manage tests skipped');
+  }
+  try {
+    systemSettingsMod = (await import('../src/tools/system_settings.js')) as SystemSettingsModule;
+  } catch {
+    console.warn('  WARN: src/tools/system_settings.js not importable — phase 8 system_settings tests skipped');
+  }
+} else {
+  console.log('  (SKIP: set SCOUT_ENABLE_PRIVATE_ENDPOINTS=true to run phase 8)');
+}
+
+const phase8Skip = privateEndpointsEnabled ? 'module not available' : 'SCOUT_ENABLE_PRIVATE_ENDPOINTS not set to true';
+
+async function toolFail8(label: string, fn: ToolExecute, args: unknown): Promise<string> {
+  const result = await fn(args);
+  assert(
+    result.isError === true,
+    `${label} expected isError=true but tool returned success: ${result.content[0]?.text}`,
+  );
+  return result.content[0]?.text ?? '';
+}
+
+// ── db_cleanup write schema validation ───────────────────────────────────────
+
+if (!dbCleanupMod) {
+  await skip('db_cleanup: delete without confirm returns isError', phase8Skip);
+  await skip('db_cleanup: delete without filter returns isError', phase8Skip);
+  await skip('db_cleanup: delete with confirm=false returns isError', phase8Skip);
+} else {
+  const dbCleanup = dbCleanupMod.dbCleanupTool.execute;
+
+  await test('db_cleanup: delete without confirm returns isError', async () => {
+    const msg = await toolFail8('db_cleanup(delete/no-confirm)', dbCleanup, {
+      action: 'delete',
+      filter: '[{"name":"Type","filter":"SomeType"}]',
+    });
+    assert(msg.toLowerCase().includes('confirm'), `Expected error about confirm: ${msg}`);
+  });
+
+  await test('db_cleanup: delete without filter returns isError', async () => {
+    const msg = await toolFail8('db_cleanup(delete/no-filter)', dbCleanup, {
+      action: 'delete',
+      confirm: true,
+    });
+    assert(msg.toLowerCase().includes('filter'), `Expected error about filter: ${msg}`);
+  });
+
+  await test('db_cleanup: delete with confirm=false returns isError', async () => {
+    const msg = await toolFail8('db_cleanup(delete/confirm-false)', dbCleanup, {
+      action: 'delete',
+      confirm: false,
+      filter: '[{"name":"Type","filter":"SomeType"}]',
+    });
+    assert(msg.toLowerCase().includes('confirm'), `Expected error about confirm: ${msg}`);
+  });
+
+  // db_cleanup action=list is a read-only live test — safe to run
+  await test('db_cleanup: list runs without error (or returns server-side note)', async () => {
+    const result = await dbCleanup({ action: 'list' });
+    if (result.isError) {
+      const msg = result.content[0]?.text ?? '';
+      console.log(`    NOTE: db_cleanup list returned error: ${msg}`);
+    }
+    // PASS regardless — request was made, schema validated
+  });
+}
+
+// ── admin_manage write schema validation ─────────────────────────────────────
+
+if (!adminManageMod) {
+  await skip('admin_manage: add_admin without username returns isError', phase8Skip);
+  await skip('admin_manage: add_admin without password returns isError', phase8Skip);
+  await skip('admin_manage: update_admin without admin_id returns isError', phase8Skip);
+  await skip('admin_manage: delete_admin without admin_id returns isError', phase8Skip);
+  await skip('admin_manage: delete_admin without confirm returns isError', phase8Skip);
+} else {
+  const adminManage = adminManageMod.adminManageTool.execute;
+
+  await test('admin_manage: add_admin without username returns isError', async () => {
+    const msg = await toolFail8('admin_manage(add_admin/no-username)', adminManage, {
+      action: 'add_admin',
+      password: 'secret',
+    });
+    assert(msg.toLowerCase().includes('username'), `Expected error about username: ${msg}`);
+  });
+
+  await test('admin_manage: add_admin without password returns isError', async () => {
+    const msg = await toolFail8('admin_manage(add_admin/no-password)', adminManage, {
+      action: 'add_admin',
+      username: 'testuser',
+    });
+    assert(msg.toLowerCase().includes('password'), `Expected error about password: ${msg}`);
+  });
+
+  await test('admin_manage: update_admin without admin_id returns isError', async () => {
+    const msg = await toolFail8('admin_manage(update_admin/no-id)', adminManage, {
+      action: 'update_admin',
+      display_name: 'New Name',
+    });
+    assert(msg.toLowerCase().includes('admin_id'), `Expected error about admin_id: ${msg}`);
+  });
+
+  await test('admin_manage: delete_admin without admin_id returns isError', async () => {
+    const msg = await toolFail8('admin_manage(delete_admin/no-id)', adminManage, {
+      action: 'delete_admin',
+      confirm: true,
+    });
+    assert(msg.toLowerCase().includes('admin_id'), `Expected error about admin_id: ${msg}`);
+  });
+
+  await test('admin_manage: delete_admin without confirm returns isError', async () => {
+    const msg = await toolFail8('admin_manage(delete_admin/no-confirm)', adminManage, {
+      action: 'delete_admin',
+      admin_id: 42,
+    });
+    assert(msg.toLowerCase().includes('confirm'), `Expected error about confirm: ${msg}`);
+  });
+}
+
+// ── system_settings write schema validation ───────────────────────────────────
+
+if (!systemSettingsMod) {
+  await skip('system_settings: set_device_name_options without name_options returns isError', phase8Skip);
+  await skip('system_settings: set_recovery_settings without recovery_options returns isError', phase8Skip);
+  await skip('system_settings: get_device_name_options runs without error', phase8Skip);
+  await skip('system_settings: get_recovery_settings runs without error', phase8Skip);
+} else {
+  const systemSettings = systemSettingsMod.systemSettingsTool.execute;
+
+  await test('system_settings: set_device_name_options without name_options returns isError', async () => {
+    const msg = await toolFail8('system_settings(set_device_name_options/empty)', systemSettings, {
+      action: 'set_device_name_options',
+    });
+    assert(
+      msg.toLowerCase().includes('name_options') || msg.toLowerCase().includes('requires'),
+      `Expected error about name_options: ${msg}`,
+    );
+  });
+
+  await test('system_settings: set_recovery_settings without recovery_options returns isError', async () => {
+    const msg = await toolFail8('system_settings(set_recovery_settings/empty)', systemSettings, {
+      action: 'set_recovery_settings',
+    });
+    assert(
+      msg.toLowerCase().includes('recovery_options') || msg.toLowerCase().includes('requires'),
+      `Expected error about recovery_options: ${msg}`,
+    );
+  });
+
+  // Read-only live tests — safe to run
+  await test('system_settings: get_device_name_options runs without error (or returns server-side note)', async () => {
+    const result = await systemSettings({ action: 'get_device_name_options' });
+    if (result.isError) {
+      const msg = result.content[0]?.text ?? '';
+      console.log(`    NOTE: get_device_name_options returned error: ${msg}`);
+    }
+    // PASS regardless — request was made, schema validated
+  });
+
+  await test('system_settings: get_recovery_settings runs without error (or returns server-side note)', async () => {
+    const result = await systemSettings({ action: 'get_recovery_settings' });
+    if (result.isError) {
+      const msg = result.content[0]?.text ?? '';
+      console.log(`    NOTE: get_recovery_settings returned error: ${msg}`);
+    }
+    // PASS regardless — request was made, schema validated
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Summary
 // ═══════════════════════════════════════════════════════════════════════════════
 

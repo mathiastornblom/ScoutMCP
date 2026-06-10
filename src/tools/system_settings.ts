@@ -38,6 +38,9 @@ const systemSettingsSchema = z.object({
       'get_retain_local_config',
       'set_retain_local_config',
       'get_device_name_options',
+      'set_device_name_options',
+      'get_recovery_settings',
+      'set_recovery_settings',
       'set_device_password',
     ])
     .describe(
@@ -47,7 +50,10 @@ const systemSettingsSchema = z.object({
         'set_discover=update discover options (at least one of: discover_ping_time, discover_collect_time); ' +
         'get_retain_local_config=read retain local config setting; ' +
         'set_retain_local_config=set retain_local_configuration (required); ' +
-        'get_device_name_options=read device name options; ' +
+        'get_device_name_options=read device naming options; ' +
+        'set_device_name_options=update device naming options (provide name_options object with fields from get_device_name_options); ' +
+        'get_recovery_settings=read recovery configuration; ' +
+        'set_recovery_settings=update recovery configuration (provide recovery_options object with fields from get_recovery_settings); ' +
         'set_device_password=DESTRUCTIVE: change device password (requires old_password, new_password, scout_board_id)',
     ),
 
@@ -71,6 +77,24 @@ const systemSettingsSchema = z.object({
     .boolean()
     .optional()
     .describe('Whether to retain local configuration on devices (set_retain_local_config)'),
+
+  // set_device_name_options field
+  name_options: z
+    .record(z.unknown())
+    .optional()
+    .describe(
+      'Object containing device naming option fields to update (set_device_name_options). ' +
+        'Run get_device_name_options first to see current field names and values.',
+    ),
+
+  // set_recovery_settings field
+  recovery_options: z
+    .record(z.unknown())
+    .optional()
+    .describe(
+      'Object containing recovery configuration fields to update (set_recovery_settings). ' +
+        'Run get_recovery_settings first to see current field names and values.',
+    ),
 
   // set_device_password fields
   old_password: z.string().optional().describe('Current device password (set_device_password)'),
@@ -162,6 +186,34 @@ async function systemSettingsExecute(raw: unknown): Promise<McpToolResult> {
         return ok(data);
       }
 
+      case 'set_device_name_options': {
+        if (!input.name_options || Object.keys(input.name_options).length === 0)
+          return fail('set_device_name_options requires name_options object (run get_device_name_options to see available fields)');
+        const path = '/api/v1/deviceNameOptions/set';
+        log(tool, 'POST', path, input.name_options);
+        const data = await client.rawRequest<unknown>('POST', path, input.name_options);
+        logOk(tool);
+        return ok(data);
+      }
+
+      case 'get_recovery_settings': {
+        const path = '/api/v1/recoverySettings';
+        log(tool, 'GET', path);
+        const data = await client.rawRequest<unknown>('GET', path);
+        logOk(tool);
+        return ok(data);
+      }
+
+      case 'set_recovery_settings': {
+        if (!input.recovery_options || Object.keys(input.recovery_options).length === 0)
+          return fail('set_recovery_settings requires recovery_options object (run get_recovery_settings to see available fields)');
+        const path = '/api/v1/recoverySettings/set';
+        log(tool, 'POST', path, input.recovery_options);
+        const data = await client.rawRequest<unknown>('POST', path, input.recovery_options);
+        logOk(tool);
+        return ok(data);
+      }
+
       case 'set_device_password': {
         if (!input.old_password) return fail('set_device_password requires old_password');
         if (!input.new_password) return fail('set_device_password requires new_password');
@@ -188,10 +240,11 @@ export const systemSettingsTool = {
   name: 'system_settings',
   description:
     '[PRIVATE ENDPOINT — not in public OpenAPI spec. Enabled via SCOUT_ENABLE_PRIVATE_ENDPOINTS=true.] ' +
-    'Manage Scout Board system settings: logging, discovery, retain-local-config, device name options, and device password. ' +
+    'Manage Scout Board system settings: logging, discovery, retain-local-config, device naming, recovery, and device password. ' +
     'Actions: get_logging/set_logging (logging options), get_discover/set_discover (discovery timing), ' +
     'get_retain_local_config/set_retain_local_config (retain local config flag), ' +
-    'get_device_name_options (device naming configuration), ' +
+    'get_device_name_options/set_device_name_options (device naming configuration — call get first to see field names), ' +
+    'get_recovery_settings/set_recovery_settings (recovery configuration — call get first to see field names), ' +
     'set_device_password (DESTRUCTIVE: change device password — requires old_password, new_password, scout_board_id).',
   inputSchema: zodToJsonSchema(systemSettingsSchema),
   execute: systemSettingsExecute,
