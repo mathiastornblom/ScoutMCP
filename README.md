@@ -138,6 +138,20 @@ These tools target Scout Board internal endpoints discovered from browser networ
 | `ou_filter_manage` | `get_settings`, `list`, `set_settings`, `add`, `modify`, `delete` | Manage OU IP subnet filter rules |
 | `new_device_options` | `get`, `set` | Read or update new device enrollment options |
 
+### MCP Prompts (workflow templates)
+
+Five pre-built workflow templates are exposed via the MCP `prompts/list` and `prompts/get` endpoints. Clients that support MCP prompts (e.g. Claude Desktop) can invoke them by name:
+
+| Prompt | Description | Key arguments |
+|--------|-------------|---------------|
+| `scout_connect` | Connect to a server and prepare the session | `base_url`, `username`, `ou_path` (opt) |
+| `onboard_device` | Add a new device to Scout Board | `device_name`, `mac_address`, `ou_path` (opt) |
+| `audit_ou` | List and summarise device health in an OU | `ou_path` (opt), `include_sub_ous` (opt) |
+| `mass_command` | Send a command to all devices in an OU | `command`, `ou_path` (opt), `confirm` (opt) |
+| `move_devices` | Find devices by name and move them | `search_term`, `target_ou`, `source_ou` (opt) |
+
+Each prompt resolves any missing OU arguments from the working OU (set with `scout_context`) and includes a preview/confirmation step before destructive operations.
+
 ### Destructive operation safeguards
 
 - `device_command` with `factoryreset` or `halt` requires `confirm: true`
