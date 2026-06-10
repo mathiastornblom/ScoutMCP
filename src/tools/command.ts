@@ -3,6 +3,11 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { resolveOuRef } from '../resolver.js';
+import { getProgressReporter } from '../progress.js';
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 // ── device_command ────────────────────────────────────────────────────────────
 
@@ -92,14 +97,32 @@ export const deviceCommandTool = {
 // ── device_diagnostics ────────────────────────────────────────────────────────
 
 const deviceDiagnosticsSchema = z.object({
-  action: z.enum(['trigger', 'poll', 'download_url']).describe(
-    'trigger=start diagnostics collection; poll=check status; download_url=returns URL to fetch the ZIP (actual binary download not supported via MCP)',
+  action: z.enum(['trigger', 'poll', 'download_url', 'run']).describe(
+    'trigger=start diagnostics collection; ' +
+      'poll=check status (HTTP 202 means still in progress, 200 means done); ' +
+      'download_url=returns URL to fetch the ZIP (actual binary download not supported via MCP); ' +
+      'run=full auto-flow: trigger → poll until ready → return download URL ' +
+      '(sends log notifications for each poll step; use timeout_s and poll_interval_s to tune)',
   ),
   name: z.string().optional(),
   mac: z.string().optional(),
   id: z.string().optional(),
   clientid: z.string().optional().describe('Required for action=download_url'),
   diagnosticsFileId: z.string().optional().describe('Required for action=download_url (from poll response)'),
+  timeout_s: z
+    .number()
+    .int()
+    .min(10)
+    .max(600)
+    .optional()
+    .describe('Max seconds to wait for diagnostics to complete (action=run, default 300)'),
+  poll_interval_s: z
+    .number()
+    .int()
+    .min(3)
+    .max(30)
+    .optional()
+    .describe('Seconds between poll attempts (action=run, default 5)'),
 });
 
 type DeviceDiagnosticsInput = z.infer<typeof deviceDiagnosticsSchema>;
@@ -133,6 +156,78 @@ async function deviceDiagnosticsExecute(raw: unknown): Promise<McpToolResult> {
           `?clientid=${encodeURIComponent(input.clientid)}&diagnosticsFileId=${encodeURIComponent(input.diagnosticsFileId)}`;
         return ok({ downloadUrl: url, note: 'Fetch this URL with the ScoutBoardAuthJWT cookie to download the ZIP.' });
       }
+
+      case 'run': {
+        const reporter = getProgressReporter();
+        const timeoutMs = (input.timeout_s ?? 300) * 1000;
+        const intervalMs = (input.poll_interval_s ?? 5) * 1000;
+        const maxPolls = Math.ceil(timeoutMs / intervalMs);
+
+        // Step 1: trigger
+        await reporter.log('info', 'Triggering diagnostics collection…');
+        await client.request<unknown>('GET', `/api/v1/command/device/diagnostics${qs}`);
+
+        // Step 2: poll until done or timed out
+        type PollResp = {
+          code?: number;
+          response?: {
+            status?: { result?: number; msg?: string };
+            diagnosticsFileId?: string | number;
+            clientIdentifier?: string;
+            downloadUrl?: string;
+          };
+        };
+
+        for (let attempt = 1; attempt <= maxPolls; attempt++) {
+          await sleep(intervalMs);
+          await reporter.log('info', `Polling diagnostics — attempt ${attempt}/${maxPolls}…`);
+
+          const poll = await client.request<PollResp>(
+            'GET',
+            `/api/v1/command/device/diagnostics/poll${qs}`,
+          );
+
+          const resp = poll?.response;
+          const result = resp?.status?.result;
+          const statusMsg = resp?.status?.msg ?? '';
+
+          if (poll?.code === 202 || result === -1) {
+            // Still in progress
+            if (statusMsg) await reporter.log('info', `  Status: ${statusMsg}`);
+            continue;
+          }
+
+          if (result === -2) {
+            return fail(`Diagnostics failed: ${statusMsg || 'device unreachable or collection error'}`);
+          }
+
+          // result === 0 (or code === 200) → done
+          const clientIdentifier = resp?.clientIdentifier ?? input.clientid;
+          const fileId = resp?.diagnosticsFileId;
+          await reporter.log('info', statusMsg ? `  ${statusMsg}` : '  Diagnostics ready.');
+
+          if (clientIdentifier && fileId !== undefined) {
+            const baseUrl = process.env.SCOUT_BASE_URL?.replace(/\/$/, '');
+            const downloadUrl =
+              `${baseUrl}/rest/api/v1/command/device/diagnostics/download` +
+              `?clientid=${encodeURIComponent(String(clientIdentifier))}&diagnosticsFileId=${encodeURIComponent(String(fileId))}`;
+            await reporter.log('info', 'Download URL ready.');
+            return ok({
+              ...poll,
+              downloadUrl,
+              note: 'Fetch this URL with the ScoutBoardAuthJWT cookie to download the ZIP.',
+            });
+          }
+
+          return ok(poll);
+        }
+
+        const elapsedS = Math.round((maxPolls * intervalMs) / 1000);
+        return fail(
+          `Diagnostics timed out after ${elapsedS}s (${maxPolls} polls). ` +
+            'Use action=poll to check status manually.',
+        );
+      }
     }
   } catch (err) {
     return fail(`device_diagnostics failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -142,8 +237,11 @@ async function deviceDiagnosticsExecute(raw: unknown): Promise<McpToolResult> {
 export const deviceDiagnosticsTool = {
   name: 'device_diagnostics',
   description:
-    'Collect device diagnostics asynchronously. Workflow: trigger → poll until ready → download_url to get the ZIP download link. ' +
-    'The download_url action returns a URL; binary download must be done by the caller using the auth cookie.',
+    'Collect device diagnostics asynchronously. ' +
+    'Quick path: action=run — triggers collection, polls automatically, and returns the download URL in one call; ' +
+    'sends log notifications (visible in the MCP client) for each poll step. ' +
+    'Manual path: trigger → poll (repeat until HTTP 200) → download_url to get the ZIP link. ' +
+    'Binary download must be performed by the caller using the ScoutBoardAuthJWT cookie.',
   inputSchema: zodToJsonSchema(deviceDiagnosticsSchema),
   execute: deviceDiagnosticsExecute,
 };
