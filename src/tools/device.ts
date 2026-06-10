@@ -5,6 +5,7 @@ import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { resolveOuRef } from '../resolver.js';
 import { enrich } from '../enricher.js';
 import { isNotFound } from '../fuzzy.js';
+import { getWorkingOu } from '../context.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -39,6 +40,11 @@ const deviceGetSchema = z.object({
   ),
   ouPath: z.string().optional().describe('OU path to search in — use ouRef for name-based lookup'),
   ouId: z.string().optional().describe('OU ID to search in — use ouRef for name-based lookup'),
+  ouPath: z
+    .string()
+    .optional()
+    .describe('OU path to search in; defaults to working OU if not provided (set via scout_context)'),
+  ouId: z.string().optional().describe('OU ID to search in (required for mode=search if ouPath not given)'),
   searchTerm: z.string().optional().describe('Search term (required for mode=search)'),
   searchFields: z.string().optional().describe('Comma-separated device fields to evaluate during search'),
   includeSubOus: z.boolean().optional().describe('Include devices from sub-OUs in search'),
@@ -79,6 +85,16 @@ async function deviceGetExecute(raw: unknown): Promise<McpToolResult> {
         const qs = buildQuery({
           ouPath: searchOuPath,
           ouId: searchOuId,
+        const effectiveOuPath = input.ouPath ?? getWorkingOu()?.path;
+        if (!effectiveOuPath && !input.ouId) {
+          return fail(
+            'ouPath or ouId is required for mode=search. ' +
+              'Set a working OU with scout_context action=set_ou to use it as default.',
+          );
+        }
+        const qs = buildQuery({
+          ouPath: effectiveOuPath,
+          ouId: input.ouId,
           searchTerm: input.searchTerm,
           searchFields: input.searchFields,
           properties: input.properties,
@@ -151,6 +167,12 @@ const deviceManageSchema = z.object({
   ),
   destoupath: z.string().optional().describe('Destination OU path (add/move) — use destouRef for name-based lookup'),
   destouid: z.number().int().optional().describe('Destination OU ID (add/move) — use destouRef for name-based lookup'),
+  // add
+  destoupath: z
+    .string()
+    .optional()
+    .describe('Destination OU path (add/move); defaults to working OU if not provided (set via scout_context)'),
+  destouid: z.number().int().optional().describe('Destination OU ID (add/move)'),
   newDeviceName: z.string().optional().describe('Name for the new device (action=add)'),
   newDeviceMac: z.string().optional().describe('MAC address for the new device (action=add)'),
 
@@ -163,6 +185,32 @@ type DeviceManageInput = z.infer<typeof deviceManageSchema>;
 async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
   const input = deviceManageSchema.parse(raw) as DeviceManageInput;
   const client = getClient();
+
+  // Destructive guard: delete requires knowing which OU the device is in.
+  // We guard by requiring destoupath for add operations that specify a test OU,
+  // and by checking destoupath on move. For delete, check SCOUT_ENV only.
+  if (input.action === 'delete' && process.env.SCOUT_ENV === 'test') {
+    const testRoot = process.env.SCOUT_TEST_OU_PATH;
+    if (!testRoot) {
+      return fail('SCOUT_TEST_OU_PATH must be set when SCOUT_ENV=test');
+    }
+    // delete doesn't take an OU path — we can't verify scope without a lookup.
+    // Require caller to confirm they know what they're doing in test mode.
+    return fail(
+      'device_manage action=delete is disabled in SCOUT_ENV=test to prevent accidental deletion. ' +
+        'Set SCOUT_ENV=production to delete devices, or verify the device is in SCOUT_TEST_OU_PATH manually.',
+    );
+  }
+
+  // Resolve effective destination: explicit arg takes priority, then working OU.
+  const effectiveDest =
+    input.destoupath ??
+    ((input.action === 'add' || input.action === 'move') ? getWorkingOu()?.path : undefined);
+
+  if ((input.action === 'add' || input.action === 'move') && effectiveDest) {
+    const err = assertTestScope(effectiveDest);
+    if (err) return fail(err);
+  }
 
   try {
     // Resolve destouRef → destination OU path/id
@@ -197,6 +245,8 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
         const qs = buildQuery({
           destoupath: resolvedDestPath,
           destouid: resolvedDestId,
+          destoupath: effectiveDest,
+          destouid: input.destouid,
           name: input.newDeviceName,
           mac: input.newDeviceMac,
         });
@@ -236,6 +286,8 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           clientid: input.clientid,
           destoupath: resolvedDestPath,
           destouid: resolvedDestId,
+          destoupath: effectiveDest,
+          destouid: input.destouid,
         });
         const data = await client.request<unknown>('PUT', `/api/v1/device/move${qs}`);
         return ok(await enrich(data));

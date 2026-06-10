@@ -5,6 +5,7 @@ import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { resolveOuRef, invalidateOuCache } from '../resolver.js';
 import { enrich, invalidateEnrichmentCache } from '../enricher.js';
 import { suggestOus, formatOuSuggestions, isNotFound } from '../fuzzy.js';
+import { getWorkingOu } from '../context.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -34,6 +35,11 @@ const ouGetSchema = z.object({
   // get / subordinate / structure
   path: z.string().optional().describe('OU path (e.g. /Enterprise/SubOU) — use ouRef for name-based lookup'),
   id: z.number().int().optional().describe('OU numeric ID — use ouRef for name-based lookup'),
+  path: z
+    .string()
+    .optional()
+    .describe('OU path (e.g. /Enterprise/SubOU); for subordinate/device_status defaults to working OU if not provided'),
+  id: z.number().int().optional().describe('OU numeric ID'),
   properties: z.string().optional().describe('Comma-separated list of extra properties to return'),
   // search
   searchTerm: z.string().optional().describe('Search term (required for mode=search)'),
@@ -43,6 +49,11 @@ const ouGetSchema = z.object({
   // device_status
   ouPath: z.string().optional().describe('OU path for device_status mode — use ouRef for name-based lookup'),
   ouId: z.string().optional().describe('OU ID for device_status mode — use ouRef for name-based lookup'),
+  ouPath: z
+    .string()
+    .optional()
+    .describe('OU path for device_status mode; defaults to working OU if not provided'),
+  ouId: z.string().optional().describe('OU ID for device_status mode'),
   includeSubOus: z.boolean().optional().describe('Include sub-OUs in device_status results'),
 });
 
@@ -95,6 +106,14 @@ async function ouGetExecute(raw: unknown): Promise<McpToolResult> {
 
       case 'subordinate': {
         const qs = buildQuery({ path: resolvedPath, id: resolvedId, properties: input.properties });
+        const path = input.path ?? (input.id === undefined ? getWorkingOu()?.path : undefined);
+        if (!path && input.id === undefined) {
+          return fail(
+            'path or id is required for mode=subordinate. ' +
+              'Set a working OU with scout_context action=set_ou to use it as default.',
+          );
+        }
+        const qs = buildQuery({ path, id: input.id, properties: input.properties });
         const data = await client.request<unknown>('GET', `/api/v1/ou/subordinate${qs}`);
         return ok(data);
       }
@@ -113,6 +132,13 @@ async function ouGetExecute(raw: unknown): Promise<McpToolResult> {
         const ouId = input.ouId ?? (resolvedId !== undefined ? String(resolvedId) : undefined);
         const ouPath = input.ouPath ?? resolvedPath;
         const qs = buildQuery({ ouPath, ouId, includeSubOus: input.includeSubOus });
+        const effectiveOuPath =
+          input.ouPath ?? input.path ?? getWorkingOu()?.path;
+        const qs = buildQuery({
+          ouPath: effectiveOuPath,
+          ouId: input.ouId ?? (input.id !== undefined ? String(input.id) : undefined),
+          includeSubOus: input.includeSubOus,
+        });
         const data = await client.request<unknown>('GET', `/api/v1/ou/device/status${qs}`);
         return ok(await enrich(data));
       }
