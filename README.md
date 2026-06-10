@@ -96,11 +96,12 @@ Add to your MCP client config:
 
 ---
 
-## Available Tools (17 public + 11 private)
+## Available Tools (18 public + 11 private)
 
 | Tool | Description |
 |------|-------------|
 | `scout_configure` | Set, inspect, or clear Scout Board credentials at runtime |
+| `scout_context` | Set, inspect, or clear the session-level working OU default |
 | `health_check` | Ping or authenticated system status check |
 | `ou_get` | Read OUs — single, root, search, subordinates, structure, device status |
 | `ou_manage` | Add, rename, delete, move OUs; export/import OU structures |
@@ -137,6 +138,23 @@ These tools target Scout Board internal endpoints discovered from browser networ
 | `db_cleanup` | `list` | List database record counts by type for cleanup |
 | `ou_filter_manage` | `get_settings`, `list`, `set_settings`, `add`, `modify`, `delete` | Manage OU IP subnet filter rules |
 | `new_device_options` | `get`, `set` | Read or update new device enrollment options |
+
+### Working OU (session context)
+
+Set a default OU once per session and omit it from every subsequent call:
+
+```
+scout_context action=set_ou path=/Enterprise/Germany/Berlin
+→ Working OU set to "Berlin Office" (/Enterprise/Germany/Berlin)
+
+device_get mode=search searchTerm=thin*          # no ouPath needed
+ou_get mode=subordinate                          # no path needed
+device_manage action=add newDeviceName=Thin99 newDeviceMac=AA:BB:CC:DD:EE:FF
+```
+
+The working OU is session-scoped (in-memory, cleared on restart). Use `scout_context action=get_ou` to inspect the current value and `action=clear_ou` to unset it.
+
+**Tools that respect the working OU default:** `device_get mode=search`, `ou_get mode=subordinate` and `mode=device_status`, `device_manage action=add` and `action=move`.
 
 ### Destructive operation safeguards
 

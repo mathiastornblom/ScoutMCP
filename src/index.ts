@@ -11,6 +11,7 @@ import { fetch } from 'undici';
 import { loadSavedConfig, setSessionConfig, clearSessionConfig, resolveConfig } from './session.js';
 import { getClient } from './client.js';
 import { configureTool } from './tools/configure.js';
+import { contextTool } from './tools/context.js';
 import { healthCheckTool } from './tools/health.js';
 import { ouGetTool, ouManageTool } from './tools/ou.js';
 import { deviceGetTool, deviceManageTool } from './tools/device.js';
@@ -94,6 +95,7 @@ if (privateEndpointsEnabled) {
 
 const tools = [
   configureTool,
+  contextTool,
   healthCheckTool,
   ouGetTool,
   ouManageTool,

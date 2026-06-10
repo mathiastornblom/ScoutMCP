@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
+import { getWorkingOu } from '../context.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -30,7 +31,10 @@ const deviceGetSchema = z.object({
   properties: z.string().optional().describe('Comma-separated extra properties to return'),
 
   // search
-  ouPath: z.string().optional().describe('OU path to search in (required for mode=search if ouId not given)'),
+  ouPath: z
+    .string()
+    .optional()
+    .describe('OU path to search in; defaults to working OU if not provided (set via scout_context)'),
   ouId: z.string().optional().describe('OU ID to search in (required for mode=search if ouPath not given)'),
   searchTerm: z.string().optional().describe('Search term (required for mode=search)'),
   searchFields: z.string().optional().describe('Comma-separated device fields to evaluate during search'),
@@ -60,9 +64,15 @@ async function deviceGetExecute(raw: unknown): Promise<McpToolResult> {
 
       case 'search': {
         if (!input.searchTerm) return fail('searchTerm is required for mode=search');
-        if (!input.ouPath && !input.ouId) return fail('ouPath or ouId is required for mode=search');
+        const effectiveOuPath = input.ouPath ?? getWorkingOu()?.path;
+        if (!effectiveOuPath && !input.ouId) {
+          return fail(
+            'ouPath or ouId is required for mode=search. ' +
+              'Set a working OU with scout_context action=set_ou to use it as default.',
+          );
+        }
         const qs = buildQuery({
-          ouPath: input.ouPath,
+          ouPath: effectiveOuPath,
           ouId: input.ouId,
           searchTerm: input.searchTerm,
           searchFields: input.searchFields,
@@ -121,7 +131,10 @@ const deviceManageSchema = z.object({
   clientid: z.string().optional().describe('Client identifier (UUID)'),
 
   // add
-  destoupath: z.string().optional().describe('Destination OU path (add/move)'),
+  destoupath: z
+    .string()
+    .optional()
+    .describe('Destination OU path (add/move); defaults to working OU if not provided (set via scout_context)'),
   destouid: z.number().int().optional().describe('Destination OU ID (add/move)'),
   newDeviceName: z.string().optional().describe('Name for the new device (action=add)'),
   newDeviceMac: z.string().optional().describe('MAC address for the new device (action=add)'),
@@ -152,8 +165,13 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
     );
   }
 
-  if ((input.action === 'add' || input.action === 'move') && input.destoupath) {
-    const err = assertTestScope(input.destoupath);
+  // Resolve effective destination: explicit arg takes priority, then working OU.
+  const effectiveDest =
+    input.destoupath ??
+    ((input.action === 'add' || input.action === 'move') ? getWorkingOu()?.path : undefined);
+
+  if ((input.action === 'add' || input.action === 'move') && effectiveDest) {
+    const err = assertTestScope(effectiveDest);
     if (err) return fail(err);
   }
 
@@ -163,7 +181,7 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
         if (!input.newDeviceName) return fail('newDeviceName is required for action=add');
         if (!input.newDeviceMac) return fail('newDeviceMac is required for action=add');
         const qs = buildQuery({
-          destoupath: input.destoupath,
+          destoupath: effectiveDest,
           destouid: input.destouid,
           name: input.newDeviceName,
           mac: input.newDeviceMac,
@@ -202,7 +220,7 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           mac: input.mac,
           id: input.id,
           clientid: input.clientid,
-          destoupath: input.destoupath,
+          destoupath: effectiveDest,
           destouid: input.destouid,
         });
         const data = await client.request<unknown>('PUT', `/api/v1/device/move${qs}`);
