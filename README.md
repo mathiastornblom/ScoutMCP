@@ -96,6 +96,20 @@ Add to your MCP client config:
 
 ---
 
+## Resources
+
+Scout MCP exposes browsable MCP Resources so AI clients can read Scout Board context without consuming tool calls. Resources are built from the live connected server at query time.
+
+| Resource URI | Type | Description |
+|-------------|------|-------------|
+| `scout://ou-tree` | Concrete | Full OU hierarchy snapshot (names, paths, IDs) |
+| `scout://ou/<path>` | Concrete (enumerated) | Single OU details — one resource per OU in your tree |
+| `scout://devices/{+ouPath}` | Template | Devices in an OU. Example: `scout://devices/Enterprise/Germany/Berlin`. Add `?includeSubOus=true` to include sub-OUs. |
+
+**Example efficiency gain:** Instead of calling `ou_get(mode=structure)` to understand your environment, an AI client reads `scout://ou-tree` once as ambient context — zero tool slots consumed.
+
+---
+
 ## Available Tools (17 public + 11 private)
 
 | Tool | Description |
@@ -172,6 +186,7 @@ src/
   client.ts       ScoutClient — JWT cookie auth, undici TLS control
   session.ts      Runtime credential store and ~/.scout-mcp.json persistence
   types.ts        Shared helpers: ok(), fail(), buildQuery()
+  resources.ts    MCP Resources — live OU tree + device inventory
   tools/          One file per functional group (17 public + 11 private endpoint tools)
 catalog/
   server.yaml     Docker MCP Registry submission metadata

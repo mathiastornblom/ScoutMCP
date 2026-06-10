@@ -5,7 +5,11 @@ import {
   CallToolRequestSchema,
   CallToolResult,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { listResources, listResourceTemplates, readResource } from './resources.js';
 
 import { fetch } from 'undici';
 import { loadSavedConfig, setSessionConfig, clearSessionConfig, resolveConfig } from './session.js';
@@ -132,7 +136,7 @@ const toolMap = new Map(tools.map((t) => [t.name, t]));
 
 const server = new Server(
   { name: 'scout-mcp-server', version: '1.0.0' },
-  { capabilities: { tools: {} } },
+  { capabilities: { tools: {}, resources: {} } },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, () => ({
@@ -160,6 +164,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
     const message = err instanceof Error ? err.message : 'An unexpected error occurred';
     return { content: [{ type: 'text', text: message }], isError: true };
   }
+});
+
+server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+  resources: await listResources(),
+}));
+
+server.setRequestHandler(ListResourceTemplatesRequestSchema, () => ({
+  resourceTemplates: listResourceTemplates(),
+}));
+
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const { uri } = request.params;
+  const content = await readResource(uri);
+  return { contents: [content] };
 });
 
 const transport = new StdioServerTransport();

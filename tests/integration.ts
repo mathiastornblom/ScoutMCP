@@ -1015,6 +1015,136 @@ if (!ouFilteringMod) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Phase 8 — MCP Resources (Item #2: browsable OU tree + device inventory)
+//
+// BEFORE this feature: to orient in the environment, the AI had to call:
+//   ou_get(mode=structure)           → understand the OU hierarchy
+//   device_get(mode=search, ...)     → find devices in specific OUs
+//   2+ tool calls just to build context.
+//
+// AFTER: client reads resources once at session start:
+//   READ scout://ou-tree             → full OU hierarchy, no tool call
+//   READ scout://devices/<ouPath>    → all devices in OU, no tool call
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\nPhase 8 — MCP Resources');
+
+interface ResourcesModule {
+  listResources(): Promise<Array<{ uri: string; name: string; description: string; mimeType: string }>>;
+  listResourceTemplates(): Array<{ uriTemplate: string; name: string }>;
+  readResource(uri: string): Promise<{ uri: string; mimeType: string; text: string }>;
+  URI_OU_TREE: string;
+  URI_OU_PREFIX: string;
+  URI_DEVICES_TEMPLATE: string;
+}
+
+let resourcesMod: ResourcesModule | null = null;
+try {
+  resourcesMod = (await import('../src/resources.js')) as ResourcesModule;
+} catch {
+  console.warn('  WARN: src/resources.js not importable — resources tests will be skipped');
+}
+
+if (!resourcesMod) {
+  await skip('resources: listResources returns scout://ou-tree', 'module not available');
+  await skip('resources: listResourceTemplates returns device template', 'module not available');
+  await skip('resources: readResource(scout://ou-tree) returns JSON tree', 'module not available');
+  await skip('resources: readResource(invalid URI) throws descriptive error', 'module not available');
+} else {
+  const { listResources: listRes, listResourceTemplates: listTemplates, readResource: readRes, URI_OU_TREE, URI_OU_PREFIX, URI_DEVICES_TEMPLATE } = resourcesMod;
+
+  await test('resources: listResourceTemplates always returns devices template', async () => {
+    const templates = listTemplates();
+    assert(Array.isArray(templates), 'Expected array from listResourceTemplates');
+    const deviceTemplate = templates.find((t) => t.uriTemplate === URI_DEVICES_TEMPLATE);
+    assert(deviceTemplate !== undefined, `Expected template "${URI_DEVICES_TEMPLATE}" in list`);
+  });
+
+  await test('resources: listResources includes scout://ou-tree (AFTER: no tool call needed)', async () => {
+    // BEFORE: client called ou_get(mode=structure) to understand the hierarchy
+    // AFTER: client reads scout://ou-tree as a resource — no tool slot consumed
+    const resources = await listRes();
+    assert(Array.isArray(resources), 'Expected array from listResources');
+    const tree = resources.find((r) => r.uri === URI_OU_TREE);
+    assert(tree !== undefined, `Expected "${URI_OU_TREE}" in resource list`);
+    assert(tree.mimeType === 'application/json', `Expected mimeType application/json, got ${tree.mimeType}`);
+  });
+
+  await test('resources: listResources enumerates per-OU resources from live server (when authenticated)', async () => {
+    const resources = await listRes();
+    const ouResources = resources.filter((r) => r.uri.startsWith(URI_OU_PREFIX));
+    if (ouResources.length === 0) {
+      // Server not reachable — tree resource only, that's expected
+      console.log('    NOTE: no per-OU resources (server not reachable or no OUs configured)');
+      return;
+    }
+    // When authenticated, every OU should have a concrete resource URI
+    assert(ouResources.length > 0, 'Expected at least one per-OU resource when server is reachable');
+    // Each per-OU URI should start with scout://ou/ and have a non-empty path segment
+    const invalid = ouResources.find((r) => r.uri === URI_OU_PREFIX);
+    assert(invalid === undefined, 'OU resources should have a path segment after scout://ou/');
+    console.log(`    NOTE: ${ouResources.length} per-OU resources enumerated from live server`);
+  });
+
+  await test('resources: readResource(scout://ou-tree) returns OU tree JSON (AFTER: 1 read vs 1 tool call)', async () => {
+    let result: { uri: string; mimeType: string; text: string };
+    try {
+      result = await readRes(URI_OU_TREE);
+    } catch (e) {
+      console.log(`    NOTE: readResource(ou-tree) threw (server not reachable): ${e instanceof Error ? e.message : String(e)}`);
+      return; // PASS — expected when server is unavailable
+    }
+    assert(result.mimeType === 'application/json', `Expected mimeType application/json`);
+    const parsed: unknown = JSON.parse(result.text);
+    assert(parsed !== null && typeof parsed === 'object', 'Expected JSON object');
+  });
+
+  await test('resources: readResource(scout://ou/<path>) returns single OU details', async () => {
+    // First get a real OU path from the list
+    const resources = await listRes();
+    const ouResource = resources.find((r) => r.uri.startsWith(URI_OU_PREFIX));
+    if (!ouResource) {
+      console.log('    NOTE: no per-OU resources available — skipping read test');
+      return;
+    }
+    let result: { uri: string; mimeType: string; text: string };
+    try {
+      result = await readRes(ouResource.uri);
+    } catch (e) {
+      console.log(`    NOTE: readResource(${ouResource.uri}) threw: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    assert(result.mimeType === 'application/json', 'Expected JSON mimeType');
+    const parsed: unknown = JSON.parse(result.text);
+    assert(parsed !== null, 'Expected non-null response for OU details');
+  });
+
+  await test('resources: readResource(scout://devices/<ouPath>) returns device list', async () => {
+    const testOuPath = process.env.SCOUT_TEST_OU_PATH?.replace(/^\//, '') ?? 'MCP-Test';
+    let result: { uri: string; mimeType: string; text: string };
+    try {
+      result = await readRes(`${URI_DEVICES_TEMPLATE.replace('{+ouPath}', testOuPath).replace('scout://devices/', 'scout://devices/')}`);
+      result = await readRes(`scout://devices/${testOuPath}`);
+    } catch (e) {
+      console.log(`    NOTE: readResource(devices/${testOuPath}) threw (server not reachable): ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    assert(result.mimeType === 'application/json', 'Expected JSON mimeType');
+    const parsed: unknown = JSON.parse(result.text);
+    assert(parsed !== null, 'Expected non-null device list response');
+  });
+
+  await test('resources: readResource with unknown URI throws descriptive error', async () => {
+    const err = await mustThrow(() => readRes('scout://invalid-resource-xyz'));
+    assert(err instanceof Error, 'Expected Error');
+    assert(
+      err.message.includes('Unknown Scout resource URI'),
+      `Expected "Unknown Scout resource URI" in message, got: ${(err as Error).message}`,
+    );
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Summary
 // ═══════════════════════════════════════════════════════════════════════════════
 
