@@ -107,7 +107,7 @@ Add to your MCP client config:
 | `device_get` | Get device info, search in OU, runtime status, config origins |
 | `device_manage` | Add, rename, delete, move devices |
 | `device_command` | Send commands to devices/OUs/groups (restart, update, factory reset, etc.) |
-| `device_diagnostics` | Async diagnostics: trigger → poll → download URL |
+| `device_diagnostics` | Async diagnostics: `run` (auto trigger+poll+download URL with log progress), or manual `trigger` → `poll` → `download_url` |
 | `app_list` | List base or OU-scoped applications |
 | `app_manage` | Create, delete, copy, move applications; manage inheritance |
 | `config_get` | Read configuration sections for base, OU, or device scope |
@@ -172,6 +172,7 @@ src/
   client.ts       ScoutClient — JWT cookie auth, undici TLS control
   session.ts      Runtime credential store and ~/.scout-mcp.json persistence
   types.ts        Shared helpers: ok(), fail(), buildQuery()
+  progress.ts     ProgressReporter — wires server.sendLoggingMessage into long-running tools
   tools/          One file per functional group (17 public + 11 private endpoint tools)
 catalog/
   server.yaml     Docker MCP Registry submission metadata

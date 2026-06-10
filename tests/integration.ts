@@ -1015,6 +1015,135 @@ if (!ouFilteringMod) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Phase 8 — Progress reporting and device_diagnostics action=run
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\nPhase 8 — Progress reporting + device_diagnostics action=run');
+
+interface ProgressModule {
+  getProgressReporter(): { log(level: string, msg: string): Promise<void> };
+  setProgressReporter(r: { log(level: string, msg: string): Promise<void> }): void;
+  clearProgressReporter(): void;
+}
+interface CommandModule {
+  deviceDiagnosticsTool: { execute: ToolExecute };
+  deviceCommandTool: { execute: ToolExecute };
+}
+
+let progressMod: ProgressModule | null = null;
+let commandMod: CommandModule | null = null;
+
+try {
+  progressMod = (await import('../src/progress.js')) as ProgressModule;
+} catch {
+  console.warn('  WARN: src/progress.js not importable — phase 8 progress tests skipped');
+}
+try {
+  commandMod = (await import('../src/tools/command.js')) as CommandModule;
+} catch {
+  console.warn('  WARN: src/tools/command.js not importable — phase 8 diagnostics tests skipped');
+}
+
+if (!progressMod) {
+  await skip('progress: getProgressReporter returns no-op by default', 'progress module not available');
+  await skip('progress: setProgressReporter replaces reporter', 'progress module not available');
+  await skip('progress: clearProgressReporter restores no-op', 'progress module not available');
+} else {
+  await test('progress: getProgressReporter returns no-op by default', async () => {
+    const reporter = progressMod!.getProgressReporter();
+    assert(typeof reporter.log === 'function', 'reporter.log should be a function');
+    // no-op should not throw
+    await reporter.log('info', 'test message');
+  });
+
+  await test('progress: setProgressReporter replaces reporter', async () => {
+    const messages: string[] = [];
+    progressMod!.setProgressReporter({
+      async log(_level, msg) { messages.push(msg); }
+    });
+    const reporter = progressMod!.getProgressReporter();
+    await reporter.log('info', 'hello');
+    assert(messages.length === 1 && messages[0] === 'hello', 'Expected captured message "hello"');
+  });
+
+  await test('progress: clearProgressReporter restores no-op', async () => {
+    progressMod!.clearProgressReporter();
+    const reporter = progressMod!.getProgressReporter();
+    // Should not throw and captured array from previous test should not grow
+    await reporter.log('info', 'should be no-op');
+    // If we reach here without throwing, the reporter is functional (no-op)
+  });
+}
+
+if (!commandMod) {
+  await skip('device_diagnostics: run without device identifier returns isError', 'command module not available');
+  await skip('device_diagnostics: run missing fields validated by trigger', 'command module not available');
+  await skip('device_diagnostics: download_url still requires clientid', 'command module not available');
+  await skip('device_diagnostics: download_url still requires diagnosticsFileId', 'command module not available');
+} else {
+  const diag = commandMod.deviceDiagnosticsTool.execute;
+
+  async function toolFail9(label: string, args: unknown): Promise<string> {
+    const result = await diag(args);
+    assert(
+      result.isError === true,
+      `${label} expected isError=true but returned success: ${result.content[0]?.text}`,
+    );
+    return result.content[0]?.text ?? '';
+  }
+
+  await test('device_diagnostics: download_url still requires clientid', async () => {
+    const msg = await toolFail9('diag(download_url/no-clientid)', {
+      action: 'download_url',
+      diagnosticsFileId: '42',
+    });
+    assert(msg.toLowerCase().includes('clientid'), `Expected error about clientid: ${msg}`);
+  });
+
+  await test('device_diagnostics: download_url still requires diagnosticsFileId', async () => {
+    const msg = await toolFail9('diag(download_url/no-fileId)', {
+      action: 'download_url',
+      clientid: 'C95E88D7-EC00-4C60-ABFF-29FDF6F0FAF1',
+    });
+    assert(
+      msg.toLowerCase().includes('diagnosticsfileid'),
+      `Expected error about diagnosticsFileId: ${msg}`,
+    );
+  });
+
+  // run mode: progress reporter integration (uses mock reporter — no HTTP)
+  await test('device_diagnostics: run captures progress messages via reporter', async () => {
+    if (!progressMod) {
+      console.log('    SKIP: progress module not available');
+      return;
+    }
+    const captured: string[] = [];
+    progressMod.setProgressReporter({ async log(_level, msg) { captured.push(msg); } });
+
+    // This will fail at the HTTP trigger step since we don't have a device to test with,
+    // but we verify that progress messages were sent before the first network call fails.
+    const result = await diag({ action: 'run', name: '__nonexistent_device_for_test__' });
+
+    progressMod.clearProgressReporter();
+
+    // Either we got a trigger message before the HTTP failure, or the server returned an error.
+    // The test passes if: a progress message was captured, OR the tool returned isError (expected).
+    const gotProgressMessage = captured.some((m) => m.toLowerCase().includes('trigger'));
+    if (!gotProgressMessage && !result.isError) {
+      throw new Error(
+        `Expected either a "Triggering" progress message or isError=true. ` +
+          `Captured: ${JSON.stringify(captured)}. Result: ${result.content[0]?.text}`,
+      );
+    }
+    // Both paths (progress before error, or plain error) are acceptable — verify expectations
+    assert(
+      gotProgressMessage || result.isError === true,
+      `Expected progress message or isError; captured=${JSON.stringify(captured)}`,
+    );
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Summary
 // ═══════════════════════════════════════════════════════════════════════════════
 

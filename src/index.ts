@@ -8,6 +8,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { fetch } from 'undici';
+import { setProgressReporter, clearProgressReporter } from './progress.js';
 import { loadSavedConfig, setSessionConfig, clearSessionConfig, resolveConfig } from './session.js';
 import { getClient } from './client.js';
 import { configureTool } from './tools/configure.js';
@@ -152,6 +153,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
       isError: true,
     };
   }
+
+  setProgressReporter({
+    async log(level, message) {
+      try {
+        await server.sendLoggingMessage({ level, data: message });
+      } catch {
+        // Best-effort: if the notification fails (transport not ready) continue silently
+      }
+    },
+  });
+
   try {
     const result = await tool.execute(args ?? {});
     return result as CallToolResult;
@@ -159,6 +171,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
     // Never forward stack traces or internal paths to the MCP client
     const message = err instanceof Error ? err.message : 'An unexpected error occurred';
     return { content: [{ type: 'text', text: message }], isError: true };
+  } finally {
+    clearProgressReporter();
   }
 });
 
