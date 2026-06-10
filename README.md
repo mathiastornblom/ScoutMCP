@@ -194,6 +194,19 @@ device_manage action=add newDeviceName=Thin99 newDeviceMac=AA:BB:CC:DD:EE:FF
 The working OU is session-scoped (in-memory, cleared on restart). Use `scout_context action=get_ou` to inspect the current value and `action=clear_ou` to unset it.
 
 **Tools that respect the working OU default:** `device_get mode=search`, `ou_get mode=subordinate` and `mode=device_status`, `device_manage action=add` and `action=move`.
+### MCP Prompts (workflow templates)
+
+Five pre-built workflow templates are exposed via the MCP `prompts/list` and `prompts/get` endpoints. Clients that support MCP prompts (e.g. Claude Desktop) can invoke them by name:
+
+| Prompt | Description | Key arguments |
+|--------|-------------|---------------|
+| `scout_connect` | Connect to a server and prepare the session | `base_url`, `username`, `ou_path` (opt) |
+| `onboard_device` | Add a new device to Scout Board | `device_name`, `mac_address`, `ou_path` (opt) |
+| `audit_ou` | List and summarise device health in an OU | `ou_path` (opt), `include_sub_ous` (opt) |
+| `mass_command` | Send a command to all devices in an OU | `command`, `ou_path` (opt), `confirm` (opt) |
+| `move_devices` | Find devices by name and move them | `search_term`, `target_ou`, `source_ou` (opt) |
+
+Each prompt resolves any missing OU arguments from the working OU (set with `scout_context`) and includes a preview/confirmation step before destructive operations.
 
 ### Destructive operation safeguards
 

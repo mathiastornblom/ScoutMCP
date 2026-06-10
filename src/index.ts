@@ -39,6 +39,7 @@ import { licenseManageTool } from './tools/license.js';
 import { adminManageTool } from './tools/admins.js';
 import { serverInstancesTool } from './tools/server_instances.js';
 import { dbCleanupTool } from './tools/db_cleanup.js';
+import { registerPrompts } from './prompts.js';
 
 // Load persisted credentials from ~/.scout-mcp.json if present
 const savedConfig = loadSavedConfig();
@@ -143,7 +144,10 @@ const toolMap = new Map(tools.map((t) => [t.name, t]));
 const server = new Server(
   { name: 'scout-mcp-server', version: '1.0.0' },
   { capabilities: { tools: {}, resources: {} } },
+  { capabilities: { tools: {}, prompts: {} } },
 );
+
+registerPrompts(server);
 
 server.setRequestHandler(ListToolsRequestSchema, () => ({
   tools: tools.map(({ name, description, inputSchema }) => ({

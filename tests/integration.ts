@@ -1823,6 +1823,157 @@ if (!ctxMod || !ctxToolMod) {
     );
     const ou = (data as Record<string, unknown>)['workingOu'];
     assert(ou !== null && typeof ou === 'object', 'workingOu should be set in response');
+// Phase 13 — MCP Prompts
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\nPhase 13 — MCP Prompts');
+
+interface PromptsModule {
+  registerPrompts(server: unknown): void;
+}
+// Direct import of the prompts module for unit-level testing of buildMessage internals.
+// We test via a minimal fake server that captures registered handlers.
+let promptsMod: PromptsModule | null = null;
+try {
+  promptsMod = (await import('../src/prompts.js')) as PromptsModule;
+} catch {
+  console.warn('  WARN: src/prompts.js not importable — prompts tests will be skipped');
+}
+
+// Minimal fake server that records registered handlers so we can invoke them directly.
+interface FakeHandler { schema: { method?: { value?: string } }; handler: (req: unknown) => unknown }
+function makeFakeServer(): { handlers: FakeHandler[]; setRequestHandler(schema: unknown, fn: (r: unknown) => unknown): void } {
+  const handlers: FakeHandler[] = [];
+  return {
+    handlers,
+    setRequestHandler(schema: unknown, fn: (r: unknown) => unknown) {
+      handlers.push({ schema: schema as FakeHandler['schema'], handler: fn });
+    },
+  };
+}
+
+if (!promptsMod) {
+  for (const name of [
+    'registerPrompts registers list and get handlers',
+    'prompts/list returns all 5 prompts with required fields',
+    'prompts/get scout_connect returns message with steps',
+    'prompts/get onboard_device interpolates device_name and mac_address',
+    'prompts/get audit_ou includes ou_path when provided',
+    'prompts/get mass_command includes warning for factoryreset',
+    'prompts/get move_devices includes source and target OUs',
+    'prompts/get unknown name throws',
+  ]) {
+    await skip(name, 'prompts module not importable');
+  }
+} else {
+  const { registerPrompts } = promptsMod;
+
+  const fakeServer = makeFakeServer();
+  registerPrompts(fakeServer as unknown as Parameters<typeof registerPrompts>[0]);
+
+  // Find list and get handlers by inspecting schema method values
+  const listHandler = fakeServer.handlers.find((h) =>
+    JSON.stringify(h.schema).includes('prompts/list'),
+  );
+  const getHandler = fakeServer.handlers.find((h) =>
+    JSON.stringify(h.schema).includes('prompts/get'),
+  );
+
+  await test('registerPrompts registers list and get handlers', async () => {
+    assert(listHandler !== undefined, 'prompts/list handler should be registered');
+    assert(getHandler !== undefined, 'prompts/get handler should be registered');
+  });
+
+  await test('prompts/list returns all 5 prompts with required fields', async () => {
+    if (!listHandler) return;
+    const result = listHandler.handler({}) as { prompts: Array<Record<string, unknown>> };
+    assert(Array.isArray(result.prompts), 'prompts should be an array');
+    assert(result.prompts.length === 5, `Expected 5 prompts, got ${result.prompts.length}`);
+    const names = result.prompts.map((p) => p['name']);
+    for (const expected of ['scout_connect', 'onboard_device', 'audit_ou', 'mass_command', 'move_devices']) {
+      assert(names.includes(expected), `Missing prompt: ${expected}`);
+    }
+    for (const p of result.prompts) {
+      assert(typeof p['name'] === 'string', 'Prompt name must be a string');
+      assert(typeof p['description'] === 'string', 'Prompt description must be a string');
+      assert(Array.isArray(p['arguments']), 'Prompt arguments must be an array');
+    }
+  });
+
+  await test('prompts/get scout_connect returns message with credential steps', async () => {
+    if (!getHandler) return;
+    const result = getHandler.handler({
+      params: { name: 'scout_connect', arguments: { base_url: 'https://scout.example.com:22160', username: 'admin@example.com' } },
+    }) as { messages: Array<{ role: string; content: { type: string; text: string } }> };
+    assert(Array.isArray(result.messages) && result.messages.length > 0, 'Should return at least one message');
+    const text = result.messages[0]!.content.text;
+    assert(text.includes('scout.example.com'), 'Message should include the base_url');
+    assert(text.includes('admin@example.com'), 'Message should include the username');
+    assert(text.includes('scout_configure'), 'Message should mention scout_configure');
+    assert(text.includes('health_check'), 'Message should mention health_check');
+  });
+
+  await test('prompts/get onboard_device interpolates device_name and mac_address', async () => {
+    if (!getHandler) return;
+    const result = getHandler.handler({
+      params: {
+        name: 'onboard_device',
+        arguments: { device_name: 'ThinClient01', mac_address: 'AA:BB:CC:DD:EE:FF', ou_path: '/Enterprise/Test' },
+      },
+    }) as { messages: Array<{ content: { text: string } }> };
+    const text = result.messages[0]!.content.text;
+    assert(text.includes('ThinClient01'), 'Message should include device_name');
+    assert(text.includes('AA:BB:CC:DD:EE:FF'), 'Message should include mac_address');
+    assert(text.includes('/Enterprise/Test'), 'Message should include ou_path');
+    assert(text.includes('device_manage'), 'Message should mention device_manage');
+  });
+
+  await test('prompts/get audit_ou includes ou_path when provided', async () => {
+    if (!getHandler) return;
+    const result = getHandler.handler({
+      params: { name: 'audit_ou', arguments: { ou_path: '/Enterprise/Germany', include_sub_ous: 'true' } },
+    }) as { messages: Array<{ content: { text: string } }> };
+    const text = result.messages[0]!.content.text;
+    assert(text.includes('/Enterprise/Germany'), 'Message should include ou_path');
+    assert(text.includes('ou_get'), 'Message should mention ou_get');
+    assert(text.includes('device_status'), 'Message should include device_status mode');
+  });
+
+  await test('prompts/get mass_command includes destructive warning for factoryreset', async () => {
+    if (!getHandler) return;
+    const result = getHandler.handler({
+      params: { name: 'mass_command', arguments: { command: 'factoryreset', ou_path: '/Enterprise/Test' } },
+    }) as { messages: Array<{ content: { text: string } }> };
+    const text = result.messages[0]!.content.text;
+    assert(text.includes('factoryreset') || text.includes('FACTORYRESET'), 'Message should include command name');
+    assert(text.includes('destructive') || text.includes('⚠'), 'Message should include a safety warning');
+    assert(text.includes('device_command'), 'Message should mention device_command');
+  });
+
+  await test('prompts/get move_devices includes source and target OUs', async () => {
+    if (!getHandler) return;
+    const result = getHandler.handler({
+      params: {
+        name: 'move_devices',
+        arguments: { search_term: 'thin', source_ou: '/Enterprise/Old', target_ou: '/Enterprise/New' },
+      },
+    }) as { messages: Array<{ content: { text: string } }> };
+    const text = result.messages[0]!.content.text;
+    assert(text.includes('thin'), 'Message should include search_term');
+    assert(text.includes('/Enterprise/Old'), 'Message should include source_ou');
+    assert(text.includes('/Enterprise/New'), 'Message should include target_ou');
+    assert(text.includes('device_manage'), 'Message should mention device_manage');
+  });
+
+  await test('prompts/get throws on unknown prompt name', async () => {
+    if (!getHandler) return;
+    let threw = false;
+    try {
+      getHandler.handler({ params: { name: 'nonexistent_prompt', arguments: {} } });
+    } catch {
+      threw = true;
+    }
+    assert(threw, 'Should throw for unknown prompt name');
   });
 }
 
