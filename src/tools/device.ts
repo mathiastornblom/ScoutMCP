@@ -9,6 +9,24 @@ import { getWorkingOu } from '../context.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
+type DeviceRecord = Record<string, unknown>;
+
+/** Extract the flat device array from a Scout search response. */
+function extractSearchDevices(raw: unknown): DeviceRecord[] {
+  if (!raw || typeof raw !== 'object') return [];
+  const r = raw as Record<string, unknown>;
+  const response = r['response'];
+  if (response && typeof response === 'object') {
+    const status = (response as Record<string, unknown>)['status'];
+    if (status && typeof status === 'object') {
+      const msg = (status as Record<string, unknown>)['msg'];
+      if (Array.isArray(msg)) return msg as DeviceRecord[];
+    }
+  }
+  if (Array.isArray(r)) return r as DeviceRecord[];
+  return [];
+}
+
 function assertTestScope(ouPath: string): string | null {
   if (process.env.SCOUT_ENV !== 'test') return null;
   const testRoot = process.env.SCOUT_TEST_OU_PATH;
@@ -22,8 +40,10 @@ function assertTestScope(ouPath: string): string | null {
 // ── device_get ────────────────────────────────────────────────────────────────
 
 const deviceGetSchema = z.object({
-  mode: z.enum(['get', 'search', 'status', 'configOrigins']).describe(
-    'get=single device by identifier; search=devices in OU; status=device runtime status; configOrigins=config inheritance origins',
+  mode: z.enum(['get', 'search', 'search_with_config', 'status', 'configOrigins']).describe(
+    'get=single device by identifier; search=devices in OU; ' +
+    'search_with_config=search + fetch a config section for each result in one call (eliminates N+1 round-trips); ' +
+    'status=device runtime status; configOrigins=config inheritance origins',
   ),
 
   // Single device identification (get / status / configOrigins)
@@ -31,9 +51,9 @@ const deviceGetSchema = z.object({
   mac: z.string().optional().describe('Device MAC address'),
   id: z.string().optional().describe('Device numeric ID'),
   clientid: z.string().optional().describe('Client identifier (UUID)'),
-  properties: z.string().optional().describe('Comma-separated extra properties to return'),
+  properties: z.string().optional().describe('Comma-separated extra properties to return (mode=get only)'),
 
-  // search — OU can be identified by name/ref, explicit path, explicit id, or working OU context
+  // search / search_with_config — OU can be identified by name/ref, explicit path, explicit id, or working OU context
   ouRef: z.string().optional().describe(
     'OU to search in — name, partial name, full path, or numeric ID. ' +
     'Resolved automatically. Preferred over ouPath/ouId for natural-language requests.',
@@ -42,10 +62,16 @@ const deviceGetSchema = z.object({
     'OU path to search in; defaults to working OU if not provided (set via scout_context)',
   ),
   ouId: z.string().optional().describe('OU ID to search in — use ouRef for name-based lookup'),
-  searchTerm: z.string().optional().describe('Search term (required for mode=search)'),
+  searchTerm: z.string().optional().describe('Search term (required for mode=search and search_with_config)'),
   searchFields: z.string().optional().describe('Comma-separated device fields to evaluate during search'),
   includeSubOus: z.boolean().optional().describe('Include devices from sub-OUs in search'),
   limit: z.number().int().min(1).max(10000).optional().describe('Max results for search (default 100, max 10000)'),
+
+  // search_with_config only
+  configSection: z.string().optional().describe(
+    'Config section to fetch for each device (required for mode=search_with_config). ' +
+    'E.g. firmware, network/lan, general, desktop/language',
+  ),
 });
 
 type DeviceGetInput = z.infer<typeof deviceGetSchema>;
@@ -88,17 +114,81 @@ async function deviceGetExecute(raw: unknown): Promise<McpToolResult> {
           );
         }
 
+        // Note: `properties` is intentionally excluded — the search endpoint
+        // ignores it and returns empty objects when it is present.
         const qs = buildQuery({
           ouPath: searchOuPath,
           ouId: searchOuId,
           searchTerm: input.searchTerm,
           searchFields: input.searchFields,
-          properties: input.properties,
           includeSubOus: input.includeSubOus,
           limit: input.limit,
         });
         const data = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
         return ok(await enrich(data));
+      }
+
+      case 'search_with_config': {
+        if (!input.searchTerm) return fail('searchTerm is required for mode=search_with_config');
+        if (!input.configSection) return fail('configSection is required for mode=search_with_config');
+
+        let searchOuPath = input.ouPath ?? getWorkingOu()?.path;
+        let searchOuId = input.ouId;
+
+        if (input.ouRef !== undefined) {
+          const match = await resolveOuRef(input.ouRef);
+          searchOuId = String(match.ouid);
+          searchOuPath = undefined;
+        }
+
+        if (!searchOuPath && !searchOuId) {
+          return fail(
+            'ouPath, ouId, or ouRef is required for mode=search_with_config. ' +
+            'Set a working OU with scout_context action=set_ou to use it as default.',
+          );
+        }
+
+        const searchQs = buildQuery({
+          ouPath: searchOuPath,
+          ouId: searchOuId,
+          searchTerm: input.searchTerm,
+          searchFields: input.searchFields,
+          includeSubOus: input.includeSubOus,
+          limit: input.limit,
+        });
+        const searchData = await client.request<unknown>('GET', `/api/v1/device/search${searchQs}`);
+        const devices = extractSearchDevices(searchData);
+
+        if (devices.length === 0) {
+          return ok({ count: 0, section: input.configSection, devices: [] });
+        }
+
+        // Fan out config fetches in parallel — one request per device
+        const section = input.configSection;
+        const results = await Promise.all(
+          devices.map(async (device) => {
+            const devId = (device['DeviceID'] ?? device['id']) as string | number | undefined;
+            const enrichedDevice = await enrich(device);
+            if (devId === undefined) {
+              return { device: enrichedDevice, config: null, configError: 'no DeviceID in search result' };
+            }
+            try {
+              const config = await client.request<unknown>(
+                'GET',
+                `/api/v1/configuration/device/${section}${buildQuery({ id: String(devId) })}`,
+              );
+              return { device: enrichedDevice, config };
+            } catch (err) {
+              return {
+                device: enrichedDevice,
+                config: null,
+                configError: err instanceof Error ? err.message : String(err),
+              };
+            }
+          }),
+        );
+
+        return ok({ count: results.length, section, devices: results });
       }
 
       case 'status': {
@@ -139,8 +229,11 @@ async function deviceGetExecute(raw: unknown): Promise<McpToolResult> {
 export const deviceGetTool = {
   name: 'device_get',
   description:
-    'Read device information from Scout Board. Modes: get (single device by name/mac/id/clientid), search (list devices in an OU by search term), status (runtime status and activation state), configOrigins (configuration inheritance origins). ' +
-    'For mode=search, use ouRef to identify the OU by name instead of needing the exact path or ID.',
+    'Read device information from Scout Board. Modes: get (single device by name/mac/id/clientid), ' +
+    'search (list devices in an OU by search term), ' +
+    'search_with_config (search + fetch a config section for every matched device in one call — use this instead of search + N×config_get), ' +
+    'status (runtime status and activation state), configOrigins (configuration inheritance origins). ' +
+    'For search modes, use ouRef to identify the OU by name instead of needing the exact path or ID.',
   inputSchema: zodToJsonSchema(deviceGetSchema),
   execute: deviceGetExecute,
 };

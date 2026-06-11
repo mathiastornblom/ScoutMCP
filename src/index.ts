@@ -22,7 +22,7 @@ import { ouGetTool, ouManageTool } from './tools/ou.js';
 import { deviceGetTool, deviceManageTool } from './tools/device.js';
 import { deviceCommandTool, deviceDiagnosticsTool } from './tools/command.js';
 import { appListTool, appManageTool } from './tools/application.js';
-import { configGetTool, configUpdateTool } from './tools/config.js';
+import { configGetTool, configUpdateTool, configCompareTool } from './tools/config.js';
 import { labelManageTool } from './tools/label.js';
 import { ruleManageTool } from './tools/rule.js';
 import { scheduleManageTool } from './tools/schedule.js';
@@ -114,6 +114,7 @@ const tools = [
   appManageTool,
   configGetTool,
   configUpdateTool,
+  configCompareTool,
   labelManageTool,
   ruleManageTool,
   scheduleManageTool,
@@ -143,7 +144,7 @@ const tools = [
 const toolMap = new Map(tools.map((t) => [t.name, t]));
 
 const server = new Server(
-  { name: 'scout-mcp-server', version: '1.0.0' },
+  { name: 'scout-mcp-server', version: '1.1.0' },
   { capabilities: { tools: {}, resources: {}, prompts: {} } },
 );
 
