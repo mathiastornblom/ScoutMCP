@@ -203,8 +203,27 @@ These tools target Scout Board internal endpoints discovered from browser networ
 | `admin_manage` | `list`, `permissions`, `advanced_rights`, `configuration_rights`, `update_rights`, `add_admin`, `update_admin`, `delete_admin` | Read and write admin accounts and UI permissions |
 | `server_instances` | `list`, `modify`, `delete` | Manage Scout Board server instances |
 | `db_cleanup` | `list`, `delete` | List and delete database records by filter |
-| `ou_filter_manage` | `get_settings`, `list`, `set_settings`, `add`, `modify`, `delete` | Manage OU filter rules — **subnet filter** (IP network, e.g. `192.168.1.0/24`) and **user-defined filter** (ELUX_* property expressions with `=`, `!=`, `>`, `<`, `*` wildcard) |
+| `ou_filter_manage` | `get_settings`, `list`, `set_settings`, `add`, `modify`, `delete` | Manage OU filter rules — **subnet filter** (IP network, e.g. `192.168.1.0/24`) and **user-defined filter** (ELUX_* property expressions, see syntax below) |
 | `new_device_options` | `get`, `set` | Read or update new device enrollment options |
+
+#### User-defined filter syntax (`custom_filter`)
+
+Confirmed working against Scout 2605:
+
+| Syntax | Example |
+|--------|---------|
+| Simple match | `ELUX_HOSTNAME=NorthCreek` |
+| Prefix match (built-in) | `ELUX_HOSTNAME=North` — matches all hostnames starting with "North" |
+| AND | `ELUX_HOSTNAME=NorthCreek AND ELUX_OSVERSION=2603` |
+| OR | `ELUX_HOSTNAME=NorthCreek OR ELUX_HOSTNAME=LiveStick` |
+| Grouped with brackets | `\(ELUX_HOSTNAME=NorthCreek OR ELUX_HOSTNAME=LiveStick\) AND ELUX_OSVERSION=2603` |
+
+**Notes:**
+- `AND` / `OR` must be uppercase
+- Brackets must be escaped: `\(` and `\)`
+- The `=` operator is the documented comparison operator; `!=` `>` `<` may work but are not in the official Scout 2605 docs
+- No explicit wildcard character — prefix matching is built-in
+- Multiple filter entries targeting the same OU are ANDed at evaluation time
 
 ---
 
