@@ -21,7 +21,6 @@ If you have [Docker Desktop](https://www.docker.com/products/docker-desktop/) wi
 ### Option A — Docker (recommended)
 
 ```bash
-# Pull and run
 docker pull mcp/scout-mcp
 echo "" | docker run --rm -i \
   -e SCOUT_BASE_URL=https://your-server:22160 \
@@ -47,7 +46,7 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 }
 ```
 
-### Option B — From source
+### Option B — Build from source
 
 ```bash
 git clone https://github.com/mathiastornblom/ScoutMCP.git
@@ -74,6 +73,17 @@ Add to your MCP client config:
 }
 ```
 
+### Option C — Build Docker image from source
+
+```bash
+docker build \
+  --build-arg GIT_SHA=$(git rev-parse HEAD) \
+  --build-arg VERSION=$(node -p "require('./package.json').version") \
+  -t scout-mcp:latest \
+  -t scout-mcp:$(git rev-parse --short HEAD) \
+  .
+```
+
 ---
 
 ## Configuration
@@ -96,6 +106,20 @@ Add to your MCP client config:
 
 ---
 
+## Version check
+
+On every MCP reconnect (each `docker run` is a fresh startup) the server checks the latest GitHub release and logs to stderr:
+
+```
+[scout-mcp] Version v1.5.1 is up to date.
+# or:
+[scout-mcp] Update available: v1.5.1 → v1.6.0. Rebuild the Docker image to get the latest version.
+```
+
+No action is taken automatically — the check is informational only.
+
+---
+
 ## Resources
 
 Scout MCP exposes browsable MCP Resources so AI clients can read Scout Board context without consuming tool calls. Resources are built from the live connected server at query time.
@@ -110,8 +134,9 @@ Scout MCP exposes browsable MCP Resources so AI clients can read Scout Board con
 
 ---
 
-## Available Tools (17 public + 11 private)
-## Available Tools (18 public + 11 private)
+## Available Tools (22 public + 11 private)
+
+### Core tools
 
 | Tool | Description |
 |------|-------------|
@@ -120,23 +145,50 @@ Scout MCP exposes browsable MCP Resources so AI clients can read Scout Board con
 | `health_check` | Ping or authenticated system status check |
 | `ou_get` | Read OUs — single, root, search, subordinates, structure, device status |
 | `ou_manage` | Add, rename, delete, move OUs; export/import OU structures |
-| `device_get` | Get device info, search in OU, runtime status, config origins |
+| `device_get` | Get device info, search in OU, runtime status, config origins; **`search_with_config` mode** fetches a config section for every matched device in one call |
 | `device_manage` | Add, rename, delete, move devices |
 | `device_command` | Send commands to devices/OUs/groups (restart, update, factory reset, etc.) |
-| `device_diagnostics` | Async diagnostics: `run` (auto trigger+poll+download URL with log progress), or manual `trigger` → `poll` → `download_url` |
+| `device_diagnostics` | Async diagnostics: `run` (auto trigger→poll→download URL with progress), or manual `trigger` → `poll` → `download_url` |
 | `app_list` | List base or OU-scoped applications |
 | `app_manage` | Create, delete, copy, move applications; manage inheritance |
 | `config_get` | Read configuration sections for base, OU, or device scope |
-| `config_update` | Write configuration sections for base, OU, or device scope |
+| `config_update` | Write configuration sections for base, OU, or device scope; pass `deviceIds[]` to update multiple devices in parallel |
+| `config_compare` | Fetch a config section for a list of device IDs in parallel and group by identical config — `uniform: true` means all devices match, otherwise shows differing groups |
 | `label_manage` | CRUD labels for dynamic device configuration |
 | `rule_manage` | CRUD rules, validate expressions, manage label associations |
 | `schedule_manage` | View and manage scheduled commands for OUs and devices |
 | `maintenance_window_manage` | CRUD maintenance windows |
 | `notification_manage` | Set and delete notifications for devices, OUs, and groups |
+| `scout_update` | Check for and apply server updates |
+
+### Fleet workflow tools
+
+These tools compress common multi-step operations into a single call.
+
+| Tool | Replaces | Description |
+|------|----------|-------------|
+| `onboard_branch` | `ou_manage(add)` + `ou_filter_manage(add)` | Create a new OU branch with filters in one call |
+| `move_devices_by_filter` | `device_get(search)` + N×`device_manage(move)` | Find devices by search term and move them all to a target OU |
+| `bulk_command` | `device_get(search)` + N×`device_command` | Find devices by search term and send a command to all of them |
+
+All workflow tools support `dryRun=true` (preview without writing) and `confirm=true` (required for large/destructive operations). Max 500 devices per bulk operation.
+
+**Typical fleet ops workflow:**
+
+```
+1. device_get mode=search_with_config ouRef=NorthCreek searchTerm=2603 searchFields=osVersion configSection=firmware
+   → Returns each matched device with its firmware config in one call
+
+2. config_compare deviceIds=[48,43,55,59] section=firmware
+   → Groups devices by identical config; uniform=false shows which differ
+
+3. config_update target=device section=firmware deviceIds=[55,59] body={...}
+   → Applies the corrected config to the outlier devices in parallel
+```
 
 ### Private endpoint tools (opt-in)
 
-These tools target Scout Board internal endpoints discovered from browser network traffic — they are **not** in the public OpenAPI spec. They are **hidden by default** and must be enabled with `SCOUT_ENABLE_PRIVATE_ENDPOINTS=true`.
+These tools target Scout Board internal endpoints discovered from browser network traffic — they are **not** in the public OpenAPI spec. Enable with `SCOUT_ENABLE_PRIVATE_ENDPOINTS=true`.
 
 > **Warning:** These endpoints are unsupported and undocumented. They may change or disappear in future Scout Board releases without notice.
 
@@ -150,13 +202,13 @@ These tools target Scout Board internal endpoints discovered from browser networ
 | `license_manage` | `get`, `check_availability`, `reconfigure` | Read and reconfigure Scout Board licensing |
 | `admin_manage` | `list`, `permissions`, `advanced_rights`, `configuration_rights`, `update_rights`, `add_admin`, `update_admin`, `delete_admin` | Read and write admin accounts and UI permissions |
 | `server_instances` | `list`, `modify`, `delete` | Manage Scout Board server instances |
-| `db_cleanup` | `list` | List database record counts by type for cleanup |
-| `ou_filter_manage` | `get_settings`, `list`, `set_settings`, `add`, `modify`, `delete` | Manage OU filter rules — **subnet filter** (IP network, e.g. `192.168.1.0/24`) and **user-defined filter** (ELUX_* property expressions with `=`, `!=`, `>`, `<`, `*` wildcard) |
 | `db_cleanup` | `list`, `delete` | List and delete database records by filter |
-| `ou_filter_manage` | `get_settings`, `list`, `set_settings`, `add`, `modify`, `delete` | Manage OU IP subnet filter rules |
+| `ou_filter_manage` | `get_settings`, `list`, `set_settings`, `add`, `modify`, `delete` | Manage OU filter rules — **subnet filter** (IP network, e.g. `192.168.1.0/24`) and **user-defined filter** (ELUX_* property expressions with `=`, `!=`, `>`, `<`, `*` wildcard) |
 | `new_device_options` | `get`, `set` | Read or update new device enrollment options |
 
-### Response enrichment
+---
+
+## Response enrichment
 
 Tool responses that contain numeric OUID fields (e.g. `device_get`, `device_manage`) are automatically annotated with human-readable `_OUIDName` and `_OUIDPath` siblings, so the AI has full context without a follow-up `ou_get` call:
 
@@ -165,9 +217,12 @@ Tool responses that contain numeric OUID fields (e.g. `device_get`, `device_mana
 ```
 
 The enrichment is best-effort — if the OU tree cannot be fetched the original response is returned unchanged. The OU map is cached for 5 minutes and invalidated automatically after any `ou_manage` mutation.
-### Fuzzy suggestions on failure
 
-When an `ou_get` or `ou_manage` call returns HTTP 404 (OU not found), the error automatically includes a ranked "Did you mean?" list of similar OUs from the cached OU tree:
+---
+
+## Fuzzy suggestions on 404
+
+When an `ou_get` or `ou_manage` call returns HTTP 404, the error automatically includes a ranked "Did you mean?" list:
 
 ```
 ou_get failed: OU not found at path "/Enterprise/Germany/Berln" (HTTP 404)
@@ -177,10 +232,11 @@ Did you mean one of these OUs?
   • "Berlin HQ"      →  /Enterprise/Germany/BerlinHQ
 ```
 
-Matching ranks by: exact → prefix → substring → edit-distance similarity. The suggestion list is cached alongside the enricher OU map (5-minute TTL) and never causes a tool call to fail.
+Matching ranks by: exact → prefix → substring → edit-distance similarity. When `device_get` or `device_manage` returns 404, the error includes a hint to use `device_get mode=search` to locate the device by partial name.
 
-When a `device_get` or `device_manage` call returns 404, the error includes a hint to use `device_get mode=search` to locate the device by partial name.
-### Working OU (session context)
+---
+
+## Working OU (session context)
 
 Set a default OU once per session and omit it from every subsequent call:
 
@@ -193,12 +249,15 @@ ou_get mode=subordinate                          # no path needed
 device_manage action=add newDeviceName=Thin99 newDeviceMac=AA:BB:CC:DD:EE:FF
 ```
 
-The working OU is session-scoped (in-memory, cleared on restart). Use `scout_context action=get_ou` to inspect the current value and `action=clear_ou` to unset it.
+The working OU is session-scoped (in-memory, cleared on restart). Use `scout_context action=get_ou` to inspect and `action=clear_ou` to unset.
 
-**Tools that respect the working OU default:** `device_get mode=search`, `ou_get mode=subordinate` and `mode=device_status`, `device_manage action=add` and `action=move`.
-### MCP Prompts (workflow templates)
+**Tools that respect the working OU default:** `device_get mode=search` and `mode=search_with_config`, `ou_get mode=subordinate` and `mode=device_status`, `device_manage action=add` and `action=move`.
 
-Five pre-built workflow templates are exposed via the MCP `prompts/list` and `prompts/get` endpoints. Clients that support MCP prompts (e.g. Claude Desktop) can invoke them by name:
+---
+
+## MCP Prompts (workflow templates)
+
+Five pre-built workflow templates are exposed via the MCP `prompts/list` and `prompts/get` endpoints:
 
 | Prompt | Description | Key arguments |
 |--------|-------------|---------------|
@@ -208,11 +267,12 @@ Five pre-built workflow templates are exposed via the MCP `prompts/list` and `pr
 | `mass_command` | Send a command to all devices in an OU | `command`, `ou_path` (opt), `confirm` (opt) |
 | `move_devices` | Find devices by name and move them | `search_term`, `target_ou`, `source_ou` (opt) |
 
-Each prompt resolves any missing OU arguments from the working OU (set with `scout_context`) and includes a preview/confirmation step before destructive operations.
+---
 
-### Destructive operation safeguards
+## Destructive operation safeguards
 
 - `device_command` with `factoryreset` or `halt` requires `confirm: true`
+- `bulk_command` and `move_devices_by_filter` require `confirm: true` for operations affecting more than one device
 - When `SCOUT_ENV=test`, all write operations are restricted to `SCOUT_TEST_OU_PATH`
 
 ---
@@ -240,13 +300,16 @@ The test suite aborts immediately if `SCOUT_TEST_OU_PATH` is not set.
 
 ```
 src/
-  index.ts        MCP server entry point (stdio transport)
+  index.ts        MCP server entry point — startup auth, version check, tool dispatch
   client.ts       ScoutClient — JWT cookie auth, undici TLS control
   session.ts      Runtime credential store and ~/.scout-mcp.json persistence
   types.ts        Shared helpers: ok(), fail(), buildQuery()
+  enricher.ts     Annotates OUID fields with human-readable OU names/paths (5-min cache)
+  fuzzy.ts        Ranked "Did you mean?" suggestions on 404 responses
+  resolver.ts     Resolves OU names/partial names to IDs for natural-language inputs
   resources.ts    MCP Resources — live OU tree + device inventory
   progress.ts     ProgressReporter — wires server.sendLoggingMessage into long-running tools
-  tools/          One file per functional group (17 public + 11 private endpoint tools)
+  tools/          One file per functional group
 catalog/
   server.yaml     Docker MCP Registry submission metadata
   tools.json      Static tool list for registry build validation
