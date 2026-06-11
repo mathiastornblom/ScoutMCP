@@ -71,24 +71,39 @@ if (startupConfig) {
   );
 }
 
-// Non-blocking background update check — logs to stderr if a newer commit exists on main.
+// Non-blocking release check — compares SCOUT_VERSION (semver) against the latest GitHub release tag.
+// Runs every time the MCP server starts, i.e. on every client reconnect.
 void (async () => {
   const currentVersion = process.env.SCOUT_VERSION;
   if (!currentVersion || currentVersion === 'dev') return;
+
+  function parseVer(v: string): [number, number, number] {
+    const parts = v.replace(/^v/, '').split('.').map(Number);
+    return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+  }
+  function isNewer(latest: string, current: string): boolean {
+    const [lMaj, lMin, lPatch] = parseVer(latest);
+    const [cMaj, cMin, cPatch] = parseVer(current);
+    if (lMaj !== cMaj) return lMaj > cMaj;
+    if (lMin !== cMin) return lMin > cMin;
+    return lPatch > cPatch;
+  }
+
   try {
-    const res = await fetch('https://api.github.com/repos/mathiastornblom/ScoutMCP/commits/main', {
+    const res = await fetch('https://api.github.com/repos/mathiastornblom/ScoutMCP/releases/latest', {
       headers: { Accept: 'application/vnd.github.v3+json' },
     });
     if (!res.ok) return;
-    const data = (await res.json()) as { sha?: string };
-    const latestSha = data.sha;
-    if (!latestSha) return;
-    const upToDate = latestSha.startsWith(currentVersion) || currentVersion === latestSha;
-    if (!upToDate) {
+    const data = (await res.json()) as { tag_name?: string };
+    const latestTag = data.tag_name;
+    if (!latestTag) return;
+    if (isNewer(latestTag, currentVersion)) {
       process.stderr.write(
-        `[scout-mcp] Update available: ${currentVersion.slice(0, 7)} → ${latestSha.slice(0, 7)}. ` +
-          'Use the scout_update tool with action=apply for instructions.\n',
+        `[scout-mcp] Update available: v${currentVersion} → ${latestTag}. ` +
+          'Rebuild the Docker image to get the latest version.\n',
       );
+    } else {
+      process.stderr.write(`[scout-mcp] Version v${currentVersion} is up to date.\n`);
     }
   } catch {
     // Network errors are non-fatal — skip silently
