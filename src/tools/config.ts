@@ -78,11 +78,16 @@ const configUpdateSchema = z.object({
   // OU identification
   ouPath: z.string().optional(),
   ouId: z.number().int().optional(),
-  // Device identification
+  // Device identification (single)
   name: z.string().optional(),
   mac: z.string().optional(),
   id: z.string().optional(),
   clientid: z.string().optional(),
+  // Bulk device update — write the same body to multiple devices in parallel
+  deviceIds: z.array(z.string()).min(1).max(500).optional().describe(
+    'Apply the same config body to multiple devices by numeric ID in parallel (target=device only). ' +
+    'Returns per-device success/failure. Max 500 devices.',
+  ),
 });
 
 type ConfigUpdateInput = z.infer<typeof configUpdateSchema>;
@@ -91,6 +96,37 @@ async function configUpdateExecute(raw: unknown): Promise<McpToolResult> {
   const input = configUpdateSchema.parse(raw) as ConfigUpdateInput;
   const client = getClient();
 
+  // Bulk path: fan out one update per device ID in parallel
+  if (input.deviceIds && input.deviceIds.length > 0) {
+    if (input.target !== 'device') {
+      return fail('deviceIds is only valid when target=device');
+    }
+    const results = await Promise.all(
+      input.deviceIds.map(async (devId) => {
+        const qs = buildQuery({ id: devId });
+        try {
+          const data = await client.request<unknown>(
+            'POST',
+            `/api/v1/configuration/device/${input.section}${qs}`,
+            input.body,
+          );
+          return { id: devId, success: true, data };
+        } catch (err) {
+          return { id: devId, success: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }),
+    );
+    const successful = results.filter((r) => r.success).length;
+    return ok({
+      section: input.section,
+      total: results.length,
+      successful,
+      failed: results.length - successful,
+      results,
+    });
+  }
+
+  // Single target path
   let qs = '';
   if (input.target === 'ou') {
     qs = buildQuery({ path: input.ouPath, id: input.ouId });
@@ -115,7 +151,80 @@ export const configUpdateTool = {
   description:
     'Write configuration to Scout Board for base, OU, or device scope. ' +
     'Provide target, section, and body with the configuration fields to update. ' +
+    'For bulk device updates, pass deviceIds (array of numeric IDs) to apply the same config body to multiple devices in parallel. ' +
     'Changes take effect when the device syncs.',
   inputSchema: zodToJsonSchema(configUpdateSchema),
   execute: configUpdateExecute,
+};
+
+// ── config_compare ────────────────────────────────────────────────────────────
+
+const configCompareSchema = z.object({
+  deviceIds: z.array(z.string()).min(2).max(500).describe(
+    'Numeric device IDs to compare (get these from device_get mode=search). Min 2, max 500.',
+  ),
+  section: z.string().describe(
+    'Config section to compare across devices, e.g. firmware, network/lan, general',
+  ),
+});
+
+type ConfigCompareInput = z.infer<typeof configCompareSchema>;
+
+async function configCompareExecute(raw: unknown): Promise<McpToolResult> {
+  const input = configCompareSchema.parse(raw) as ConfigCompareInput;
+  const client = getClient();
+
+  // Fetch config for all devices in parallel
+  const fetched = await Promise.all(
+    input.deviceIds.map(async (id) => {
+      const qs = buildQuery({ id });
+      try {
+        const config = await client.request<unknown>(
+          'GET',
+          `/api/v1/configuration/device/${input.section}${qs}`,
+        );
+        return { id, config, error: null };
+      } catch (err) {
+        return { id, config: null, error: err instanceof Error ? err.message : String(err) };
+      }
+    }),
+  );
+
+  const errors = fetched.filter((r) => r.error !== null).map((r) => ({ id: r.id, error: r.error! }));
+
+  // Group devices by identical config (stable JSON key)
+  const groups = new Map<string, { config: unknown; deviceIds: string[] }>();
+  for (const r of fetched) {
+    if (r.error || r.config === null) continue;
+    const key = JSON.stringify(r.config);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.deviceIds.push(r.id);
+    } else {
+      groups.set(key, { config: r.config, deviceIds: [r.id] });
+    }
+  }
+
+  // Sort groups largest-first (majority config first)
+  const groupList = Array.from(groups.values()).sort((a, b) => b.deviceIds.length - a.deviceIds.length);
+
+  return ok({
+    section: input.section,
+    totalDevices: input.deviceIds.length,
+    groupCount: groupList.length,
+    uniform: groupList.length === 1 && errors.length === 0,
+    groups: groupList,
+    ...(errors.length > 0 ? { errors } : {}),
+  });
+}
+
+export const configCompareTool = {
+  name: 'config_compare',
+  description:
+    'Compare a config section across multiple devices in one call. ' +
+    'Fetches the given section for each device ID in parallel, then groups devices by identical config. ' +
+    'Returns: uniform=true if all devices share the same config, otherwise a list of groups with their differing configs. ' +
+    'Typical workflow: device_get mode=search → collect DeviceIDs → config_compare → config_update with deviceIds to fix outliers.',
+  inputSchema: zodToJsonSchema(configCompareSchema),
+  execute: configCompareExecute,
 };
