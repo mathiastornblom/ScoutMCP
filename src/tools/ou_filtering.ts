@@ -55,8 +55,14 @@ const filterEntrySchema = z.object({
   // User-defined filter (FilterType 2)
   custom_filter: z.string().optional().describe(
     'Property expression for a user-defined filter, matched against the device at enrollment. ' +
-    'Format: PROPERTY OPERATOR value. Supported operators: = (equals), != (not equals), ' +
-    '> (greater than), < (less than). Wildcard * is supported in values, e.g. "Hostn*". ' +
+    'Format: PROPERTY = value. ' +
+    'The = operator is the documented comparison operator. ' +
+    'Operators != > < may also work but are not in the official documentation (Scout 2605). ' +
+    'Prefix matching is built in — "ELUX_HOSTNAME=PC" matches all hostnames starting with "PC"; ' +
+    'no explicit wildcard character is needed or supported. ' +
+    'Combine multiple conditions within one expression using AND / OR (uppercase required): ' +
+    '"ELUX_HOSTNAME=PC AND ELUX_OSVERSION=2603". ' +
+    'Nest complex expressions with escaped brackets: "\\(ELUX_A=x OR ELUX_A=y\\) AND ELUX_B=z". ' +
     'Available properties: ' +
     'ELUX_IP (IP address), ELUX_MAC (MAC address), ' +
     'ELUX_NETADDR (network address, e.g. "192.168.1.0"), ' +
@@ -71,7 +77,7 @@ const filterEntrySchema = z.object({
     'ELUX_FLASHSIZE (storage in MiB), ELUX_GRAPHICS (GPU name(s)), ' +
     'ELUX_OSNAME (OS name), ELUX_OSVERSION (OS version), ' +
     'ELUX_KERNEL (kernel version), ELUX_IDF (firmware image name). ' +
-    'Multiple entries for the same OU are ANDed at evaluation time. ' +
+    'Multiple filter entries targeting the same OU are ANDed at evaluation time. ' +
     'Provide this field (instead of subnet_address) to create/update a user-defined rule.',
   ),
 
@@ -238,7 +244,10 @@ export const ouFilterManageTool = {
     'Two filter rule types are supported: ' +
     '(1) Subnet filter (FilterType 1) — matches enrolling devices by IP network; uses subnet_address e.g. "192.168.1.0/24". ' +
     '(2) User-defined filter (FilterType 2) — matches by ELUX_* device property expression; uses custom_filter e.g. "ELUX_NETADDR=192.168.1.0". ' +
-    'custom_filter format: PROPERTY OPERATOR value. Operators: = != > <. Wildcards supported, e.g. "Hostn*". ' +
+    'custom_filter format: PROPERTY = value. ' +
+    'Combine conditions with AND / OR (uppercase): "ELUX_HOSTNAME=PC AND ELUX_OSVERSION=2603". ' +
+    'Prefix matching is built in — no wildcard character needed. ' +
+    'Operators != > < may work but are not in the official Scout 2605 documentation. ' +
     'Available properties: ELUX_IP, ELUX_MAC, ELUX_NETADDR, ELUX_NETCIDR, ' +
     'ELUX_NETMASK, ELUX_BROADCAST, ELUX_DOMAIN, ELUX_HOSTNAME, ELUX_SERIAL, ELUX_DEVICETYPE, ' +
     'ELUX_PRODUCT, ELUX_SUPPLIER, ELUX_BIOS, ELUX_CPU, ELUX_MEMORY, ELUX_FLASH, ELUX_FLASHSIZE, ' +
