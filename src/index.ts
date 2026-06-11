@@ -144,7 +144,7 @@ const tools = [
 const toolMap = new Map(tools.map((t) => [t.name, t]));
 
 const server = new Server(
-  { name: 'scout-mcp-server', version: '1.1.0' },
+  { name: 'scout-mcp-server', version: '1.5.1' },
   { capabilities: { tools: {}, resources: {}, prompts: {} } },
 );
 
