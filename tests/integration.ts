@@ -2355,6 +2355,177 @@ if (!commandMod) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Phase 14 — eLux config schema (pure unit tests, no HTTP required)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\nPhase 14 — eLux config schema');
+
+interface EluxConfigEntry {
+  section: string;
+  key: string;
+  default: string | number | boolean | null;
+  range: unknown;
+  sinceVersion: string | null;
+  publish: boolean;
+  notes: string;
+  inferred?: true;
+}
+
+interface EluxConfigModule {
+  loadEluxConfigSchema(): EluxConfigEntry[];
+  clearEluxConfigSchemaCache(): void;
+  findEluxConfigEntry(section: string, key: string): EluxConfigEntry | undefined;
+  getEluxConfigSection(section: string): EluxConfigEntry[];
+  listEluxConfigSections(): string[];
+  isValueInRange(entry: EluxConfigEntry, value: unknown): boolean;
+}
+
+interface ResourcesModuleSchema {
+  listResources(): Promise<Array<{ uri: string; name: string; description: string; mimeType: string }>>;
+  readResource(uri: string): Promise<{ uri: string; mimeType: string; text: string }>;
+  URI_SCHEMA_TERMINAL_INI: string;
+  URI_SCHEMA_KIOSKMODE_INI: string;
+}
+
+let eluxConfigMod: EluxConfigModule | null = null;
+try {
+  eluxConfigMod = (await import('../src/schema/eluxConfig.js')) as EluxConfigModule;
+} catch {
+  console.warn('  WARN: src/schema/eluxConfig.js not importable — eLux config schema tests will be skipped');
+}
+
+let schemaResourcesMod: ResourcesModuleSchema | null = null;
+try {
+  schemaResourcesMod = (await import('../src/resources.js')) as unknown as ResourcesModuleSchema;
+} catch {
+  console.warn('  WARN: src/resources.js not importable — eLux schema resource tests will be skipped');
+}
+
+if (!eluxConfigMod) {
+  await skip('eluxConfig: loads schema without error', 'module not available');
+  await skip('eluxConfig: no duplicate section.key pairs', 'module not available');
+  await skip('eluxConfig: every entry has a default or explicit "unset"', 'module not available');
+  await skip('eluxConfig: covers required minimum terminal.ini sections', 'module not available');
+  await skip('eluxConfig: covers all required kioskmode.ini sections', 'module not available');
+  await skip('eluxConfig: findEluxConfigEntry resolves a known key', 'module not available');
+  await skip('eluxConfig: isValueInRange validates enum ranges', 'module not available');
+} else {
+  const { loadEluxConfigSchema, findEluxConfigEntry, getEluxConfigSection, listEluxConfigSections, isValueInRange } =
+    eluxConfigMod;
+
+  await test('eluxConfig: loads schema without error and returns a non-empty array', async () => {
+    const entries = loadEluxConfigSchema();
+    assert(Array.isArray(entries), 'Expected an array from loadEluxConfigSchema');
+    assert(entries.length > 0, 'Expected at least one schema entry');
+  });
+
+  await test('eluxConfig: no duplicate section.key pairs', async () => {
+    const entries = loadEluxConfigSchema();
+    const seen = new Set<string>();
+    for (const e of entries) {
+      const id = `${e.section}.${e.key}`;
+      assert(!seen.has(id), `Duplicate section.key pair found: ${id}`);
+      seen.add(id);
+    }
+  });
+
+  await test('eluxConfig: every entry has a default value or explicit "unset"', async () => {
+    const entries = loadEluxConfigSchema();
+    for (const e of entries) {
+      const hasDefault = e.default !== undefined && e.default !== null;
+      assert(
+        hasDefault,
+        `Entry ${e.section}.${e.key} has no default and no explicit "unset" — default was: ${JSON.stringify(e.default)}`,
+      );
+    }
+  });
+
+  await test('eluxConfig: covers required minimum terminal.ini sections', async () => {
+    const sections = new Set(listEluxConfigSections());
+    const required = [
+      'Global',
+      'Network',
+      'Layout',
+      'Screen',
+      'Security',
+      'OpenId',
+      'Imprivata',
+      'SAML',
+      'SmartCard',
+      'Hotkeys',
+    ];
+    for (const s of required) {
+      assert(sections.has(s), `Expected required section "${s}" in eLux config schema, got: ${[...sections].join(', ')}`);
+    }
+    // PowerManagement* — at least one PowerManagement-prefixed section must be present
+    const hasPowerManagement = [...sections].some((s) => s.startsWith('PowerManagement'));
+    assert(hasPowerManagement, 'Expected at least one PowerManagement* section');
+  });
+
+  await test('eluxConfig: covers all required kioskmode.ini sections', async () => {
+    const sections = new Set(listEluxConfigSections());
+    // Parameters/Theme/Store<1-N>/Environment_Store<1-N>/PassThroughCredentials/Browser<1-N>
+    // are the kioskmode.ini sections per docs/reference/kioskmode-ini-source.md
+    const required = ['Parameters', 'Store<1-N>', 'Browser<1-N>', 'PassThroughCredentials'];
+    for (const s of required) {
+      assert(sections.has(s), `Expected required kioskmode.ini section "${s}", got: ${[...sections].join(', ')}`);
+    }
+  });
+
+  await test('eluxConfig: findEluxConfigEntry resolves a known key (Security.AuthType)', async () => {
+    const entry = findEluxConfigEntry('Security', 'AuthType');
+    assert(entry !== undefined, 'Expected Security.AuthType to be present in the schema');
+    assert(entry!.section === 'Security', 'Expected section Security');
+    assert(entry!.key === 'AuthType', 'Expected key AuthType');
+  });
+
+  await test('eluxConfig: getEluxConfigSection returns only entries for that section', async () => {
+    const entries = getEluxConfigSection('Security');
+    assert(entries.length > 0, 'Expected at least one Security entry');
+    assert(entries.every((e) => e.section === 'Security'), 'All returned entries must belong to the Security section');
+  });
+
+  await test('eluxConfig: isValueInRange validates enum ranges correctly', async () => {
+    const entry = findEluxConfigEntry('Security', 'AuthType');
+    assert(entry !== undefined, 'Expected Security.AuthType to be present');
+    assert(isValueInRange(entry!, 0) === true, 'AuthType=0 should be in range');
+    assert(isValueInRange(entry!, 9999) === false, 'AuthType=9999 should be out of range');
+  });
+}
+
+if (!schemaResourcesMod) {
+  await skip('resources: scout://schema/terminal-ini is listed and readable', 'module not available');
+  await skip('resources: scout://schema/kioskmode-ini is listed and readable', 'module not available');
+} else {
+  const { listResources: listResSchema, readResource: readResSchema, URI_SCHEMA_TERMINAL_INI, URI_SCHEMA_KIOSKMODE_INI } =
+    schemaResourcesMod;
+
+  await test('resources: scout://schema/terminal-ini is listed and readable without a configured Scout server', async () => {
+    const resources = await listResSchema();
+    const entry = resources.find((r) => r.uri === URI_SCHEMA_TERMINAL_INI);
+    assert(entry !== undefined, `Expected "${URI_SCHEMA_TERMINAL_INI}" in resource list`);
+    assert(entry.mimeType === 'application/json', 'Expected JSON mimeType');
+
+    const content = await readResSchema(URI_SCHEMA_TERMINAL_INI);
+    assert(content.mimeType === 'application/json', 'Expected JSON mimeType on read');
+    const parsed: unknown = JSON.parse(content.text);
+    assert(Array.isArray(parsed), 'Expected an array of schema entries');
+    assert((parsed as unknown[]).length > 0, 'Expected at least one terminal.ini schema entry');
+  });
+
+  await test('resources: scout://schema/kioskmode-ini is listed and readable without a configured Scout server', async () => {
+    const resources = await listResSchema();
+    const entry = resources.find((r) => r.uri === URI_SCHEMA_KIOSKMODE_INI);
+    assert(entry !== undefined, `Expected "${URI_SCHEMA_KIOSKMODE_INI}" in resource list`);
+
+    const content = await readResSchema(URI_SCHEMA_KIOSKMODE_INI);
+    const parsed: unknown = JSON.parse(content.text);
+    assert(Array.isArray(parsed), 'Expected an array of schema entries');
+    assert((parsed as unknown[]).length > 0, 'Expected at least one kioskmode.ini schema entry');
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Summary
 // ═══════════════════════════════════════════════════════════════════════════════
 
