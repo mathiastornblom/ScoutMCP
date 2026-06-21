@@ -23,6 +23,7 @@ import { deviceGetTool, deviceManageTool } from './tools/device.js';
 import { deviceCommandTool, deviceDiagnosticsTool } from './tools/command.js';
 import { appListTool, appManageTool } from './tools/application.js';
 import { configGetTool, configUpdateTool, configCompareTool } from './tools/config.js';
+import { configResolveTool } from './tools/config_resolve.js';
 import { labelManageTool } from './tools/label.js';
 import { ruleManageTool } from './tools/rule.js';
 import { scheduleManageTool } from './tools/schedule.js';
@@ -130,6 +131,7 @@ const tools = [
   configGetTool,
   configUpdateTool,
   configCompareTool,
+  configResolveTool,
   labelManageTool,
   ruleManageTool,
   scheduleManageTool,

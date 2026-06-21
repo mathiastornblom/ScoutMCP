@@ -104,6 +104,41 @@ export async function resolveOuRef(ref: string | number): Promise<OuMatch> {
   );
 }
 
+/**
+ * Returns the chain of OUs from root to the given OU (inclusive), in root→leaf order, by
+ * walking the cached OU tree and recording parentage as it flattens. Used by the RSoP
+ * engine (§2) to fetch each ancestor OU's config layer in precedence order.
+ *
+ * Falls back to a single-element chain [ou] if the tree has no parent info (e.g. ou is
+ * itself the root) — never throws on a missing parent, since the root OU has none.
+ */
+export async function getOuChain(ouRef: string | number): Promise<OuMatch[]> {
+  const target = await resolveOuRef(ouRef);
+  const client = getClient();
+  const root = await client.request<OuNode>('GET', '/api/v1/ou/structure');
+
+  const chain: OuMatch[] = [];
+  function findPathTo(node: OuNode, trail: OuMatch[]): boolean {
+    const here: OuMatch = { ouid: node.OUID, name: node.OUName, path: node.OUPath };
+    const nextTrail = [...trail, here];
+    if (node.OUID === target.ouid) {
+      chain.push(...nextTrail);
+      return true;
+    }
+    if (Array.isArray(node.SubOUs)) {
+      for (const child of node.SubOUs) {
+        if (findPathTo(child, nextTrail)) return true;
+      }
+    }
+    return false;
+  }
+  findPathTo(root, []);
+
+  // If the walk failed to find the target (shouldn't happen since resolveOuRef already
+  // matched it against the same flattened cache), fall back to a single-element chain.
+  return chain.length > 0 ? chain : [target];
+}
+
 function throwAmbiguous(ref: string, candidates: OuMatch[]): never {
   const list = candidates.map((c) => `  • "${c.name}"  ID: ${c.ouid}  path: ${c.path}`).join('\n');
   throw new Error(
