@@ -18,6 +18,12 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
+import {
+  checkMutationAllowed,
+  checkBlastRadius,
+  isDryRunSkip,
+  GuardrailError,
+} from '../safety/guardrails.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -86,13 +92,27 @@ async function onboardBranchExecute(raw: unknown): Promise<McpToolResult> {
   const steps: string[] = [];
 
   try {
+    // Gate 1: mode tiers — onboard_branch is a multi-step composite write.
+    const modeCheck = checkMutationAllowed('onboard_branch');
+    if (!modeCheck.proceed) {
+      return ok({
+        status: 'dry_run',
+        wouldCreate: input.name,
+        wouldAddFilter: input.subnetCidr ?? null,
+        message: modeCheck.dryRunNotice,
+      });
+    }
+
     // Step 1 — create the new OU
     const qs = buildQuery({
       destoupath: input.parentOuPath,
       destouid: input.parentOuId,
       name: input.name,
     });
-    const createResp = await client.request<unknown>('POST', `/api/v1/ou${qs}`);
+    const createResp = await client.request<unknown>('POST', `/api/v1/ou${qs}`, undefined, {
+      mutating: true,
+      opName: 'onboard_branch',
+    });
     steps.push(`OU "${input.name}" created`);
 
     // Extract the new OU's ID from the creation response (best-effort)
@@ -122,7 +142,10 @@ async function onboardBranchExecute(raw: unknown): Promise<McpToolResult> {
               },
             ],
           };
-          await client.rawRequest<unknown>('POST', '/api/v1/oufilter/add', filterBody);
+          await client.rawRequest<unknown>('POST', '/api/v1/oufilter/add', filterBody, {
+            mutating: true,
+            opName: 'onboard_branch(filter)',
+          });
           steps.push(`Filter rule added: ${input.subnetCidr} → OUID ${newOuId}`);
         } catch (filterErr) {
           const msg = filterErr instanceof Error ? filterErr.message : String(filterErr);
@@ -136,6 +159,7 @@ async function onboardBranchExecute(raw: unknown): Promise<McpToolResult> {
 
     return ok({ status: 'ok', steps, ouId: newOuId, response: createResp });
   } catch (err) {
+    if (err instanceof GuardrailError) return fail(`onboard_branch blocked: ${err.message}`);
     return fail(`onboard_branch failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
@@ -146,7 +170,8 @@ export const onboardBranchTool = {
     'Create a new OU branch and optionally add a subnet filter rule — all in one call. ' +
     'Replaces ou_manage(add) + ou_filter_manage(add). ' +
     'Provide parentOuPath or parentOuId to set the parent. ' +
-    'If subnetCidr is given, a filter rule is added automatically (requires SCOUT_ENABLE_PRIVATE_ENDPOINTS=true).',
+    'If subnetCidr is given, a filter rule is added automatically (requires SCOUT_ENABLE_PRIVATE_ENDPOINTS=true). ' +
+    'Gated by SCOUT_MODE (read-only blocks all writes, dry-run plans without executing).',
   inputSchema: zodToJsonSchema(onboardBranchSchema),
   execute: onboardBranchExecute,
 };
@@ -172,6 +197,10 @@ const moveDevicesByFilterSchema = z.object({
   ),
   limit: z.number().int().min(1).max(MAX_BULK).optional().describe(
     `Max devices to process in one call (default 100, max ${MAX_BULK})`,
+  ),
+  overrideBlastRadius: z.boolean().optional().describe(
+    'Set true to proceed when the number of matched devices exceeds SCOUT_MAX_BLAST_RADIUS ' +
+    '(still capped by a hard ceiling).',
   ),
 });
 
@@ -228,6 +257,20 @@ async function moveDevicesByFilterExecute(raw: unknown): Promise<McpToolResult> 
       });
     }
 
+    // Gate 3: blast-radius cap, now that the device count is resolved.
+    checkBlastRadius({ affectedCount: devices.length, overrideBlastRadius: input.overrideBlastRadius });
+
+    // Gate 1: mode tiers.
+    const modeCheck = checkMutationAllowed('move_devices_by_filter');
+    if (!modeCheck.proceed) {
+      return ok({
+        status: 'dry_run',
+        matched: devices.length,
+        wouldMove: devices.map((d) => deviceName(d) ?? '(unknown)'),
+        message: modeCheck.dryRunNotice,
+      });
+    }
+
     // Move each device
     let moved = 0;
     const failed: Array<{ device: string; error: string }> = [];
@@ -244,7 +287,11 @@ async function moveDevicesByFilterExecute(raw: unknown): Promise<McpToolResult> 
           destoupath: input.destOuPath,
           destouid: input.destOuId,
         });
-        await client.request<unknown>('PUT', `/api/v1/device/move${moveQs}`);
+        const result = await client.request<unknown>('PUT', `/api/v1/device/move${moveQs}`, undefined, {
+          mutating: true,
+          opName: 'move_devices_by_filter',
+        });
+        if (isDryRunSkip(result)) continue;
         moved++;
       } catch (err) {
         failed.push({ device: name, error: err instanceof Error ? err.message : String(err) });
@@ -258,6 +305,7 @@ async function moveDevicesByFilterExecute(raw: unknown): Promise<McpToolResult> 
       failed: failed.length > 0 ? failed : undefined,
     });
   } catch (err) {
+    if (err instanceof GuardrailError) return fail(`move_devices_by_filter blocked: ${err.message}`);
     return fail(`move_devices_by_filter failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
@@ -268,7 +316,9 @@ export const moveDevicesByFilterTool = {
     'Search for devices in a source OU and bulk-move them to a destination OU in one call. ' +
     'Replaces device_get(search) + N×device_manage(move). ' +
     'Use dryRun=true first to preview matches, then confirm=true to execute. ' +
-    'DESTRUCTIVE: moves devices — requires confirm=true (unless dryRun=true).',
+    'DESTRUCTIVE: moves devices — requires confirm=true (unless dryRun=true). ' +
+    'Gated by SCOUT_MODE (read-only blocks all writes, dry-run plans without executing) and ' +
+    'SCOUT_MAX_BLAST_RADIUS (default 25, hard ceiling 500) — pass overrideBlastRadius=true to exceed the cap up to the ceiling.',
   inputSchema: zodToJsonSchema(moveDevicesByFilterSchema),
   execute: moveDevicesByFilterExecute,
 };
@@ -300,6 +350,10 @@ const bulkCommandSchema = z.object({
   ),
   limit: z.number().int().min(1).max(MAX_BULK).optional().describe(
     `Max devices to command in one call (default 100, max ${MAX_BULK})`,
+  ),
+  overrideBlastRadius: z.boolean().optional().describe(
+    'Set true to proceed when the number of matched devices exceeds SCOUT_MAX_BLAST_RADIUS ' +
+    '(still capped by a hard ceiling).',
   ),
 });
 
@@ -353,6 +407,21 @@ async function bulkCommandExecute(raw: unknown): Promise<McpToolResult> {
       });
     }
 
+    // Gate 3: blast-radius cap, now that the device count is resolved.
+    checkBlastRadius({ affectedCount: devices.length, overrideBlastRadius: input.overrideBlastRadius });
+
+    // Gate 1: mode tiers.
+    const modeCheck = checkMutationAllowed(`bulk_command(${input.command})`);
+    if (!modeCheck.proceed) {
+      return ok({
+        status: 'dry_run',
+        matched: devices.length,
+        command: input.command,
+        wouldTarget: devices.map((d) => deviceName(d) ?? '(unknown)'),
+        message: modeCheck.dryRunNotice,
+      });
+    }
+
     // Send command to each device
     let commanded = 0;
     const failed: Array<{ device: string; error: string }> = [];
@@ -365,11 +434,13 @@ async function bulkCommandExecute(raw: unknown): Promise<McpToolResult> {
       }
       try {
         const cmdQs = buildQuery({ name });
-        await client.request<unknown>(
+        const result = await client.request<unknown>(
           'POST',
           `/api/v1/command/device/${input.command}${cmdQs}`,
           input.commandBody,
+          { mutating: true, opName: `bulk_command(${input.command})` },
         );
+        if (isDryRunSkip(result)) continue;
         commanded++;
       } catch (err) {
         failed.push({ device: name, error: err instanceof Error ? err.message : String(err) });
@@ -384,6 +455,7 @@ async function bulkCommandExecute(raw: unknown): Promise<McpToolResult> {
       failed: failed.length > 0 ? failed : undefined,
     });
   } catch (err) {
+    if (err instanceof GuardrailError) return fail(`bulk_command blocked: ${err.message}`);
     return fail(`bulk_command failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
@@ -394,7 +466,9 @@ export const bulkCommandTool = {
     'Search for devices in an OU and send a command to all matched devices in one call. ' +
     'Replaces device_get(search) + N×device_command(device, …). ' +
     'Use dryRun=true first to preview targets, then confirm=true to execute. ' +
-    'DESTRUCTIVE: factoryreset and halt are irreversible — always require confirm=true.',
+    'DESTRUCTIVE: factoryreset and halt are irreversible — always require confirm=true. ' +
+    'Gated by SCOUT_MODE (read-only blocks all writes, dry-run plans without executing) and ' +
+    'SCOUT_MAX_BLAST_RADIUS (default 25, hard ceiling 500) — pass overrideBlastRadius=true to exceed the cap up to the ceiling.',
   inputSchema: zodToJsonSchema(bulkCommandSchema),
   execute: bulkCommandExecute,
 };

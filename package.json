@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "test": "tsx tests/integration.ts"
+    "test": "tsx tests/integration.ts",
+    "test:unit": "tsx tests/guardrails.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

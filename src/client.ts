@@ -1,5 +1,17 @@
 import { Agent, fetch } from 'undici';
 import { type ScoutConfig, resolveConfig } from './session.js';
+import {
+  checkMutationAllowed,
+  type MutationCheckResult,
+  DRY_RUN_SKIP_MARKER,
+} from './safety/guardrails.js';
+
+function makeDryRunSkip<T>(notice?: string): T {
+  return {
+    [DRY_RUN_SKIP_MARKER]: true,
+    notice: notice ?? 'Skipped by SCOUT_MODE=dry-run.',
+  } as unknown as T;
+}
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 /** Renew token this many ms before its actual expiry to avoid race windows. */
@@ -85,15 +97,47 @@ export class ScoutClient {
     this.tokenExpiresAt = parseJwtExpiry(data.token);
   }
 
-  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  /**
+   * @param opts.mutating - Set true for any call that changes server state (POST/PUT/
+   *   DELETE/PATCH that writes data, as opposed to e.g. a POST used as a read/search).
+   *   This is the Gate 1 (SCOUT_MODE) chokepoint: callers MUST pass this explicitly for
+   *   write-capable calls — it is not inferred from the HTTP verb, because some tools use
+   *   POST for read/search operations (e.g. structure export, device search-by-filter).
+   *   When mutating=true and SCOUT_MODE=read-only, this throws. When SCOUT_MODE=dry-run,
+   *   this returns a DryRunResult<T> sentinel instead of issuing the HTTP call — tools
+   *   should check `isDryRunSkip(result)` and report the planned action instead of `data`.
+   */
+  async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    opts?: { mutating?: boolean; opName?: string },
+  ): Promise<T> {
+    if (opts?.mutating) {
+      const check = this.checkMode(opts.opName ?? `${method} ${path}`);
+      if (!check.proceed) return makeDryRunSkip<T>(check.dryRunNotice);
+    }
     await this.ensureAuth();
     return this.doRequest<T>(method, path, body, false);
   }
 
   /** Like request(), but skips the /rest prefix — for private endpoints served outside /rest/. */
-  async rawRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+  async rawRequest<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    opts?: { mutating?: boolean; opName?: string },
+  ): Promise<T> {
+    if (opts?.mutating) {
+      const check = this.checkMode(opts.opName ?? `${method} ${path}`);
+      if (!check.proceed) return makeDryRunSkip<T>(check.dryRunNotice);
+    }
     await this.ensureAuth();
     return this.doRawRequest<T>(method, path, body, false);
+  }
+
+  private checkMode(opName: string): MutationCheckResult {
+    return checkMutationAllowed(opName);
   }
 
   isAuthenticated(): boolean {

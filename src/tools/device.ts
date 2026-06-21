@@ -6,6 +6,7 @@ import { resolveOuRef } from '../resolver.js';
 import { enrich } from '../enricher.js';
 import { isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
+import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -282,6 +283,9 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
   }
 
   try {
+    // Gate 1: mode tiers — all device_manage actions are mutating.
+    const modeCheck = checkMutationAllowed(`device_manage(${input.action})`);
+
     // Resolve destination OU: destouRef wins; otherwise explicit args with working OU fallback
     let resolvedDestPath: string | undefined;
     let resolvedDestId: number | undefined = input.destouid;
@@ -303,6 +307,17 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
       }
     }
 
+    if (!modeCheck.proceed) {
+      return ok({
+        status: 'dry_run',
+        action: input.action,
+        target: input.name ?? input.mac ?? input.id ?? input.clientid,
+        message: modeCheck.dryRunNotice,
+      });
+    }
+
+    let data: unknown;
+
     switch (input.action) {
       case 'add': {
         if (!input.newDeviceName) return fail('newDeviceName is required for action=add');
@@ -313,7 +328,11 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           name: input.newDeviceName,
           mac: input.newDeviceMac,
         });
-        const data = await client.request<unknown>('POST', `/api/v1/device${qs}`);
+        data = await client.request<unknown>('POST', `/api/v1/device${qs}`, undefined, {
+          mutating: true,
+          opName: 'device_manage(add)',
+        });
+        if (isDryRunSkip(data)) break;
         return ok(await enrich(data));
       }
 
@@ -326,7 +345,11 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           clientid: input.clientid,
           newname: input.newname,
         });
-        const data = await client.request<unknown>('PUT', `/api/v1/device${qs}`);
+        data = await client.request<unknown>('PUT', `/api/v1/device${qs}`, undefined, {
+          mutating: true,
+          opName: 'device_manage(rename)',
+        });
+        if (isDryRunSkip(data)) break;
         return ok(data);
       }
 
@@ -337,7 +360,11 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           id: input.id,
           clientid: input.clientid,
         });
-        const data = await client.request<unknown>('DELETE', `/api/v1/device${qs}`);
+        data = await client.request<unknown>('DELETE', `/api/v1/device${qs}`, undefined, {
+          mutating: true,
+          opName: 'device_manage(delete)',
+        });
+        if (isDryRunSkip(data)) break;
         return ok(data);
       }
 
@@ -350,11 +377,21 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           destoupath: resolvedDestPath,
           destouid: resolvedDestId,
         });
-        const data = await client.request<unknown>('PUT', `/api/v1/device/move${qs}`);
+        data = await client.request<unknown>('PUT', `/api/v1/device/move${qs}`, undefined, {
+          mutating: true,
+          opName: 'device_manage(move)',
+        });
+        if (isDryRunSkip(data)) break;
         return ok(await enrich(data));
       }
     }
+
+    if (isDryRunSkip(data)) {
+      return ok({ status: 'dry_run', action: input.action, message: data.notice });
+    }
+    return ok(data);
   } catch (err) {
+    if (err instanceof GuardrailError) return fail(`device_manage blocked: ${err.message}`);
     const baseMsg = `device_manage failed: ${err instanceof Error ? err.message : String(err)}`;
     if (isNotFound(err)) {
       const identifier = input.name ?? input.mac ?? input.id ?? input.clientid;
@@ -373,7 +410,8 @@ export const deviceManageTool = {
     'Add, rename, delete, or move devices in Scout Board. ' +
     'Use destouRef to specify the destination OU by name, partial name, path, or ID — no need to look up IDs first. ' +
     'DESTRUCTIVE: action=delete permanently removes a device from Scout Board. ' +
-    'In SCOUT_ENV=test mode, delete is blocked entirely; add and move are restricted to paths under SCOUT_TEST_OU_PATH.',
+    'In SCOUT_ENV=test mode, delete is blocked entirely; add and move are restricted to paths under SCOUT_TEST_OU_PATH. ' +
+    'Gated by SCOUT_MODE (read-only blocks all writes, dry-run plans without executing).',
   inputSchema: zodToJsonSchema(deviceManageSchema),
   execute: deviceManageExecute,
 };

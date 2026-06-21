@@ -2,6 +2,13 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
+import {
+  checkMutationAllowed,
+  checkBaseWriteAllowed,
+  checkBlastRadius,
+  isDryRunSkip,
+  GuardrailError,
+} from '../safety/guardrails.js';
 
 // Section examples (not exhaustive — API accepts any valid section string):
 // general, firmware, display, hardware, security, userauthentication, diagnostics,
@@ -88,6 +95,10 @@ const configUpdateSchema = z.object({
     'Apply the same config body to multiple devices by numeric ID in parallel (target=device only). ' +
     'Returns per-device success/failure. Max 500 devices.',
   ),
+  overrideBlastRadius: z.boolean().optional().describe(
+    'Set true to proceed when the number of affected devices exceeds SCOUT_MAX_BLAST_RADIUS ' +
+    '(still capped by a hard ceiling — see config_update tool description).',
+  ),
 });
 
 type ConfigUpdateInput = z.infer<typeof configUpdateSchema>;
@@ -96,52 +107,95 @@ async function configUpdateExecute(raw: unknown): Promise<McpToolResult> {
   const input = configUpdateSchema.parse(raw) as ConfigUpdateInput;
   const client = getClient();
 
-  // Bulk path: fan out one update per device ID in parallel
-  if (input.deviceIds && input.deviceIds.length > 0) {
-    if (input.target !== 'device') {
-      return fail('deviceIds is only valid when target=device');
-    }
-    const results = await Promise.all(
-      input.deviceIds.map(async (devId) => {
-        const qs = buildQuery({ id: devId });
-        try {
-          const data = await client.request<unknown>(
-            'POST',
-            `/api/v1/configuration/device/${input.section}${qs}`,
-            input.body,
-          );
-          return { id: devId, success: true, data };
-        } catch (err) {
-          return { id: devId, success: false, error: err instanceof Error ? err.message : String(err) };
-        }
-      }),
-    );
-    const successful = results.filter((r) => r.success).length;
-    return ok({
-      section: input.section,
-      total: results.length,
-      successful,
-      failed: results.length - successful,
-      results,
-    });
-  }
-
-  // Single target path
-  let qs = '';
-  if (input.target === 'ou') {
-    qs = buildQuery({ path: input.ouPath, id: input.ouId });
-  } else if (input.target === 'device') {
-    qs = buildQuery({ name: input.name, mac: input.mac, id: input.id, clientid: input.clientid });
-  }
-
   try {
+    // Gate 1: mode tiers — read-only blocks outright, dry-run is handled per-branch below
+    // so we can still report what WOULD happen.
+    const modeCheck = checkMutationAllowed('config_update');
+
+    // Gate 2: Base scope writes require explicit arming, independent of SCOUT_MODE.
+    checkBaseWriteAllowed({
+      isBaseOrRoot: input.target === 'base',
+      label: 'Base config scope (inherits to the entire fleet)',
+    });
+
+    // Bulk path: fan out one update per device ID in parallel
+    if (input.deviceIds && input.deviceIds.length > 0) {
+      if (input.target !== 'device') {
+        return fail('deviceIds is only valid when target=device');
+      }
+
+      // Gate 3: blast-radius cap on bulk device updates.
+      checkBlastRadius({
+        affectedCount: input.deviceIds.length,
+        overrideBlastRadius: input.overrideBlastRadius,
+      });
+
+      if (!modeCheck.proceed) {
+        return ok({
+          status: 'dry_run',
+          section: input.section,
+          target: input.target,
+          wouldUpdate: input.deviceIds,
+          message: modeCheck.dryRunNotice,
+        });
+      }
+
+      const results = await Promise.all(
+        input.deviceIds.map(async (devId) => {
+          const qs = buildQuery({ id: devId });
+          try {
+            const data = await client.request<unknown>(
+              'POST',
+              `/api/v1/configuration/device/${input.section}${qs}`,
+              input.body,
+              { mutating: true, opName: 'config_update' },
+            );
+            return { id: devId, success: true, data };
+          } catch (err) {
+            return { id: devId, success: false, error: err instanceof Error ? err.message : String(err) };
+          }
+        }),
+      );
+      const successful = results.filter((r) => r.success).length;
+      return ok({
+        section: input.section,
+        total: results.length,
+        successful,
+        failed: results.length - successful,
+        results,
+      });
+    }
+
+    // Single target path — affects at most one OU/device/base scope (count = 1, never
+    // exceeds the default cap), so no blast-radius check needed here.
+    let qs = '';
+    if (input.target === 'ou') {
+      qs = buildQuery({ path: input.ouPath, id: input.ouId });
+    } else if (input.target === 'device') {
+      qs = buildQuery({ name: input.name, mac: input.mac, id: input.id, clientid: input.clientid });
+    }
+
+    if (!modeCheck.proceed) {
+      return ok({
+        status: 'dry_run',
+        target: input.target,
+        section: input.section,
+        message: modeCheck.dryRunNotice,
+      });
+    }
+
     const data = await client.request<unknown>(
       'POST',
       `/api/v1/configuration/${input.target}/${input.section}${qs}`,
       input.body,
+      { mutating: true, opName: 'config_update' },
     );
+    if (isDryRunSkip(data)) {
+      return ok({ status: 'dry_run', target: input.target, section: input.section, message: data.notice });
+    }
     return ok(data);
   } catch (err) {
+    if (err instanceof GuardrailError) return fail(`config_update blocked: ${err.message}`);
     return fail(`config_update failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
@@ -152,7 +206,10 @@ export const configUpdateTool = {
     'Write configuration to Scout Board for base, OU, or device scope. ' +
     'Provide target, section, and body with the configuration fields to update. ' +
     'For bulk device updates, pass deviceIds (array of numeric IDs) to apply the same config body to multiple devices in parallel. ' +
-    'Changes take effect when the device syncs.',
+    'Changes take effect when the device syncs. ' +
+    'Gated by SCOUT_MODE (read-only blocks all writes, dry-run plans without executing, write performs the call); ' +
+    'target=base requires SCOUT_ALLOW_BASE_WRITES=true (Base config inherits to the entire fleet); ' +
+    'bulk deviceIds writes are capped by SCOUT_MAX_BLAST_RADIUS (default 25, hard ceiling 500) — pass overrideBlastRadius=true to exceed the cap up to the ceiling.',
   inputSchema: zodToJsonSchema(configUpdateSchema),
   execute: configUpdateExecute,
 };

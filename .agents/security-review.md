@@ -189,3 +189,100 @@ Resultat: **SECURITY: FINAL APPROVED**
 ### Integrationstestverifiering
 
 QA körde 23/23 tester mot live-server inklusive autentisering, OU-skrivoperationer scoped till `/MCP-Test`, cleanup i `finally`-block, och verifiering att token inte exponeras i felsvar.
+
+---
+
+## Review: WS-D Phase 1 — Safety mode tiers, Base/root protection, blast-radius cap
+Datum: 2026-06-21
+Granskare: Säkerhet (självgranskning av eget arbete — branch `feature/safety-mode-tiers`)
+Resultat: SECURITY: APPROVED (med kvarstående gap dokumenterade nedan)
+
+### Scope för denna runda
+
+Tre tidiga skyddsgrindar, landade INNAN RSoP/validation-arbetet börjar, så att framtida
+write-kod föds bakom dem:
+
+1. **SCOUT_MODE** (`read-only` default | `dry-run` | `write`) — global mutationsspärr.
+2. **SCOUT_ALLOW_BASE_WRITES** — separat armeringsflagga för Base-scope/root-OU-skrivningar,
+   oberoende av SCOUT_MODE.
+3. **SCOUT_MAX_BLAST_RADIUS** — enhetstak per bulkoperation (default 25, hård cap 500).
+
+Implementerat i `src/safety/guardrails.ts` som enda källa för all gate-logik, anropat från
+`src/client.ts` (Gate 1, central funnel via `mutating`-flaggan på `request()`/`rawRequest()`)
+samt direkt från verktygslagret (`config.ts`, `ou.ts`, `device.ts`, `workflow.ts`) för Gate 2
+och Gate 3, eftersom endast verktygslagret känner till semantiskt scope (base/ou/device) och
+det upplösta enhetsantalet.
+
+### Godkänt
+
+- **Gate 1 är en hård spärr, inte bara en varning** — `checkMutationAllowed` kastar
+  `GuardrailError` i `read-only` (inklusive när `SCOUT_MODE` är ounset eller ogiltigt — fail
+  closed, inte fail open). `dry-run` returnerar `proceed=false` utan att kasta, vilket låter
+  verktyget köra sin read/plan-del och rapportera vad som SKULLE hända.
+- **Gate 2 är explicit oberoende av Gate 1** — `checkBaseWriteAllowed` läser enbart
+  `SCOUT_ALLOW_BASE_WRITES`, aldrig `SCOUT_MODE`. Verifierat med enhetstest
+  ("Gate 2 is independent of SCOUT_MODE — write mode alone does not arm base writes").
+  `SCOUT_MODE=write` ensamt kan alltså INTE skriva till Base/root.
+- **Gate 3 har en hård cap som inte kan höjas via konfiguration** — `HARD_BLAST_RADIUS_CEILING`
+  är en kodkonstant (500), `getBlastRadiusCap()` clampar alltid `SCOUT_MAX_BLAST_RADIUS` till
+  detta tak. `overrideBlastRadius: true` kan höja över den konfigurerade cap men aldrig över
+  hårdtaket — verifierat med enhetstest.
+- **Root-OU-detektion är konservativ** — `isRootOuTarget` jämför mot en live `GET /api/v1/ou/root`-
+  lookup (inte cachead vid anropstillfället i `ou_manage`) samt behandlar bar `"/"` som root
+  oavsett vad root-lookupen returnerar — minskar risken att ett tomt/felaktigt root-svar tolkas
+  som "inte root".
+- **Fail-closed vid ogiltiga env-värden** — ogiltigt `SCOUT_MODE` faller tillbaka till
+  `read-only` (säkraste läget), ogiltigt/negativt `SCOUT_MAX_BLAST_RADIUS` faller tillbaka till
+  default (25), inte till hårdtaket. Verifierat med enhetstest.
+- **27/27 enhetstester gröna**, körs utan live-server (`npm run test:unit`), och hela
+  integrationstestsviten (`tsc --noEmit`) bygger utan fel efter ändringarna.
+
+### Kvarstående gap — INTE blockerande för denna runda, men måste lösas innan
+write-funktionalitet (RSoP-motorn, pre-write validation) bygger vidare på dessa grindar
+
+1. **Inte alla skrivvägar är instrumenterade ännu.** Denna runda kopplade in gates i
+   `config_update`, `ou_manage`, `device_manage`, `move_devices_by_filter`, `bulk_command`,
+   och `onboard_branch`. Följande write-capable verktyg har INTE fått Gate 1 ännu:
+   `ou_filter_manage` (`tools/ou_filtering.ts`), `application.ts`, `label.ts`, `rule.ts`,
+   `schedule.ts`, `maintenance.ts`, `notification.ts`, `admins.ts`, `license.ts`,
+   `server_instances.ts`, `db_cleanup.ts`, `update.ts`, `command.ts` (single-device
+   `device_command`), `predefined_*.ts`, `system_settings.ts`. Dessa måste instrumenteras
+   innan SCOUT_MODE kan beskrivas som en universell garanti — just nu är det en garanti för
+   en delmängd av write-verktygen. Rekommendation: nästa PR ska grep:a `'POST'|'PUT'|'DELETE'|'PATCH'`
+   i samtliga `tools/*.ts`-filer och lägga `mutating: true` på varje faktisk write-anrop
+   (notera: vissa POST-anrop är read/search, t.ex. `search_with_config`, och ska INTE flaggas).
+2. **`client.ts`s `mutating`-flagga är opt-in, inte enforced.** Eftersom flaggan måste skickas
+   explicit av varje anropsställe finns ingen mekanism som upptäcker om en framtida write-kod
+   glömmer `mutating: true`. En statisk lint-regel eller ett runtime-varningsläge
+   ("denna POST/PUT/DELETE/PATCH saknar mutating-flagga") vore värt att lägga till i en
+   senare fas.
+3. **Blast-radius räknas bara där enhetsantalet redan upplöstes innan denna runda.**
+   `move_devices_by_filter` och `bulk_command` hade redan en `device/search`-upplösning
+   före mutationen, så Gate 3 kunde hakas på utan ny logik. `config_update` med `deviceIds`
+   räknas direkt på array-längden. Men `config_update target=ou` och `device_manage` move/add
+   räknar INTE antalet enheter som indirekt påverkas av en OU-flytt (en OU kan innehålla
+   hundratals enheter; att flytta OU:n i sig är en enhetsoperation men en framtida RSoP-motor
+   som expanderar config-inheritance till alla enheter i OU:n måste själv anropa
+   `checkBlastRadius` med det upplösta antalet — denna gate skyddar inte automatiskt mot det.
+4. **`overrideBlastRadius` är en blankocheck, som avsiktligt dokumenterat.** Ingen TTL, ingen
+   bindning till den specifika upplösta enhetsmängden, inget replay-skydd. Markerat med TODO
+   i `guardrails.ts` för WS-D-bekräftelsetoken-fasen. Får INTE användas av oövervakade/
+   automatiserade anropare i nuvarande form.
+5. **Root-OU-lookupen i `ou_manage` gör ett extra nätverksanrop per muterande anrop**
+   (`GET /api/v1/ou/root`) för att avgöra om målet är root. Detta är korrekt ur säkerhets-
+   synpunkt (ingen cache-baserad race mellan "är detta root" och den faktiska mutationen),
+   men adderar latens. Acceptabelt för denna fas; om det blir ett prestandaproblem bör en
+   kort TTL-cache (analog med `resolver.ts`s 5-minuters OU-cache) övervägas — med samma
+   invalidering-efter-mutation-mönster som redan finns för `invalidateOuCache()`.
+6. **Inget audit-spår av vem som satte `SCOUT_MODE=write` eller `SCOUT_ALLOW_BASE_WRITES=true`,
+   eller när.** Detta är avsiktligt utanför scope för denna runda (audit log är en senare
+   WS-D-fas) men flaggas explicit här så att Reviewer inte förväxlar "grindarna finns" med
+   "grindarna är spårbara".
+
+### Slutsats
+
+Grindarna är korrekta för det de gör och är väl testade isolerat. De är INTE en fullständig
+write-säkerhetslösning än — se gap 1–6 ovan. Godkänner denna runda som avsedd: tidig
+scaffolding som framtida write-path-PR:er (RSoP-motor, pre-write validation) ska byggas
+ovanpå och granskas mot. Kräver uppföljande PR(s) för full instrumentering av återstående
+write-verktyg innan SCOUT_MODE kan kommuniceras som en universell garanti till slutanvändare.
