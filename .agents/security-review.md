@@ -914,3 +914,23 @@ audit logging, test fixture corrected + new regression test added). QA follow-up
 (`countDevicesUnderOu` fail-open) is fixed. QA follow-up 2 (generic chokepoint target context)
 is explicitly deferred as a larger refactor, not attempted. Not pushed, not merged — awaiting
 Security re-verification.
+
+---
+
+## 2026-06-22 (re-review) — SECURITY: APPROVED
+
+Independently re-verified commit ef791c5 on `feature/safety-full` against my own BLOCKED finding. Did not trust the report — re-derived each claim from source.
+
+1. **Schema match confirmed.** Grepped openapi.json's `/api/v1/device/search` 200 example directly (line ~31190): `response.status.msg.{visibleDevices,hiddenDevices}`. `src/devices.ts`'s `parseSearchDevices` checks exactly this nested shape (object, not array, at each level) before returning devices — matches the real schema, not just "changed from before."
+
+2. **Single shared parser confirmed.** `device.ts`, `resolver.ts`, and `workflow.ts` all import `extractSearchDevices`/`parseSearchDevices`/`deviceOuId` from `devices.ts`. Grepped for the old divergent parser names (`extractDevices`, ad-hoc `resolveDistinctSourceOuPaths`) — none remain as live code; only a comment in devices.ts referencing the old name for history. `workflow.ts` line 501 (`bulk_command`) still uses the non-throwing `extractSearchDevices`, but I traced that path: `bulk_command` has no source-OU protected-OU gate, so degrading to "no devices matched" there cannot bypass a safety check. Correctly scoped.
+
+3. **Fail-closed path traced by hand.** `extractDevicesOrThrow` and `resolveDistinctSourceOuPathsOrThrow` in `workflow.ts` both throw `GuardrailError('unresolvable-source-ou')` with `auditLog(... result:'refused')` calls before throwing, for: unparseable envelope, any device missing a resolvable OUID, and any OUID that fails to resolve against the OU tree. These run *before* the `/device/move` mutating call (line 395) in `moveDevicesByFilterExecute`. The new test "FAIL CLOSED: malformed/unparseable device-search response..." asserts both `isError === true` AND `!mutatingCallsReceived.some(c => c.path.includes('/device/move'))` — confirmed it checks the mutate call was never issued, not just that an error was thrown.
+
+4. **countDevicesUnderOu confirmed fail-closed.** Both HTTP error and parse failure on any sub-OU search now throw (no more "treat as 0 devices"). Its only caller, `config.ts`'s `configUpdateExecute`, has an outer try/catch (~line 329) that converts any thrown error to a `fail()` result — verified by reading the catch block; no swallowing.
+
+5. **Fixture fixed, ran tests myself.** `tests/protected-ou-wiring.test.ts` now serves one schema-accurate envelope to all callers. `npx tsc --noEmit` → clean. `npm run test:unit` → 38+7+14+5+36+11 = **111 passed, 0 failed**, matching the report exactly.
+
+**Deferred item (target:'unknown' in generic chokepoint audit logs):** Acceptable to leave. It's a logging-fidelity gap, not a fail-open defect — Gates 2/3/6/7 (the gates that actually prevent the bypass class I blocked on) have their own dedicated audit calls with real target/count context. The generic Gate 1/4/5 chokepoint's `target:'unknown'` only degrades forensic audit-trail readability for those specific gates, it does not allow any mutation to proceed that should be blocked. Genuinely a 54-call-site refactor, correctly not bundled into a fail-open fix. Not blocking.
+
+**Verdict: SECURITY: APPROVED.** The fail-open gap is closed at its root (unified, schema-correct parser) and defended in depth (fail-closed gate + audit log + regression test that asserts the mutate call never fires). Branch may proceed to merge per QA sign-off; not pushed/merged by me.
