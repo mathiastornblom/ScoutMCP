@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
+import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 // ── Logging helpers ───────────────────────────────────────────────────────────
 
@@ -83,6 +84,10 @@ async function licenseManageExecute(raw: unknown): Promise<McpToolResult> {
       case 'reconfigure': {
         if (!input.license_server) return fail('reconfigure requires license_server');
         if (input.selfsigned === undefined) return fail('reconfigure requires selfsigned (boolean)');
+        const modeCheck = checkMutationAllowed('license_manage(reconfigure)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, licenseServer: input.license_server, message: modeCheck.dryRunNotice });
+        }
         const body: Record<string, unknown> = {
           licenseServer: input.license_server,
           selfsigned: input.selfsigned,
@@ -90,12 +95,20 @@ async function licenseManageExecute(raw: unknown): Promise<McpToolResult> {
         if (input.thumbprint !== undefined) body['thumbprint'] = input.thumbprint;
         const path = '/api/v1/license/reConfigure';
         log(tool, 'PUT', path, body);
-        const data = await client.rawRequest<unknown>('PUT', path, body);
+        const data = await client.rawRequest<unknown>('PUT', path, body, {
+          mutating: true,
+          opName: 'license_manage(reconfigure)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
     }
   } catch (err) {
+    if (err instanceof GuardrailError) {
+      logErr(tool, err);
+      return fail(`license_manage blocked: ${err.message}`);
+    }
     logErr(tool, err);
     return fail(`license_manage failed: ${err instanceof Error ? err.message : String(err)}`);
   }

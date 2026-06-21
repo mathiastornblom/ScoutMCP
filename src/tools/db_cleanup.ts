@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
+import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 // ── Logging helpers ───────────────────────────────────────────────────────────
 
@@ -72,14 +73,27 @@ async function dbCleanupExecute(raw: unknown): Promise<McpToolResult> {
       case 'delete': {
         if (!input.confirm) return fail('db_cleanup action=delete requires confirm=true (destructive operation)');
         if (!input.filter) return fail('db_cleanup action=delete requires filter to specify which records to delete');
+        // Gate 1: mode tiers — db_cleanup(delete) is a destructive, irreversible operation.
+        const modeCheck = checkMutationAllowed('db_cleanup(delete)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, filter: input.filter, message: modeCheck.dryRunNotice });
+        }
         const path = `/api/v1/dbCleanUp?filter=${encodeURIComponent(input.filter)}`;
         log(tool, 'DELETE', path);
-        const data = await client.rawRequest<unknown>('DELETE', path);
+        const data = await client.rawRequest<unknown>('DELETE', path, undefined, {
+          mutating: true,
+          opName: 'db_cleanup(delete)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
     }
   } catch (err) {
+    if (err instanceof GuardrailError) {
+      logErr(tool, err);
+      return fail(`db_cleanup blocked: ${err.message}`);
+    }
     logErr(tool, err);
     return fail(`db_cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
   }

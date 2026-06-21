@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
+import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 const notificationManageSchema = z.object({
   action: z.enum(['set', 'delete']).describe('set=enable notification; delete=cancel notification'),
@@ -43,9 +44,27 @@ async function notificationManageExecute(raw: unknown): Promise<McpToolResult> {
   }
 
   try {
-    const data = await client.request<unknown>(method, `${path}${qs}`, input.body);
+    // Both set and delete mutate notification state for the target — gate both.
+    const modeCheck = checkMutationAllowed(`notification_manage(${input.action})`);
+    if (!modeCheck.proceed) {
+      return ok({
+        status: 'dry_run',
+        action: input.action,
+        target: input.target,
+        type: input.type,
+        message: modeCheck.dryRunNotice,
+      });
+    }
+    const data = await client.request<unknown>(method, `${path}${qs}`, input.body, {
+      mutating: true,
+      opName: `notification_manage(${input.action})`,
+    });
+    if (isDryRunSkip(data)) {
+      return ok({ status: 'dry_run', action: input.action, message: data.notice });
+    }
     return ok(data);
   } catch (err) {
+    if (err instanceof GuardrailError) return fail(`notification_manage blocked: ${err.message}`);
     return fail(`notification_manage failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

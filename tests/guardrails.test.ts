@@ -20,6 +20,20 @@ import {
   DEFAULT_BLAST_RADIUS,
   HARD_BLAST_RADIUS_CEILING,
 } from '../src/safety/guardrails.js';
+import { setSessionConfig, clearSessionConfig } from '../src/session.js';
+import { dbCleanupTool } from '../src/tools/db_cleanup.js';
+import { adminManageTool } from '../src/tools/admins.js';
+import { systemSettingsTool } from '../src/tools/system_settings.js';
+import { deviceCommandTool } from '../src/tools/command.js';
+
+// Fake but well-formed config so getClient() succeeds without ever issuing a real
+// network call (Gate 1 short-circuits before client.request()/rawRequest() in
+// read-only and dry-run modes, so login() is never reached).
+setSessionConfig({
+  baseUrl: 'https://fake-scout-board.invalid:22160',
+  username: 'fake-user',
+  password: 'fake-password',
+});
 
 // ─── Minimal test harness (mirrors tests/integration.ts style) ────────────────
 
@@ -66,6 +80,33 @@ function assertThrowsGuardrail(fn: () => void, gate: GuardrailError['gate'], con
     return;
   }
   throw new Error(`${context}: expected GuardrailError to be thrown, but nothing was thrown`);
+}
+
+/** Async variant of test() for tool-level Gate 1 wiring checks (execute() is async). */
+async function testAsync(name: string, fn: () => Promise<void>): Promise<void> {
+  const snapshot = {
+    SCOUT_MODE: process.env.SCOUT_MODE,
+    SCOUT_ALLOW_BASE_WRITES: process.env.SCOUT_ALLOW_BASE_WRITES,
+    SCOUT_MAX_BLAST_RADIUS: process.env.SCOUT_MAX_BLAST_RADIUS,
+  };
+  try {
+    await fn();
+    results.push({ name, status: 'PASS' });
+    console.log(`  ✓ ${name}`);
+  } catch (e) {
+    results.push({ name, status: 'FAIL', error: String(e) });
+    console.error(`  ✗ ${name}: ${e instanceof Error ? e.message : String(e)}`);
+  } finally {
+    for (const [k, v] of Object.entries(snapshot)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+/** Extract the JSON-serialized payload from an ok()/fail() McpToolResult for assertions. */
+function resultText(result: { content: Array<{ type: 'text'; text: string }> }): string {
+  return result.content[0]?.text ?? '';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -267,8 +308,149 @@ test('override=false behaves the same as no override', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Gate 1 wiring — tool-level checks (db_cleanup, admin_manage, system_settings,
+// device_command). These exercise the real execute() functions end-to-end: a fake
+// (non-connecting) session config is set above so getClient() succeeds, and Gate 1
+// short-circuits before any real HTTP call would be made in read-only/dry-run modes.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function runToolGateTests(): Promise<void> {
+  console.log('\nGate 1 wiring — db_cleanup');
+
+  await testAsync('db_cleanup: read-only blocks action=delete', async () => {
+    process.env.SCOUT_MODE = 'read-only';
+    const result = await dbCleanupTool.execute({
+      action: 'delete',
+      filter: '[{"name":"Test","filter":"x"}]',
+      confirm: true,
+    });
+    assert(result.isError === true, 'expected an error result');
+    assert(resultText(result).includes('db_cleanup blocked:'), 'expected "db_cleanup blocked:" prefix');
+  });
+
+  await testAsync('db_cleanup: dry-run short-circuits action=delete without calling the real client', async () => {
+    process.env.SCOUT_MODE = 'dry-run';
+    const result = await dbCleanupTool.execute({
+      action: 'delete',
+      filter: '[{"name":"Test","filter":"x"}]',
+      confirm: true,
+    });
+    assert(result.isError !== true, 'expected a non-error result in dry-run');
+    const text = resultText(result);
+    assert(text.includes('"status": "dry_run"'), 'expected status=dry_run in payload');
+  });
+
+  console.log('\nGate 1 wiring — admin_manage');
+
+  await testAsync('admin_manage: read-only blocks action=delete_admin', async () => {
+    process.env.SCOUT_MODE = 'read-only';
+    const result = await adminManageTool.execute({
+      action: 'delete_admin',
+      admin_id: 1,
+      confirm: true,
+    });
+    assert(result.isError === true, 'expected an error result');
+    assert(resultText(result).includes('admin_manage blocked:'), 'expected "admin_manage blocked:" prefix');
+  });
+
+  await testAsync('admin_manage: dry-run short-circuits action=delete_admin', async () => {
+    process.env.SCOUT_MODE = 'dry-run';
+    const result = await adminManageTool.execute({
+      action: 'delete_admin',
+      admin_id: 1,
+      confirm: true,
+    });
+    assert(result.isError !== true, 'expected a non-error result in dry-run');
+    assert(resultText(result).includes('"status": "dry_run"'), 'expected status=dry_run in payload');
+  });
+
+  await testAsync('admin_manage: read-only blocks action=add_admin', async () => {
+    process.env.SCOUT_MODE = 'read-only';
+    const result = await adminManageTool.execute({
+      action: 'add_admin',
+      username: 'newadmin',
+      password: 'secret',
+    });
+    assert(result.isError === true, 'expected an error result');
+    assert(resultText(result).includes('admin_manage blocked:'), 'expected "admin_manage blocked:" prefix');
+  });
+
+  console.log('\nGate 1 wiring — system_settings');
+
+  await testAsync('system_settings: read-only blocks action=set_device_password', async () => {
+    process.env.SCOUT_MODE = 'read-only';
+    const result = await systemSettingsTool.execute({
+      action: 'set_device_password',
+      old_password: 'old',
+      new_password: 'new',
+      scout_board_id: 'abc-123',
+    });
+    assert(result.isError === true, 'expected an error result');
+    assert(resultText(result).includes('system_settings blocked:'), 'expected "system_settings blocked:" prefix');
+  });
+
+  await testAsync('system_settings: dry-run short-circuits action=set_device_password', async () => {
+    process.env.SCOUT_MODE = 'dry-run';
+    const result = await systemSettingsTool.execute({
+      action: 'set_device_password',
+      old_password: 'old',
+      new_password: 'new',
+      scout_board_id: 'abc-123',
+    });
+    assert(result.isError !== true, 'expected a non-error result in dry-run');
+    assert(resultText(result).includes('"status": "dry_run"'), 'expected status=dry_run in payload');
+  });
+
+  await testAsync('system_settings: read-only blocks action=set_logging', async () => {
+    process.env.SCOUT_MODE = 'read-only';
+    const result = await systemSettingsTool.execute({ action: 'set_logging', log_enabled: true });
+    assert(result.isError === true, 'expected an error result');
+    assert(resultText(result).includes('system_settings blocked:'), 'expected "system_settings blocked:" prefix');
+  });
+
+  console.log('\nGate 1 wiring — device_command (single-device path)');
+
+  await testAsync('device_command: read-only blocks target=device command=restart', async () => {
+    process.env.SCOUT_MODE = 'read-only';
+    const result = await deviceCommandTool.execute({
+      target: 'device',
+      command: 'restart',
+      name: 'TestDevice01',
+    });
+    assert(result.isError === true, 'expected an error result');
+    assert(resultText(result).includes('device_command blocked:'), 'expected "device_command blocked:" prefix');
+  });
+
+  await testAsync('device_command: dry-run short-circuits target=device command=restart', async () => {
+    process.env.SCOUT_MODE = 'dry-run';
+    const result = await deviceCommandTool.execute({
+      target: 'device',
+      command: 'restart',
+      name: 'TestDevice01',
+    });
+    assert(result.isError !== true, 'expected a non-error result in dry-run');
+    assert(resultText(result).includes('"status": "dry_run"'), 'expected status=dry_run in payload');
+  });
+
+  await testAsync('device_command: read-only blocks factoryreset even with confirm=true', async () => {
+    process.env.SCOUT_MODE = 'read-only';
+    const result = await deviceCommandTool.execute({
+      target: 'device',
+      command: 'factoryreset',
+      name: 'TestDevice01',
+      confirm: true,
+    });
+    assert(result.isError === true, 'expected an error result');
+    assert(resultText(result).includes('device_command blocked:'), 'expected "device_command blocked:" prefix');
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Summary
 // ═══════════════════════════════════════════════════════════════════════════════
+
+await runToolGateTests();
+clearSessionConfig();
 
 const passedCount = results.filter((r) => r.status === 'PASS').length;
 const failedCount = results.filter((r) => r.status === 'FAIL').length;

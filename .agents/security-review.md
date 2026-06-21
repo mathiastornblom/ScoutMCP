@@ -286,3 +286,114 @@ write-säkerhetslösning än — se gap 1–6 ovan. Godkänner denna runda som a
 scaffolding som framtida write-path-PR:er (RSoP-motor, pre-write validation) ska byggas
 ovanpå och granskas mot. Kräver uppföljande PR(s) för full instrumentering av återstående
 write-verktyg innan SCOUT_MODE kan kommuniceras som en universell garanti till slutanvändare.
+
+---
+
+## Review: Gate 1 gap closure — resterande write-verktyg instrumenterade
+Datum: 2026-06-21
+Granskare: Säkerhet (självgranskning, branch `feature/safety-mode-tiers`)
+Resultat: SECURITY: APPROVED — gap 1 från föregående runda är nu stängt
+
+### Scope för denna runda
+
+Stänger gap 1 ovan: alla write-capable verktyg som saknade Gate 1 har nu fått
+`checkMutationAllowed()` instrumenterat på exakt samma mönster som `config_update`,
+`ou_manage`, `device_manage`, `move_devices_by_filter`, `bulk_command`, `onboard_branch`
+(explicit anrop före HTTP-anropet, kortslutning med `status:'dry_run'` i dry-run,
+`GuardrailError` fångas i catch och returneras som `fail('<tool> blocked: ' + msg)`,
+samt `{ mutating: true, opName }` skickas in i `client.request()`/`rawRequest()` som
+defence-in-depth).
+
+### Filer/funktioner som fick Gate 1
+
+- **`src/tools/ou_filtering.ts`** — `ou_filter_manage`: `set_settings`, `add`, `modify`,
+  `delete` gated. `new_device_options`: `set` gated. (`get_settings`, `list`, `get` lämnas
+  ogated — rena läsningar.)
+- **`src/tools/application.ts`** — `app_manage`: `create`, `delete`, `copy`, `move`,
+  `set_inheritance` gated. (`app_list`, `get_inheritance` lämnas ogated.)
+- **`src/tools/label.ts`** — `label_manage`: `create`, `update`, `delete` gated.
+  (`list`, `get` lämnas ogated.)
+- **`src/tools/rule.ts`** — `rule_manage`: `create`, `update`, `delete`, `link_label`,
+  `update_label_priority`, `unlink_label` gated. `validate` lämnas ogated — den anropar
+  ett syntax-check-endpoint och muterar ingen regel.
+- **`src/tools/schedule.ts`** — `schedule_manage`: `update`, `delete` gated.
+  (`get_ou`, `get_device` lämnas ogated.)
+- **`src/tools/maintenance.ts`** — `maintenance_window_manage`: `create`, `update`,
+  `delete` gated. (`list` lämnas ogated.)
+- **`src/tools/notification.ts`** — `notification_manage`: BÅDA `set` och `delete` gated
+  (verktyget har inget rent läsläge — varje anrop muterar notifikationstillstånd).
+- **`src/tools/admins.ts`** (HÖGRISK) — `admin_manage`: `add_admin`, `update_admin`,
+  `delete_admin` gated. `update_rights` gated av försiktighet (triggar en server-side
+  rättighetsuppdatering — oklara sidoeffekter, behandlad som muterande). (`list`,
+  `permissions`, `advanced_rights`, `configuration_rights` lämnas ogated.)
+- **`src/tools/license.ts`** — `license_manage`: `reconfigure` gated.
+  (`get`, `check_availability` lämnas ogated.)
+- **`src/tools/server_instances.ts`** — `server_instances`: `delete`, `modify` gated.
+  (`list` lämnas ogated.)
+- **`src/tools/db_cleanup.ts`** (HÖGRISK, privat/destruktiv endpoint) — `db_cleanup`:
+  `delete` gated. (`list` lämnas ogated.)
+- **`src/tools/command.ts`** — `device_command` (target=device/devicelist/ou/ddg):
+  HELA verktyget gated på en gemensam plats (varje kommando muterar enhetstillstånd,
+  oavsett target). `device_diagnostics` lämnas helt ogated — `trigger`/`poll`/
+  `download_url`/`run` är alla läs-/pollnings-operationer mot ett asynkront
+  insamlingsjobb, ingen av dem skriver enhetskonfiguration.
+- **`src/tools/predefined_commands.ts`** — `predefined_commands`: `add`, `modify`,
+  `delete`, `modify_templates` gated. `auth` gated av försiktighet (aktiverar
+  kommandoexekvering server-side — oklar sidoeffekt). (`list`, `list_templates`
+  lämnas ogated.)
+- **`src/tools/predefined_paths.ts`** — `predefined_paths`: `add`, `delete` gated.
+  (`list` lämnas ogated.)
+- **`src/tools/system_settings.ts`** (HÖGRISK) — `system_settings`: `set_logging`,
+  `set_discover`, `set_retain_local_config`, `set_device_name_options`,
+  `set_recovery_settings`, `set_device_password` — ALLA `set_*`-actions gated, inga
+  undantag. (`get_logging`, `get_discover`, `get_retain_local_config`,
+  `get_device_name_options`, `get_recovery_settings` lämnas ogated.)
+
+### Verktyg bekräftat som rena läsningar — medvetet INTE instrumenterade
+
+- **`src/tools/predefined_images.ts`** — `predefined_images`: `list_images`, `list_uefi`.
+  Endast GET mot kataloglistor, inga write-endpoints existerar i filen.
+- **`src/tools/update.ts`** (`scout_update`) — `check` läser GitHub API (offentlig,
+  inte Scout Board), `apply` returnerar enbart instruktionstext (docker-pull-kommando)
+  utan att anropa Scout Board eller någon mutation. Ingen `getClient()`/`ScoutClient`-
+  interaktion alls i denna fil.
+
+### Verifiering
+
+- `npx tsc --noEmit`: rent, inga typfel.
+- `npm run test:unit`: 38/38 gröna (27 ursprungliga Gate 1–3-tester + 11 nya
+  verktygsnivå-tester för `db_cleanup`, `admin_manage`, `system_settings`,
+  `device_command` — read-only blockerar, dry-run kortsluter utan att nå
+  `client.request()`/`rawRequest()`).
+- Manuell granskning: varje ändrad fil grep:ad för kvarvarande `client.request(` /
+  `client.rawRequest(` utan `{ mutating: true, ... }` på write-grenar — inga kvar
+  inom scope för denna runda.
+
+### Medvetna avgränsningsbeslut
+
+- `rule_manage(validate)` behandlas som läsning trots POST — endpointen är ett
+  syntax-check, ingen regel skapas eller ändras.
+- `admin_manage(update_rights)` och `predefined_commands(auth)` behandlas som
+  muterande trots oklar effekt på faktisk datalagring, eftersom uppgiften
+  uttryckligen bad om strikt tolkning för `admins.ts` och eftersom båda har
+  server-side sidoeffekter (rättighetscache-refresh respektive
+  exekveringsbehörighet) som är svåra att klassificera som rena läsningar.
+- `notification_manage` gated i sin helhet (en gemensam kodväg för `set`/`delete`,
+  inget separat read-läge existerar att undanta).
+- `device_command` gated i sin enda execute-funktion (en kodväg som hanterar alla
+  fyra targets) snarare än duplicerad per-target, eftersom `target=device` är den
+  enda parametriseringen som nämns explicit i uppgiften men resten av targets delar
+  exakt samma muterande POST-anrop och därför rimligen ska omfattas av samma gate.
+
+### Kvarstående gap (oförändrat sedan föregående runda, ej i scope här)
+
+Gap 2–6 från föregående runda (lint-regel för glömd `mutating`-flagga, blast-radius
+för indirekt OU-påverkan, `overrideBlastRadius` utan TTL/bindning, extra
+nätverksanrop för root-OU-detektion, avsaknad av audit-spår) kvarstår oförändrade
+och är inte adresserade av denna runda — de tillhör senare WS-D-faser.
+
+### Slutsats
+
+Gap 1 är stängt: samtliga write-capable verktyg i kodbasen har nu Gate 1. SCOUT_MODE
+kan nu kommuniceras som en universell garanti för mutationsspärrning över hela
+verktygsytan (med de kvarstående, redan dokumenterade begränsningarna i gap 2–6).

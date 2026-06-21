@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
+import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 const scheduleManageSchema = z.object({
   action: z.enum(['get_ou', 'get_device', 'update', 'delete']).describe(
@@ -41,18 +42,35 @@ async function scheduleManageExecute(raw: unknown): Promise<McpToolResult> {
       }
       case 'update': {
         if (input.scheduleId === undefined) return fail('scheduleId is required for action=update');
+        const modeCheck = checkMutationAllowed('schedule_manage(update)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, scheduleId: input.scheduleId, message: modeCheck.dryRunNotice });
+        }
         const qs = buildQuery({ scheduleId: input.scheduleId });
-        const data = await client.request<unknown>('POST', `/api/v1/schedule/update${qs}`, input.body);
+        const data = await client.request<unknown>('POST', `/api/v1/schedule/update${qs}`, input.body, {
+          mutating: true,
+          opName: 'schedule_manage(update)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
       case 'delete': {
         if (input.scheduleId === undefined) return fail('scheduleId is required for action=delete');
+        const modeCheck = checkMutationAllowed('schedule_manage(delete)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, scheduleId: input.scheduleId, message: modeCheck.dryRunNotice });
+        }
         const qs = buildQuery({ scheduleId: input.scheduleId });
-        const data = await client.request<unknown>('DELETE', `/api/v1/schedule/delete${qs}`);
+        const data = await client.request<unknown>('DELETE', `/api/v1/schedule/delete${qs}`, undefined, {
+          mutating: true,
+          opName: 'schedule_manage(delete)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
     }
   } catch (err) {
+    if (err instanceof GuardrailError) return fail(`schedule_manage blocked: ${err.message}`);
     return fail(`schedule_manage failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

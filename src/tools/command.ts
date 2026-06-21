@@ -4,6 +4,7 @@ import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { resolveOuRef } from '../resolver.js';
 import { getProgressReporter } from '../progress.js';
+import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -76,9 +77,28 @@ async function deviceCommandExecute(raw: unknown): Promise<McpToolResult> {
       body = { ouId: match.ouid, ...body };
     }
 
-    const data = await client.request<unknown>('POST', `${path}${qs}`, body);
+    // Gate 1: mode tiers — every device_command invocation sends a command that
+    // changes device state (restart, halt, factoryreset, custom payloads, etc).
+    const modeCheck = checkMutationAllowed(`device_command(${input.command})`);
+    if (!modeCheck.proceed) {
+      return ok({
+        status: 'dry_run',
+        target: input.target,
+        command: input.command,
+        message: modeCheck.dryRunNotice,
+      });
+    }
+
+    const data = await client.request<unknown>('POST', `${path}${qs}`, body, {
+      mutating: true,
+      opName: `device_command(${input.command})`,
+    });
+    if (isDryRunSkip(data)) {
+      return ok({ status: 'dry_run', target: input.target, command: input.command, message: data.notice });
+    }
     return ok(data);
   } catch (err) {
+    if (err instanceof GuardrailError) return fail(`device_command blocked: ${err.message}`);
     return fail(`device_command failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

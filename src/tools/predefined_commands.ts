@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
+import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 // ── Logging helpers ───────────────────────────────────────────────────────────
 
@@ -112,10 +113,16 @@ async function predefinedCommandsExecute(raw: unknown): Promise<McpToolResult> {
       case 'add': {
         if (!input.add_entries || input.add_entries.length === 0)
           return fail('add requires at least one entry in add_entries');
+        const modeCheck = checkMutationAllowed('predefined_commands(add)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         const body = { requestValues: input.add_entries };
         const path = '/api/v1/predefinedCommands/add';
         log(tool, 'POST', path, body);
-        const data = await client.rawRequest<unknown>('POST', path, body);
+        const data = await client.rawRequest<unknown>('POST', path, body, {
+          mutating: true,
+          opName: 'predefined_commands(add)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
@@ -123,10 +130,16 @@ async function predefinedCommandsExecute(raw: unknown): Promise<McpToolResult> {
       case 'modify': {
         if (!input.modify_entries || input.modify_entries.length === 0)
           return fail('modify requires at least one entry in modify_entries');
+        const modeCheck = checkMutationAllowed('predefined_commands(modify)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         const body = { requestValues: input.modify_entries };
         const path = '/api/v1/predefinedCommands/modify';
         log(tool, 'POST', path, body);
-        const data = await client.rawRequest<unknown>('POST', path, body);
+        const data = await client.rawRequest<unknown>('POST', path, body, {
+          mutating: true,
+          opName: 'predefined_commands(modify)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
@@ -134,20 +147,34 @@ async function predefinedCommandsExecute(raw: unknown): Promise<McpToolResult> {
       case 'delete': {
         if (!input.delete_entries || input.delete_entries.length === 0)
           return fail('delete requires at least one entry in delete_entries');
+        const modeCheck = checkMutationAllowed('predefined_commands(delete)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         const body = { requestValues: input.delete_entries };
         const path = '/api/v1/predefinedCommands/delete';
         log(tool, 'POST', path, body);
-        const data = await client.rawRequest<unknown>('POST', path, body);
+        const data = await client.rawRequest<unknown>('POST', path, body, {
+          mutating: true,
+          opName: 'predefined_commands(delete)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
 
       case 'auth': {
         if (!input.password) return fail('auth requires password');
+        // Ambiguous side effect (enables command execution capability server-side) —
+        // treated as mutating out of caution.
+        const modeCheck = checkMutationAllowed('predefined_commands(auth)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         const body = { password: input.password };
         const path = '/api/v1/predefinedCommands/auth';
         log(tool, 'POST', path);
-        const data = await client.rawRequest<unknown>('POST', path, body);
+        const data = await client.rawRequest<unknown>('POST', path, body, {
+          mutating: true,
+          opName: 'predefined_commands(auth)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
@@ -163,15 +190,25 @@ async function predefinedCommandsExecute(raw: unknown): Promise<McpToolResult> {
       case 'modify_templates': {
         if (!input.template_entries || input.template_entries.length === 0)
           return fail('modify_templates requires at least one entry in template_entries');
+        const modeCheck = checkMutationAllowed('predefined_commands(modify_templates)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         const body = { modifiedTemplates: input.template_entries };
         const path = '/api/v1/predefinedCommands/modifyTemplates';
         log(tool, 'POST', path, body);
-        const data = await client.rawRequest<unknown>('POST', path, body);
+        const data = await client.rawRequest<unknown>('POST', path, body, {
+          mutating: true,
+          opName: 'predefined_commands(modify_templates)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
     }
   } catch (err) {
+    if (err instanceof GuardrailError) {
+      logErr(tool, err);
+      return fail(`predefined_commands blocked: ${err.message}`);
+    }
     logErr(tool, err);
     return fail(`predefined_commands failed: ${err instanceof Error ? err.message : String(err)}`);
   }
