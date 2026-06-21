@@ -12,7 +12,8 @@ import {
 import { listResources, listResourceTemplates, readResource } from './resources.js';
 
 import { fetch } from 'undici';
-import { setProgressReporter, clearProgressReporter } from './progress.js';
+import { setProgressReporter, clearProgressReporter, createProgressReporter } from './progress.js';
+import type { ToolContext, McpTool } from './types.js';
 import { loadSavedConfig, setSessionConfig, clearSessionConfig, resolveConfig } from './session.js';
 import { getClient } from './client.js';
 import { configureTool } from './tools/configure.js';
@@ -116,7 +117,7 @@ if (privateEndpointsEnabled) {
   process.stderr.write('[scout-mcp] Private endpoints enabled (SCOUT_ENABLE_PRIVATE_ENDPOINTS=true)\n');
 }
 
-const tools = [
+const tools: McpTool[] = [
   configureTool,
   contextTool,
   healthCheckTool,
@@ -175,7 +176,7 @@ server.setRequestHandler(ListToolsRequestSchema, () => ({
   })),
 }));
 
-server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
+server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<CallToolResult> => {
   const { name, arguments: args } = request.params;
   const tool = toolMap.get(name);
   if (!tool) {
@@ -185,18 +186,49 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
     };
   }
 
-  setProgressReporter({
-    async log(level, message) {
-      try {
+  // notifications/progress requires a progressToken from the originating request's _meta
+  // (per the MCP spec). If the caller didn't supply one, progressToken is undefined and
+  // sendProgress below is never invoked — createProgressReporter()'s report() degrades to a
+  // silent no-op in that case (see src/progress.ts).
+  const progressToken = request.params._meta?.progressToken;
+
+  setProgressReporter(
+    createProgressReporter({
+      log: async (level, message) => {
         await server.sendLoggingMessage({ level, data: message });
-      } catch {
-        // Best-effort: if the notification fails (transport not ready) continue silently
-      }
-    },
-  });
+      },
+      sendProgress:
+        progressToken !== undefined
+          ? async (progress, total, message) => {
+              await server.notification({
+                method: 'notifications/progress',
+                params: { progressToken, progress, total, message },
+              });
+            }
+          : undefined,
+    }),
+  );
+
+  const ctx: ToolContext = {
+    server,
+    progressToken,
+    sendProgress:
+      progressToken !== undefined
+        ? async (progress, total, message) => {
+            try {
+              await server.notification({
+                method: 'notifications/progress',
+                params: { progressToken, progress, total, message },
+              });
+            } catch {
+              // Best-effort: progress notifications must never fail the underlying operation.
+            }
+          }
+        : undefined,
+  };
 
   try {
-    const result = await tool.execute(args ?? {});
+    const result = await tool.execute(args ?? {}, ctx);
     return result as CallToolResult;
   } catch (err) {
     // Never forward stack traces or internal paths to the MCP client

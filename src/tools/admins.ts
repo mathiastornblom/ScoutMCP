@@ -8,7 +8,8 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
-import { ok, fail, type McpToolResult } from '../types.js';
+import { ok, fail, type McpToolResult, type ToolContext } from '../types.js';
+import { confirmDestructiveAction } from '../elicitation.js';
 import {
   checkMutationAllowed,
   checkPrivateWriteAllowedInProduction,
@@ -93,7 +94,7 @@ const adminManageSchema = z.object({
 
 type AdminManageInput = z.infer<typeof adminManageSchema>;
 
-async function adminManageExecute(raw: unknown): Promise<McpToolResult> {
+async function adminManageExecute(raw: unknown, ctx?: ToolContext): Promise<McpToolResult> {
   const input = adminManageSchema.parse(raw) as AdminManageInput;
   const client = getClient();
   const tool = 'admin_manage';
@@ -207,7 +208,15 @@ async function adminManageExecute(raw: unknown): Promise<McpToolResult> {
 
       case 'delete_admin': {
         if (input.admin_id === undefined) return fail('delete_admin requires admin_id');
-        if (!input.confirm) return fail('delete_admin requires confirm=true (destructive operation)');
+        const delOutcome = await confirmDestructiveAction(
+          { server: ctx?.server },
+          {
+            opName: 'admin_manage(delete_admin)',
+            summary: `Permanently delete admin account id ${input.admin_id}.`,
+            confirmFlag: input.confirm,
+          },
+        );
+        if (!delOutcome.proceed) return fail(`admin_manage blocked: ${delOutcome.reason}`);
         checkPrivateWriteAllowedInProduction('admin_manage(delete_admin)');
         const modeCheck = checkMutationAllowed('admin_manage(delete_admin)');
         if (!modeCheck.proceed) {

@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
-import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
+import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { resolveOuRef } from '../resolver.js';
 import { getProgressReporter } from '../progress.js';
+import { confirmDestructiveAction } from '../elicitation.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 function sleep(ms: number): Promise<void> {
@@ -48,15 +49,27 @@ const deviceCommandSchema = z.object({
 
 type DeviceCommandInput = z.infer<typeof deviceCommandSchema>;
 
-async function deviceCommandExecute(raw: unknown): Promise<McpToolResult> {
+async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpToolResult> {
   const input = deviceCommandSchema.parse(raw) as DeviceCommandInput;
 
-  // Security: require explicit confirmation for irreversible commands
-  if ((input.command === 'factoryreset' || input.command === 'halt') && input.confirm !== true) {
-    return fail(
-      `command=${input.command} is irreversible and requires confirm=true to proceed. ` +
-        'Set confirm: true only after verifying the target device.',
+  // Security: require explicit confirmation for irreversible commands. Real elicitation
+  // prompt if the client supports it, otherwise the confirm:true fallback.
+  if (input.command === 'factoryreset' || input.command === 'halt') {
+    const target =
+      input.target === 'device'
+        ? (input.name ?? input.mac ?? input.id ?? input.clientid ?? '(unspecified device)')
+        : `${input.target} scope`;
+    const outcome = await confirmDestructiveAction(
+      { server: ctx?.server },
+      {
+        opName: `device_command(${input.command})`,
+        summary: `Send irreversible command "${input.command}" to ${target}.`,
+        confirmFlag: input.confirm,
+      },
     );
+    if (!outcome.proceed) {
+      return fail(`device_command blocked: ${outcome.reason}`);
+    }
   }
 
   const client = getClient();
@@ -147,7 +160,7 @@ const deviceDiagnosticsSchema = z.object({
 
 type DeviceDiagnosticsInput = z.infer<typeof deviceDiagnosticsSchema>;
 
-async function deviceDiagnosticsExecute(raw: unknown): Promise<McpToolResult> {
+async function deviceDiagnosticsExecute(raw: unknown, _ctx?: ToolContext): Promise<McpToolResult> {
   const input = deviceDiagnosticsSchema.parse(raw) as DeviceDiagnosticsInput;
   const client = getClient();
   const qs = buildQuery({
@@ -185,6 +198,7 @@ async function deviceDiagnosticsExecute(raw: unknown): Promise<McpToolResult> {
 
         // Step 1: trigger
         await reporter.log('info', 'Triggering diagnostics collection…');
+        await reporter.report(0, maxPolls, 'Triggering diagnostics collection…');
         await client.request<unknown>('GET', `/api/v1/command/device/diagnostics${qs}`);
 
         // Step 2: poll until done or timed out
@@ -201,6 +215,7 @@ async function deviceDiagnosticsExecute(raw: unknown): Promise<McpToolResult> {
         for (let attempt = 1; attempt <= maxPolls; attempt++) {
           await sleep(intervalMs);
           await reporter.log('info', `Polling diagnostics — attempt ${attempt}/${maxPolls}…`);
+          await reporter.report(attempt, maxPolls, `Polling diagnostics — attempt ${attempt}/${maxPolls}`);
 
           const poll = await client.request<PollResp>(
             'GET',
@@ -225,6 +240,7 @@ async function deviceDiagnosticsExecute(raw: unknown): Promise<McpToolResult> {
           const clientIdentifier = resp?.clientIdentifier ?? input.clientid;
           const fileId = resp?.diagnosticsFileId;
           await reporter.log('info', statusMsg ? `  ${statusMsg}` : '  Diagnostics ready.');
+          await reporter.report(maxPolls, maxPolls, statusMsg || 'Diagnostics ready.');
 
           if (clientIdentifier && fileId !== undefined) {
             const baseUrl = process.env.SCOUT_BASE_URL?.replace(/\/$/, '');

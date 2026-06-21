@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
-import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
+import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
+import { confirmDestructiveAction } from '../elicitation.js';
 import {
   checkMutationAllowed,
   checkBaseWriteAllowed,
@@ -139,7 +140,7 @@ async function lookupRunningEluxVersion(client: ReturnType<typeof getClient>, re
   }
 }
 
-async function configUpdateExecute(raw: unknown): Promise<McpToolResult> {
+async function configUpdateExecute(raw: unknown, ctx?: ToolContext): Promise<McpToolResult> {
   const input = configUpdateSchema.parse(raw) as ConfigUpdateInput;
   const client = getClient();
   let warningLines: string[] = [];
@@ -182,25 +183,14 @@ async function configUpdateExecute(raw: unknown): Promise<McpToolResult> {
       checkOuWriteAllowed({ targetPath: resolvedOuPath });
     }
 
-    // Fleet-wide write gate — OU scope or multi-device bulk requires explicit confirm=true.
-    // (No elicitation capability is exposed by src/session.ts/src/index.ts today, so this
-    // falls back to the existing confirm:true flag pattern used elsewhere in this codebase,
-    // per §3.3 of the spec.)
-    const isFleetWide = input.target === 'ou' || (input.deviceIds && input.deviceIds.length > 1);
-    if (isFleetWide && input.confirm !== true) {
-      const affected = input.deviceIds ? input.deviceIds.length : 'the entire OU (and its inheriting devices)';
-      return fail(
-        `config_update blocked: this write targets ${input.target === 'ou' ? 'an OU scope' : `${affected} devices`}, ` +
-          'which is a fleet-wide change. Pass confirm=true to proceed after reviewing the scope, section, and body.',
-      );
-    }
-
     // Gate 3 (closing the previously documented gap): target=ou writes inherit to every
     // device under that OU, which can be the largest blast radius of any write in this
     // API — confirm=true alone is a boolean with no link to the actual device count. We
     // now resolve the real device count under the OU (recursively, via
     // countDevicesUnderOu) and run it through the same checkBlastRadius() the bulk
-    // deviceIds path uses, before allowing the write.
+    // deviceIds path uses, before allowing the write. Resolved before the fleet-wide
+    // confirmation gate below so the confirmation prompt/message can state the real count
+    // rather than a vague "the entire OU".
     let ouAffectedCount: number | undefined;
     if (input.target === 'ou' && resolvedOuId !== undefined) {
       ouAffectedCount = await countDevicesUnderOu(resolvedOuId);
@@ -208,6 +198,31 @@ async function configUpdateExecute(raw: unknown): Promise<McpToolResult> {
         affectedCount: ouAffectedCount,
         overrideBlastRadius: input.overrideBlastRadius,
       });
+    }
+
+    // Fleet-wide write gate — OU scope or multi-device bulk requires confirmation.
+    // If the connected client declared the `elicitation` capability during initialize, we
+    // issue a real yes/no elicitation/create prompt summarizing the blast radius (target,
+    // section, device count) and honor accept/decline/cancel. Otherwise we fall back to the
+    // confirm:true tool-input flag exactly as before — see src/elicitation.ts for the single
+    // condition (supportsElicitation(ctx.server)) that decides which path runs.
+    const isFleetWide = input.target === 'ou' || (input.deviceIds && input.deviceIds.length > 1);
+    if (isFleetWide) {
+      const affectedDesc =
+        input.target === 'ou'
+          ? `OU "${resolvedOuPath}"${ouAffectedCount !== undefined ? ` (${ouAffectedCount} device(s) affected via inheritance)` : ''}`
+          : `${input.deviceIds!.length} device(s)`;
+      const outcome = await confirmDestructiveAction(
+        { server: ctx?.server },
+        {
+          opName: 'config_update',
+          summary: `Write config section "${input.section}" to ${affectedDesc}. This is a fleet-wide change.`,
+          confirmFlag: input.confirm,
+        },
+      );
+      if (!outcome.proceed) {
+        return fail(`config_update blocked: ${outcome.reason}`);
+      }
     }
 
     // Gate 8b: snapshot-before-mutate for fleet-scope writes (OU-scope or multi-device
@@ -353,7 +368,8 @@ export const configUpdateTool = {
     'bulk deviceIds writes are capped by SCOUT_MAX_BLAST_RADIUS (default 25, hard ceiling 500) — pass overrideBlastRadius=true to exceed the cap up to the ceiling. ' +
     'Every write is validated against the eLux config schema (unknown keys fail with a "did you mean" suggestion, ' +
     'out-of-range values fail with the allowed range, newer-sinceVersion keys warn but do not block) unless skipValidation=true. ' +
-    'Fleet-wide writes (target=ou, or deviceIds with more than one device) require confirm=true.',
+    'Fleet-wide writes (target=ou, or deviceIds with more than one device) require confirmation: ' +
+    'an interactive yes/no prompt if the client supports MCP elicitation, otherwise confirm=true.',
   inputSchema: zodToJsonSchema(configUpdateSchema),
   execute: configUpdateExecute,
 };

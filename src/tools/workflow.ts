@@ -17,7 +17,8 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
-import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
+import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
+import { confirmDestructiveAction, supportsElicitation } from '../elicitation.js';
 import { resolveOuRef } from '../resolver.js';
 import {
   checkMutationAllowed,
@@ -286,7 +287,7 @@ const moveDevicesByFilterSchema = z.object({
 
 type MoveDevicesByFilterInput = z.infer<typeof moveDevicesByFilterSchema>;
 
-async function moveDevicesByFilterExecute(raw: unknown): Promise<McpToolResult> {
+async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Promise<McpToolResult> {
   const input = moveDevicesByFilterSchema.parse(raw) as MoveDevicesByFilterInput;
   const client = getClient();
 
@@ -296,7 +297,11 @@ async function moveDevicesByFilterExecute(raw: unknown): Promise<McpToolResult> 
     return fail('destOuPath or destOuId is required');
 
   const isDryRun = input.dryRun ?? false;
-  if (!isDryRun && input.confirm !== true)
+  // Cheap fail-fast for the non-elicitation, non-dry-run case: if the client doesn't support
+  // elicitation, confirm=true must be present before we even bother searching. Clients that DO
+  // support elicitation skip this early check — they get a real yes/no prompt after the device
+  // search resolves the actual count, below (see confirmDestructiveAction call further down).
+  if (!isDryRun && !supportsElicitation(ctx?.server) && input.confirm !== true)
     return fail(
       'confirm=true is required to move devices. ' +
         'Use dryRun=true first to preview what would be moved.',
@@ -338,6 +343,21 @@ async function moveDevicesByFilterExecute(raw: unknown): Promise<McpToolResult> 
         wouldMove: devices.map((d) => deviceName(d) ?? '(unknown)'),
         message: `${devices.length} device(s) would be moved. Set dryRun=false and confirm=true to proceed.`,
       });
+    }
+
+    // Confirmation gate, now that the real matched-device count is known. If the client
+    // supports elicitation, prompt with the actual count and destination; otherwise the
+    // early confirm=true fail-fast above has already gated this.
+    const moveOutcome = await confirmDestructiveAction(
+      { server: ctx?.server },
+      {
+        opName: 'move_devices_by_filter',
+        summary: `Move ${devices.length} device(s) to "${input.destOuPath ?? `OU id ${input.destOuId}`}".`,
+        confirmFlag: input.confirm,
+      },
+    );
+    if (!moveOutcome.proceed) {
+      return fail(`move_devices_by_filter blocked: ${moveOutcome.reason}`);
     }
 
     // Gate 3: blast-radius cap, now that the device count is resolved.
@@ -464,7 +484,7 @@ const bulkCommandSchema = z.object({
 
 type BulkCommandInput = z.infer<typeof bulkCommandSchema>;
 
-async function bulkCommandExecute(raw: unknown): Promise<McpToolResult> {
+async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpToolResult> {
   const input = bulkCommandSchema.parse(raw) as BulkCommandInput;
   const client = getClient();
 
@@ -474,7 +494,10 @@ async function bulkCommandExecute(raw: unknown): Promise<McpToolResult> {
   const isDryRun = input.dryRun ?? false;
   const isDestructive = (DESTRUCTIVE_COMMANDS as readonly string[]).includes(input.command);
 
-  if (!isDryRun && input.confirm !== true) {
+  // Cheap fail-fast for the non-elicitation, non-dry-run case (see move_devices_by_filter for
+  // the same pattern). Clients that support elicitation get a real yes/no prompt after the
+  // device search resolves the actual count, below.
+  if (!isDryRun && !supportsElicitation(ctx?.server) && input.confirm !== true) {
     const hint = isDestructive
       ? `command=${input.command} is irreversible and`
       : `bulk_command`;
@@ -516,6 +539,19 @@ async function bulkCommandExecute(raw: unknown): Promise<McpToolResult> {
       });
     }
 
+    // Confirmation gate, now that the real matched-device count is known.
+    const cmdOutcome = await confirmDestructiveAction(
+      { server: ctx?.server },
+      {
+        opName: `bulk_command(${input.command})`,
+        summary: `Send "${input.command}" to ${devices.length} device(s).${isDestructive ? ' This command is irreversible.' : ''}`,
+        confirmFlag: input.confirm,
+      },
+    );
+    if (!cmdOutcome.proceed) {
+      return fail(`bulk_command blocked: ${cmdOutcome.reason}`);
+    }
+
     // Gate 3: blast-radius cap, now that the device count is resolved.
     checkBlastRadius({ affectedCount: devices.length, overrideBlastRadius: input.overrideBlastRadius });
 
@@ -534,8 +570,13 @@ async function bulkCommandExecute(raw: unknown): Promise<McpToolResult> {
     // Send command to each device
     let commanded = 0;
     const failed: Array<{ device: string; error: string }> = [];
+    let processed = 0;
 
     for (const device of devices) {
+      processed++;
+      if (ctx?.sendProgress) {
+        await ctx.sendProgress(processed, devices.length, `${input.command}: device ${processed}/${devices.length}`);
+      }
       const name = deviceName(device);
       if (!name) {
         failed.push({ device: JSON.stringify(device), error: 'Could not determine device name' });

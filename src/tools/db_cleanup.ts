@@ -8,7 +8,8 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
-import { ok, fail, type McpToolResult } from '../types.js';
+import { ok, fail, type McpToolResult, type ToolContext } from '../types.js';
+import { confirmDestructiveAction } from '../elicitation.js';
 import {
   checkMutationAllowed,
   checkPrivateWriteAllowedInProduction,
@@ -59,7 +60,7 @@ const dbCleanupSchema = z.object({
 
 type DbCleanupInput = z.infer<typeof dbCleanupSchema>;
 
-async function dbCleanupExecute(raw: unknown): Promise<McpToolResult> {
+async function dbCleanupExecute(raw: unknown, ctx?: ToolContext): Promise<McpToolResult> {
   const input = dbCleanupSchema.parse(raw) as DbCleanupInput;
   const client = getClient();
   const tool = 'db_cleanup';
@@ -76,8 +77,16 @@ async function dbCleanupExecute(raw: unknown): Promise<McpToolResult> {
       }
 
       case 'delete': {
-        if (!input.confirm) return fail('db_cleanup action=delete requires confirm=true (destructive operation)');
         if (!input.filter) return fail('db_cleanup action=delete requires filter to specify which records to delete');
+        const delOutcome = await confirmDestructiveAction(
+          { server: ctx?.server },
+          {
+            opName: 'db_cleanup(delete)',
+            summary: `Permanently delete database records matching filter: ${input.filter}`,
+            confirmFlag: input.confirm,
+          },
+        );
+        if (!delOutcome.proceed) return fail(`db_cleanup blocked: ${delOutcome.reason}`);
         // Gate 7: private-endpoint writes are hard-disabled in SCOUT_MODE=write (production)
         // by default, even with SCOUT_ENABLE_PRIVATE_ENDPOINTS=true — db_cleanup(delete) is
         // one of the explicitly named high-risk endpoints for this gate.
