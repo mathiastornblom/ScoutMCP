@@ -99,10 +99,23 @@ docker build \
 | `SCOUT_TEST_OU_PATH` | tests only | OU path for integration tests, e.g. `/MCP-Test` |
 | `SCOUT_ENV` | tests only | Set `test` to restrict destructive operations to `SCOUT_TEST_OU_PATH` |
 | `SCOUT_ENABLE_PRIVATE_ENDPOINTS` | no | `true` to expose 11 additional private endpoint tools (see below) |
+| `SCOUT_MODE` | no | `read-only` (default) \| `dry-run` \| `write` — global write gate, see [Safety gates](#safety-gates) below |
+| `SCOUT_ALLOW_BASE_WRITES` | no | `true` to allow writes targeting Base config scope or the root OU (default off, independent of `SCOUT_MODE`) |
+| `SCOUT_MAX_BLAST_RADIUS` | no | Max devices a single bulk write may affect (default `25`, hard ceiling `500` — cannot be raised past the ceiling via config) |
 
 > **Note:** You can also configure credentials at runtime using the `scout_configure` tool — no `.env` file needed.
 
 > **Warning:** `SCOUT_IGNORE_TLS=true` disables certificate verification. Use only with self-signed certificates in controlled environments.
+
+### Safety gates
+
+Three independent gates guard every write-capable tool (`config_update`, `device_manage`, `ou_manage`, `move_devices_by_filter`, `bulk_command`, `onboard_branch`, and private write endpoints):
+
+1. **Mode tiers (`SCOUT_MODE`)** — defaults to `read-only`, which blocks every mutating call outright. `dry-run` resolves and reports what a write *would* do without performing it. `write` is required for any mutation to actually happen.
+2. **Base/root write-protection (`SCOUT_ALLOW_BASE_WRITES`)** — Base config scope and the root OU inherit to the entire fleet, so writes targeting them are blocked unless this is explicitly set to `true`. This is independent of `SCOUT_MODE=write` — both must be satisfied.
+3. **Blast-radius cap (`SCOUT_MAX_BLAST_RADIUS`)** — bulk operations that resolve a device count (OU-scope searches, bulk `deviceIds`) are capped at `25` devices by default. Raise it via env up to a hard ceiling of `500` devices, which cannot be exceeded by configuration alone. A single call can still pass `overrideBlastRadius: true` to exceed the configured cap (up to the ceiling) for that one call.
+
+These are early-phase guardrails (mode tiers, scope protection, blast-radius cap). Later phases add audit logging, a circuit breaker, snapshot-before-mutate, confirmation tokens, a protected-OU deny list, and a kill switch — not yet implemented.
 
 ---
 
@@ -304,14 +317,20 @@ Scout Board uses JWT authentication. The client sends credentials to `POST /rest
 
 ## Running tests
 
-Tests require a live Scout Board server. All write operations are scoped to `SCOUT_TEST_OU_PATH`.
+`npm test` runs the live integration suite — it requires a real Scout Board server, and all write operations are scoped to `SCOUT_TEST_OU_PATH`.
 
 ```bash
 cp .env.example .env   # fill in your values
 npm test
 ```
 
-The test suite aborts immediately if `SCOUT_TEST_OU_PATH` is not set.
+The integration suite aborts immediately if `SCOUT_TEST_OU_PATH` is not set.
+
+`npm run test:unit` runs pure unit tests (currently: the safety-gate logic in `src/safety/guardrails.ts`) — no live server or credentials needed:
+
+```bash
+npm run test:unit
+```
 
 ---
 
@@ -328,6 +347,8 @@ src/
   resolver.ts     Resolves OU names/partial names to IDs for natural-language inputs
   resources.ts    MCP Resources — live OU tree + device inventory
   progress.ts     ProgressReporter — wires server.sendLoggingMessage into long-running tools
+  safety/
+    guardrails.ts Mode tiers (SCOUT_MODE), Base/root write-protection, blast-radius cap
   tools/          One file per functional group
 catalog/
   server.yaml     Docker MCP Registry submission metadata

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
+import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 // ── app_list ──────────────────────────────────────────────────────────────────
 
@@ -65,29 +66,51 @@ async function appManageExecute(raw: unknown): Promise<McpToolResult> {
       case 'create': {
         if (!input.scope) return fail('scope is required for action=create');
         if (!input.applicationType) return fail('applicationType is required for action=create');
+        const modeCheck = checkMutationAllowed('app_manage(create)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         const data = await client.request<unknown>(
           'POST',
           `/api/v1/applications/${input.scope}/${input.applicationType}`,
           input.body,
+          { mutating: true, opName: 'app_manage(create)' },
         );
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
 
       case 'delete': {
         if (!input.scope) return fail('scope is required for action=delete');
         if (input.appId === undefined) return fail('appId is required for action=delete');
+        const modeCheck = checkMutationAllowed('app_manage(delete)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, appId: input.appId, message: modeCheck.dryRunNotice });
         const qs = buildQuery({ appId: input.appId, ouPath: input.ouPath, ouId: input.ouId });
-        const data = await client.request<unknown>('DELETE', `/api/v1/applications/${input.scope}${qs}`);
+        const data = await client.request<unknown>('DELETE', `/api/v1/applications/${input.scope}${qs}`, undefined, {
+          mutating: true,
+          opName: 'app_manage(delete)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
 
       case 'copy': {
-        const data = await client.request<unknown>('POST', '/api/v1/applications/copy', input.body);
+        const modeCheck = checkMutationAllowed('app_manage(copy)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
+        const data = await client.request<unknown>('POST', '/api/v1/applications/copy', input.body, {
+          mutating: true,
+          opName: 'app_manage(copy)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
 
       case 'move': {
-        const data = await client.request<unknown>('POST', '/api/v1/applications/move', input.body);
+        const modeCheck = checkMutationAllowed('app_manage(move)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
+        const data = await client.request<unknown>('POST', '/api/v1/applications/move', input.body, {
+          mutating: true,
+          opName: 'app_manage(move)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
 
@@ -98,12 +121,19 @@ async function appManageExecute(raw: unknown): Promise<McpToolResult> {
       }
 
       case 'set_inheritance': {
+        const modeCheck = checkMutationAllowed('app_manage(set_inheritance)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         const qs = buildQuery({ ouPath: input.ouPath, ouId: input.ouId });
-        const data = await client.request<unknown>('POST', `/api/v1/applications/inheritance${qs}`, input.body);
+        const data = await client.request<unknown>('POST', `/api/v1/applications/inheritance${qs}`, input.body, {
+          mutating: true,
+          opName: 'app_manage(set_inheritance)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
     }
   } catch (err) {
+    if (err instanceof GuardrailError) return fail(`app_manage blocked: ${err.message}`);
     return fail(`app_manage failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

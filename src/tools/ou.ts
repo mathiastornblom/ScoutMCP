@@ -6,6 +6,13 @@ import { resolveOuRef, invalidateOuCache } from '../resolver.js';
 import { enrich, invalidateEnrichmentCache } from '../enricher.js';
 import { suggestOus, formatOuSuggestions, isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
+import {
+  checkMutationAllowed,
+  checkBaseWriteAllowed,
+  isRootOuTarget,
+  isDryRunSkip,
+  GuardrailError,
+} from '../safety/guardrails.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -235,20 +242,64 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
       if (err) return fail(err);
     }
 
+    // structure_export is read-only (it doesn't mutate); everything else does.
+    const isMutatingAction = input.action !== 'structure_export';
+
+    // Gate 1: mode tiers.
+    const modeCheck = isMutatingAction
+      ? checkMutationAllowed(`ou_manage(${input.action})`)
+      : { proceed: true };
+
+    // Gate 2: root OU is protected the same way as Base config — it's the ancestor of
+    // every other OU, so rename/delete/move/converttobase against it is fleet-wide blast
+    // radius. We only know "root" by comparing the resolved target against the live
+    // root lookup (the API has no syntactic "is root" marker).
+    if (isMutatingAction && (resolvedPath !== undefined || resolvedId !== undefined)) {
+      const rootResp = await client.request<{ OUID?: number; OUPath?: string }>(
+        'GET',
+        '/api/v1/ou/root',
+      );
+      const isRoot = isRootOuTarget({
+        resolvedPath,
+        resolvedId,
+        rootPath: rootResp?.OUPath,
+        rootId: rootResp?.OUID,
+      });
+      checkBaseWriteAllowed({
+        isBaseOrRoot: isRoot,
+        label: 'the root OU (ancestor of every OU in the fleet)',
+      });
+    }
+
+    if (!modeCheck.proceed) {
+      return ok({
+        status: 'dry_run',
+        action: input.action,
+        target: resolvedPath ?? resolvedId ?? lookupQuery,
+        message: modeCheck.dryRunNotice,
+      });
+    }
+
     let result: unknown;
 
     switch (input.action) {
       case 'add': {
         if (!input.name) return fail('name is required for action=add');
         const qs = buildQuery({ destoupath: resolvedDestPath, destouid: resolvedDestId, name: input.name });
-        result = await client.request<unknown>('POST', `/api/v1/ou${qs}`);
+        result = await client.request<unknown>('POST', `/api/v1/ou${qs}`, undefined, {
+          mutating: true,
+          opName: 'ou_manage(add)',
+        });
         break;
       }
 
       case 'rename': {
         if (!input.newname) return fail('newname is required for action=rename');
         const qs = buildQuery({ path: resolvedPath, id: resolvedId, newname: input.newname });
-        result = await client.request<unknown>('PUT', `/api/v1/ou${qs}`);
+        result = await client.request<unknown>('PUT', `/api/v1/ou${qs}`, undefined, {
+          mutating: true,
+          opName: 'ou_manage(rename)',
+        });
         break;
       }
 
@@ -258,7 +309,10 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
           id: resolvedId,
           forceDeleteOUFilter: input.forceDeleteOUFilter,
         });
-        result = await client.request<unknown>('DELETE', `/api/v1/ou${qs}`);
+        result = await client.request<unknown>('DELETE', `/api/v1/ou${qs}`, undefined, {
+          mutating: true,
+          opName: 'ou_manage(delete)',
+        });
         break;
       }
 
@@ -269,13 +323,19 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
           destoupath: resolvedDestPath,
           destouid: resolvedDestId,
         });
-        result = await client.request<unknown>('PUT', `/api/v1/ou/move${qs}`);
+        result = await client.request<unknown>('PUT', `/api/v1/ou/move${qs}`, undefined, {
+          mutating: true,
+          opName: 'ou_manage(move)',
+        });
         break;
       }
 
       case 'converttobase': {
         const qs = buildQuery({ path: resolvedPath, id: resolvedId });
-        result = await client.request<unknown>('PUT', `/api/v1/ou/converttobase${qs}`);
+        result = await client.request<unknown>('PUT', `/api/v1/ou/converttobase${qs}`, undefined, {
+          mutating: true,
+          opName: 'ou_manage(converttobase)',
+        });
         break;
       }
 
@@ -296,9 +356,16 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
       case 'structure_import': {
         if (!input.importPayload) return fail('importPayload is required for action=structure_import');
         const body = { ...input.importPayload, dryRun: input.dryRun };
-        result = await client.request<unknown>('POST', '/api/v1/ou/structure/import', body);
+        result = await client.request<unknown>('POST', '/api/v1/ou/structure/import', body, {
+          mutating: true,
+          opName: 'ou_manage(structure_import)',
+        });
         break;
       }
+    }
+
+    if (isDryRunSkip(result)) {
+      return ok({ status: 'dry_run', action: input.action, message: result.notice });
     }
 
     // Invalidate resolver + enrichment cache after any mutation
@@ -309,6 +376,7 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
 
     return ok(result);
   } catch (err) {
+    if (err instanceof GuardrailError) return fail(`ou_manage blocked: ${err.message}`);
     const baseMsg = `ou_manage failed: ${err instanceof Error ? err.message : String(err)}`;
     if (isNotFound(err) && lookupQuery) {
       const suggestions = await suggestOus(lookupQuery);
@@ -324,7 +392,9 @@ export const ouManageTool = {
     'Create, rename, delete, or move OUs in Scout Board, and export/import OU structures. ' +
     'Use ouRef to identify the target OU and destouRef for the destination — both accept names, partial names, paths, or IDs. ' +
     'DESTRUCTIVE: action=delete permanently removes an OU and all its contents. ' +
-    'In SCOUT_ENV=test mode, delete operations are restricted to paths under SCOUT_TEST_OU_PATH.',
+    'In SCOUT_ENV=test mode, delete operations are restricted to paths under SCOUT_TEST_OU_PATH. ' +
+    'Gated by SCOUT_MODE (read-only blocks all writes, dry-run plans without executing); ' +
+    'rename/delete/move/converttobase against the root OU requires SCOUT_ALLOW_BASE_WRITES=true.',
   inputSchema: zodToJsonSchema(ouManageSchema),
   execute: ouManageExecute,
 };
