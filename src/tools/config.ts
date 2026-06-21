@@ -6,6 +6,9 @@ import {
   checkMutationAllowed,
   checkBaseWriteAllowed,
   checkBlastRadius,
+  checkOuWriteAllowed,
+  writeSnapshot,
+  auditLog,
   isDryRunSkip,
   GuardrailError,
 } from '../safety/guardrails.js';
@@ -13,7 +16,7 @@ import { validateConfigWrite, formatViolations, formatWarnings } from '../valida
 import { resolveTargetRef, resolveEffectiveConfig } from './config_resolve.js';
 import { foldConfigLayers, type ResolvedConfigKey } from '../rsop.js';
 import { loadEluxConfigSchema } from '../schema/eluxConfig.js';
-import { getOuChain } from '../resolver.js';
+import { getOuChain, resolveOuRef, countDevicesUnderOu } from '../resolver.js';
 
 // Section examples (not exhaustive — API accepts any valid section string):
 // general, firmware, display, hardware, security, userauthentication, diagnostics,
@@ -165,6 +168,20 @@ async function configUpdateExecute(raw: unknown): Promise<McpToolResult> {
       warningLines = formatWarnings(validation.warnings);
     }
 
+    // Gate 6: protected/allowed OU lists — only meaningful when the write resolves to a
+    // concrete OU path (target=ou). Resolved here (once) so both the protected-OU check
+    // and the blast-radius device count below can reuse the same resolved path/id.
+    let resolvedOuPath: string | undefined;
+    let resolvedOuId: number | undefined;
+    if (input.target === 'ou') {
+      const ouRef = input.ouId ?? input.ouPath;
+      if (ouRef === undefined) return fail('config_update target=ou requires ouPath or ouId');
+      const resolved = await resolveOuRef(ouRef);
+      resolvedOuPath = resolved.path;
+      resolvedOuId = resolved.ouid;
+      checkOuWriteAllowed({ targetPath: resolvedOuPath });
+    }
+
     // Fleet-wide write gate — OU scope or multi-device bulk requires explicit confirm=true.
     // (No elicitation capability is exposed by src/session.ts/src/index.ts today, so this
     // falls back to the existing confirm:true flag pattern used elsewhere in this codebase,
@@ -176,6 +193,44 @@ async function configUpdateExecute(raw: unknown): Promise<McpToolResult> {
         `config_update blocked: this write targets ${input.target === 'ou' ? 'an OU scope' : `${affected} devices`}, ` +
           'which is a fleet-wide change. Pass confirm=true to proceed after reviewing the scope, section, and body.',
       );
+    }
+
+    // Gate 3 (closing the previously documented gap): target=ou writes inherit to every
+    // device under that OU, which can be the largest blast radius of any write in this
+    // API — confirm=true alone is a boolean with no link to the actual device count. We
+    // now resolve the real device count under the OU (recursively, via
+    // countDevicesUnderOu) and run it through the same checkBlastRadius() the bulk
+    // deviceIds path uses, before allowing the write.
+    let ouAffectedCount: number | undefined;
+    if (input.target === 'ou' && resolvedOuId !== undefined) {
+      ouAffectedCount = await countDevicesUnderOu(resolvedOuId);
+      checkBlastRadius({
+        affectedCount: ouAffectedCount,
+        overrideBlastRadius: input.overrideBlastRadius,
+      });
+    }
+
+    // Gate 8b: snapshot-before-mutate for fleet-scope writes (OU-scope or multi-device
+    // bulk), captured before the mutating call actually executes (in write mode) or is
+    // skipped (in dry-run) — a snapshot taken before a planned-but-not-executed dry-run
+    // write is harmless and gives an immediate "what it looked like when we considered
+    // this" reference even if the write is never performed.
+    if (isFleetWide) {
+      try {
+        const snapshotTarget =
+          input.target === 'ou' && resolvedOuPath
+            ? await resolveEffectiveConfig({ target: 'ou', ouPath: resolvedOuPath, ouId: resolvedOuId! }, input.section)
+            : null;
+        if (snapshotTarget) {
+          const path = writeSnapshot(
+            `ou-${resolvedOuId}`,
+            { target: input.target, ouPath: resolvedOuPath, section: input.section, effectiveConfig: snapshotTarget },
+          );
+          if (path) warningLines.push(`Snapshot of pre-write effective config saved to ${path}`);
+        }
+      } catch {
+        // Snapshot is best-effort and must never block the write — see writeSnapshot() docs.
+      }
     }
 
     // Bulk path: fan out one update per device ID in parallel
@@ -211,8 +266,10 @@ async function configUpdateExecute(raw: unknown): Promise<McpToolResult> {
               input.body,
               { mutating: true, opName: 'config_update' },
             );
+            auditLog({ opName: 'config_update', target: `device:${devId}`, operation: 'POST', result: 'allowed', gate: null });
             return { id: devId, success: true, data };
           } catch (err) {
+            auditLog({ opName: 'config_update', target: `device:${devId}`, operation: 'POST', result: 'error', gate: null });
             return { id: devId, success: false, error: err instanceof Error ? err.message : String(err) };
           }
         }),
@@ -228,8 +285,10 @@ async function configUpdateExecute(raw: unknown): Promise<McpToolResult> {
       });
     }
 
-    // Single target path — affects at most one OU/device/base scope (count = 1, never
-    // exceeds the default cap), so no blast-radius check needed here.
+    // Single target path — affects at most one device/base scope (count = 1, never
+    // exceeds the default cap, so no blast-radius check needed there); target=ou is
+    // handled above (ouAffectedCount / checkBlastRadius), since a single OU write is not
+    // actually a "count = 1" operation once inheritance is accounted for.
     let qs = '';
     if (input.target === 'ou') {
       qs = buildQuery({ path: input.ouPath, id: input.ouId });
@@ -242,6 +301,7 @@ async function configUpdateExecute(raw: unknown): Promise<McpToolResult> {
         status: 'dry_run',
         target: input.target,
         section: input.section,
+        ...(ouAffectedCount !== undefined ? { affectedDeviceCount: ouAffectedCount } : {}),
         message: modeCheck.dryRunNotice,
         ...(warningLines.length > 0 ? { warnings: warningLines } : {}),
       });
@@ -253,13 +313,30 @@ async function configUpdateExecute(raw: unknown): Promise<McpToolResult> {
       input.body,
       { mutating: true, opName: 'config_update' },
     );
+    auditLog({
+      opName: 'config_update',
+      target: input.target === 'ou' ? `ou:${resolvedOuPath}` : input.target,
+      operation: 'POST',
+      blastRadius: ouAffectedCount,
+      result: 'allowed',
+      gate: null,
+    });
     if (isDryRunSkip(data)) {
       return ok({ status: 'dry_run', target: input.target, section: input.section, message: data.notice });
     }
     if (warningLines.length === 0) return ok(data);
     return ok({ result: data, warnings: warningLines });
   } catch (err) {
-    if (err instanceof GuardrailError) return fail(`config_update blocked: ${err.message}`);
+    if (err instanceof GuardrailError) {
+      auditLog({
+        opName: 'config_update',
+        target: input.target === 'ou' ? (input.ouPath ?? String(input.ouId ?? 'unknown')) : input.target,
+        result: 'refused',
+        gate: err.gate,
+        detail: err.message,
+      });
+      return fail(`config_update blocked: ${err.message}`);
+    }
     return fail(`config_update failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

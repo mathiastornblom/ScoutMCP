@@ -9,7 +9,12 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
-import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
+import {
+  checkMutationAllowed,
+  checkPrivateWriteAllowedInProduction,
+  isDryRunSkip,
+  GuardrailError,
+} from '../safety/guardrails.js';
 
 // ── Logging helpers ───────────────────────────────────────────────────────────
 
@@ -203,6 +208,7 @@ async function adminManageExecute(raw: unknown): Promise<McpToolResult> {
       case 'delete_admin': {
         if (input.admin_id === undefined) return fail('delete_admin requires admin_id');
         if (!input.confirm) return fail('delete_admin requires confirm=true (destructive operation)');
+        checkPrivateWriteAllowedInProduction('admin_manage(delete_admin)');
         const modeCheck = checkMutationAllowed('admin_manage(delete_admin)');
         if (!modeCheck.proceed) {
           return ok({ status: 'dry_run', action: input.action, adminId: input.admin_id, message: modeCheck.dryRunNotice });

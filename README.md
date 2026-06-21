@@ -102,6 +102,15 @@ docker build \
 | `SCOUT_MODE` | no | `read-only` (default) \| `dry-run` \| `write` — global write gate, see [Safety gates](#safety-gates) below |
 | `SCOUT_ALLOW_BASE_WRITES` | no | `true` to allow writes targeting Base config scope or the root OU (default off, independent of `SCOUT_MODE`) |
 | `SCOUT_MAX_BLAST_RADIUS` | no | Max devices a single bulk write may affect (default `25`, hard ceiling `500` — cannot be raised past the ceiling via config) |
+| `SCOUT_PROTECTED_OUS` | no | Comma-separated or JSON-array list of OU paths that can never be written to, regardless of `SCOUT_MODE`. Blocks the listed OU **and all of its descendants** (see [Safety gates](#safety-gates)). Default: empty (nothing protected). |
+| `SCOUT_ALLOWED_OUS` | no | Comma-separated or JSON-array list of OU paths. If set (non-empty), writes are restricted to **only** these OUs and their descendants — everything else is blocked. Default: empty (no restriction; opt-in allow-list). |
+| `SCOUT_ALLOW_PRIVATE_WRITES_IN_PRODUCTION` | no | `true` to allow high-risk private endpoints (`db_cleanup` delete, `system_settings` writes, `admin_manage` delete_admin) to mutate when `SCOUT_MODE=write`. Default off — these are hard-disabled in production even with `SCOUT_ENABLE_PRIVATE_ENDPOINTS=true`. No effect in `read-only`/`dry-run` (Gate 1 already covers those). |
+| `SCOUT_CIRCUIT_BREAKER_MAX_OPS` | no | Max destructive ops allowed within the window before the breaker trips (default `10`). |
+| `SCOUT_CIRCUIT_BREAKER_WINDOW_SECONDS` | no | Sliding window size in seconds for the circuit breaker (default `60`). |
+| `SCOUT_AUDIT_LOG_PATH` | no | Path to the append-only, newline-delimited-JSON audit log (default `./logs/scout-audit.log`). Directory is created if missing. |
+| `SCOUT_AUDIT_ACTOR` | no | Identity string recorded as `actor` in audit log entries. Default: `"unknown"` — there is no per-call MCP caller identity available to this server (single stdio session), so this is honestly reported rather than guessed unless a wrapping deployment sets it explicitly. |
+| `SCOUT_SNAPSHOT_DIR` | no | Directory for pre-write effective-config snapshots (default `./logs/scout-snapshots`). |
+| `SCOUT_KILL_SWITCH_FILE` | no | Path to a sentinel file (default `./KILL_SWITCH`). If the file exists, **every** mutating call is forced read-only regardless of `SCOUT_MODE`. See [Safety gates](#safety-gates) for the operator workflow. |
 
 > **Note:** You can also configure credentials at runtime using the `scout_configure` tool — no `.env` file needed.
 
@@ -109,13 +118,19 @@ docker build \
 
 ### Safety gates
 
-Three independent gates guard every write-capable tool (`config_update`, `device_manage`, `ou_manage`, `move_devices_by_filter`, `bulk_command`, `onboard_branch`, and private write endpoints):
+All write-capable tools (`config_update`, `device_manage`, `ou_manage`, `move_devices_by_filter`, `bulk_command`, `onboard_branch`, and private write endpoints) funnel through a single chokepoint module (`src/safety/guardrails.ts`). As of this round there are eight gates plus two non-blocking side-effecting helpers (audit log, snapshot):
 
 1. **Mode tiers (`SCOUT_MODE`)** — defaults to `read-only`, which blocks every mutating call outright. `dry-run` resolves and reports what a write *would* do without performing it. `write` is required for any mutation to actually happen.
 2. **Base/root write-protection (`SCOUT_ALLOW_BASE_WRITES`)** — Base config scope and the root OU inherit to the entire fleet, so writes targeting them are blocked unless this is explicitly set to `true`. This is independent of `SCOUT_MODE=write` — both must be satisfied.
-3. **Blast-radius cap (`SCOUT_MAX_BLAST_RADIUS`)** — bulk operations that resolve a device count (OU-scope searches, bulk `deviceIds`) are capped at `25` devices by default. Raise it via env up to a hard ceiling of `500` devices, which cannot be exceeded by configuration alone. A single call can still pass `overrideBlastRadius: true` to exceed the configured cap (up to the ceiling) for that one call.
+3. **Blast-radius cap (`SCOUT_MAX_BLAST_RADIUS`)** — bulk operations that resolve a device count (OU-scope writes — the actual device count under the OU is resolved and checked, not just a `confirm` boolean — and bulk `deviceIds`) are capped at `25` devices by default. Raise it via env up to a hard ceiling of `500` devices, which cannot be exceeded by configuration alone. A single call can still pass `overrideBlastRadius: true` to exceed the configured cap (up to the ceiling) for that one call.
+4. **Kill switch (`SCOUT_KILL_SWITCH_FILE`)** — if the sentinel file exists, every mutating call is forced read-only immediately, regardless of `SCOUT_MODE`. Operator workflow: `touch ./KILL_SWITCH` to engage, `rm ./KILL_SWITCH` to clear. Checked fresh on every call (no caching, no restart needed either way).
+5. **Circuit breaker (`SCOUT_CIRCUIT_BREAKER_MAX_OPS` / `SCOUT_CIRCUIT_BREAKER_WINDOW_SECONDS`)** — if more than the configured number of destructive ops occur within the configured sliding window, the breaker trips and **all** mutating calls are refused, regardless of mode, until an explicit re-arm. Re-arm is intentionally NOT automatic/time-based — it requires an explicit call to `resetCircuitBreaker()` (or a process restart, which clears the in-memory window) — see the gate's doc comment in `guardrails.ts` for the tradeoff rationale (a purely time-based cooldown would let a runaway agent simply wait out the window and resume).
+6. **Protected/allowed OU lists (`SCOUT_PROTECTED_OUS` / `SCOUT_ALLOWED_OUS`)** — a deny-list of OU paths that can never be written to (blocks the OU itself **and every descendant** — protecting an OU always protects its whole subtree, by design; there is no way to protect only the OU's own config while leaving children writable). An optional allow-list, if set, restricts ALL writes to only the listed OUs and their descendants. Deny always wins if an OU is in both lists.
+7. **Private-endpoint writes hard-off in production (`SCOUT_ALLOW_PRIVATE_WRITES_IN_PRODUCTION`)** — belt-and-suspenders on top of `SCOUT_ENABLE_PRIVATE_ENDPOINTS`: when `SCOUT_MODE=write`, the highest-risk private endpoints (`db_cleanup` delete, all `system_settings` writes, `admin_manage` delete_admin) are hard-disabled by default and require this additional flag to re-enable, even though private endpoints are otherwise on.
+8. **Append-only audit log (`SCOUT_AUDIT_LOG_PATH`)** — every mutation attempt (allowed or refused, by which gate) is appended as one JSON line, opened with the append flag and never truncated. Not a forensic-grade system: no rotation, no size cap, no tamper-evidence — just a plain "what happened" trail.
+8b. **Snapshot-before-mutate (`SCOUT_SNAPSHOT_DIR`)** — before a fleet-scope write (OU-scope or multi-device bulk) executes, the effective config (via the RSoP engine) is captured to a timestamped JSON file as a manual rollback reference point. Not an automatic rollback mechanism. Git-based snapshotting was considered and explicitly deferred — see the doc comment on `writeSnapshot()`.
 
-These are early-phase guardrails (mode tiers, scope protection, blast-radius cap). Later phases add audit logging, a circuit breaker, snapshot-before-mutate, confirmation tokens, a protected-OU deny list, and a kill switch — not yet implemented.
+A note on actor identity in the audit log: this server runs as a single stdio MCP session with one Scout Board credential set — there is no per-call upstream-caller identity threaded through today. Rather than fabricate one, the `actor` field honestly reports `"unknown"` unless `SCOUT_AUDIT_ACTOR` is set by a wrapping deployment that knows who/what triggered the session.
 
 ---
 
@@ -326,7 +341,7 @@ npm test
 
 The integration suite aborts immediately if `SCOUT_TEST_OU_PATH` is not set.
 
-`npm run test:unit` runs pure unit tests (currently: the safety-gate logic in `src/safety/guardrails.ts`) — no live server or credentials needed:
+`npm run test:unit` runs pure unit tests (the safety-gate logic in `src/safety/guardrails.ts`, the RSoP merge engine, config validation, and read-only/gate-wiring guarantees) — no live server or credentials needed:
 
 ```bash
 npm run test:unit
@@ -348,8 +363,11 @@ src/
   resources.ts    MCP Resources — live OU tree + device inventory
   progress.ts     ProgressReporter — wires server.sendLoggingMessage into long-running tools
   safety/
-    guardrails.ts Mode tiers (SCOUT_MODE), Base/root write-protection, blast-radius cap
+    guardrails.ts Single chokepoint for all 8 write-safety gates (mode tiers, base/root
+                  protection, blast-radius cap, kill switch, circuit breaker, protected/
+                  allowed OU lists, private-writes-in-production) + audit log + snapshot
   tools/          One file per functional group
+logs/             Runtime-generated, gitignored: scout-audit.log, scout-snapshots/
 catalog/
   server.yaml     Docker MCP Registry submission metadata
   tools.json      Static tool list for registry build validation

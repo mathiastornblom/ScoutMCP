@@ -9,7 +9,12 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
-import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
+import {
+  checkMutationAllowed,
+  checkPrivateWriteAllowedInProduction,
+  isDryRunSkip,
+  GuardrailError,
+} from '../safety/guardrails.js';
 
 // ── Logging helpers ───────────────────────────────────────────────────────────
 
@@ -131,6 +136,7 @@ async function systemSettingsExecute(raw: unknown): Promise<McpToolResult> {
           return fail(
             'set_logging requires at least one of: log_enabled, log_keep_alive, log_level, max_log_files, max_log_file_size',
           );
+        checkPrivateWriteAllowedInProduction('system_settings(set_logging)');
         const modeCheck = checkMutationAllowed('system_settings(set_logging)');
         if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, wouldSet: body, message: modeCheck.dryRunNotice });
         const path = '/api/v1/loggingOptions/set';
@@ -159,6 +165,7 @@ async function systemSettingsExecute(raw: unknown): Promise<McpToolResult> {
           body['DiscoverCollectTime'] = input.discover_collect_time;
         if (Object.keys(body).length === 0)
           return fail('set_discover requires at least one of: discover_ping_time, discover_collect_time');
+        checkPrivateWriteAllowedInProduction('system_settings(set_discover)');
         const modeCheck = checkMutationAllowed('system_settings(set_discover)');
         if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, wouldSet: body, message: modeCheck.dryRunNotice });
         const path = '/api/v1/discoverOptions/set';
@@ -183,6 +190,7 @@ async function systemSettingsExecute(raw: unknown): Promise<McpToolResult> {
       case 'set_retain_local_config': {
         if (input.retain_local_configuration === undefined)
           return fail('set_retain_local_config requires retain_local_configuration (boolean)');
+        checkPrivateWriteAllowedInProduction('system_settings(set_retain_local_config)');
         const modeCheck = checkMutationAllowed('system_settings(set_retain_local_config)');
         if (!modeCheck.proceed) {
           return ok({ status: 'dry_run', action: input.action, retainLocalConfiguration: input.retain_local_configuration, message: modeCheck.dryRunNotice });
@@ -210,6 +218,7 @@ async function systemSettingsExecute(raw: unknown): Promise<McpToolResult> {
       case 'set_device_name_options': {
         if (!input.name_options || Object.keys(input.name_options).length === 0)
           return fail('set_device_name_options requires name_options object (run get_device_name_options to see available fields)');
+        checkPrivateWriteAllowedInProduction('system_settings(set_device_name_options)');
         const modeCheck = checkMutationAllowed('system_settings(set_device_name_options)');
         if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         const path = '/api/v1/deviceNameOptions/set';
@@ -234,6 +243,7 @@ async function systemSettingsExecute(raw: unknown): Promise<McpToolResult> {
       case 'set_recovery_settings': {
         if (!input.recovery_options || Object.keys(input.recovery_options).length === 0)
           return fail('set_recovery_settings requires recovery_options object (run get_recovery_settings to see available fields)');
+        checkPrivateWriteAllowedInProduction('system_settings(set_recovery_settings)');
         const modeCheck = checkMutationAllowed('system_settings(set_recovery_settings)');
         if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         const path = '/api/v1/recoverySettings/set';
@@ -251,6 +261,7 @@ async function systemSettingsExecute(raw: unknown): Promise<McpToolResult> {
         if (!input.old_password) return fail('set_device_password requires old_password');
         if (!input.new_password) return fail('set_device_password requires new_password');
         if (!input.scout_board_id) return fail('set_device_password requires scout_board_id');
+        checkPrivateWriteAllowedInProduction('system_settings(set_device_password)');
         const modeCheck = checkMutationAllowed('system_settings(set_device_password)');
         if (!modeCheck.proceed) {
           return ok({ status: 'dry_run', action: input.action, scoutBoardId: input.scout_board_id, message: modeCheck.dryRunNotice });

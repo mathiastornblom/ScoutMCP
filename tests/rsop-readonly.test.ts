@@ -93,6 +93,25 @@ test('config_update (the one write path in config.ts) is the only place mutating
   }
 });
 
+console.log('\nGate wiring — config_update target=ou blast-radius gap closure (WS-D round 2)');
+
+test('config_update resolves the OU and runs checkOuWriteAllowed before the fleet-wide confirm check', () => {
+  const text = readFileSync(join(SRC, 'tools', 'config.ts'), 'utf8');
+  const ouCheckIdx = text.indexOf('checkOuWriteAllowed({ targetPath: resolvedOuPath })');
+  const confirmIdx = text.indexOf('Fleet-wide write gate');
+  assert(ouCheckIdx !== -1, 'expected a checkOuWriteAllowed call site in config.ts');
+  assert(confirmIdx !== -1, 'expected the fleet-wide confirm gate comment in config.ts');
+  assert(ouCheckIdx < confirmIdx, 'checkOuWriteAllowed must run before the confirm gate, not after');
+});
+
+test('config_update calls countDevicesUnderOu and checkBlastRadius for target=ou writes (closes the documented gap)', () => {
+  const text = readFileSync(join(SRC, 'tools', 'config.ts'), 'utf8');
+  assert(text.includes('countDevicesUnderOu(resolvedOuId)'), 'expected countDevicesUnderOu to be called with the resolved OU id');
+  const countIdx = text.indexOf('countDevicesUnderOu(resolvedOuId)');
+  const nextBlastRadiusIdx = text.indexOf('checkBlastRadius({', countIdx);
+  assert(nextBlastRadiusIdx !== -1 && nextBlastRadiusIdx > countIdx, 'expected checkBlastRadius to be called using the OU device count, after resolving it');
+});
+
 const passedCount = results.filter((r) => r.status === 'PASS').length;
 const failedCount = results.filter((r) => r.status === 'FAIL').length;
 

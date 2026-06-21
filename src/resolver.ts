@@ -139,6 +139,83 @@ export async function getOuChain(ouRef: string | number): Promise<OuMatch[]> {
   return chain.length > 0 ? chain : [target];
 }
 
+/** Extract the flat device array from a Scout /device/search response envelope. */
+function extractSearchDevices(raw: unknown): Array<Record<string, unknown>> {
+  if (!raw || typeof raw !== 'object') return [];
+  const r = raw as Record<string, unknown>;
+  const response = r['response'];
+  if (response && typeof response === 'object') {
+    const status = (response as Record<string, unknown>)['status'];
+    if (status && typeof status === 'object') {
+      const msg = (status as Record<string, unknown>)['msg'];
+      if (Array.isArray(msg)) return msg as Array<Record<string, unknown>>;
+    }
+  }
+  if (Array.isArray(r)) return r as Array<Record<string, unknown>>;
+  return [];
+}
+
+/** Recursively collects every OU in the subtree rooted at `ouid` (inclusive), by walking
+ *  the cached OU tree structure directly rather than relying on includeSubOus — per known
+ *  project behavior, the device/search `includeSubOus` flag does not reliably recurse, so
+ *  fan-out is done manually here, one /device/search call per leaf/branch OU. */
+async function collectOuSubtree(ouid: number): Promise<OuMatch[]> {
+  const client = getClient();
+  const root = await client.request<OuNode>('GET', '/api/v1/ou/structure');
+
+  const collected: OuMatch[] = [];
+  function walk(node: OuNode, capture: boolean): void {
+    const isTarget = node.OUID === ouid;
+    const shouldCapture = capture || isTarget;
+    if (shouldCapture && node.OUID !== undefined) {
+      collected.push({ ouid: node.OUID, name: node.OUName, path: node.OUPath });
+    }
+    if (Array.isArray(node.SubOUs)) {
+      for (const child of node.SubOUs) walk(child, shouldCapture);
+    }
+  }
+  walk(root, false);
+  return collected;
+}
+
+/**
+ * Counts the number of devices under an OU, including all sub-OUs, by walking the OU
+ * subtree and issuing one `/api/v1/device/search` call per OU in it (in parallel), using
+ * the `%` wildcard searchTerm convention (Scout's device search wildcard is `%`, not `*`)
+ * to match every device in each OU. Used by config_update's Gate 3 (blast-radius) check
+ * for target=ou writes, where a single OU-scope write inherits to every device under it.
+ *
+ * This is a best-effort count: OUs whose search call errors are treated as 0 devices for
+ * that OU (logged to stderr) rather than aborting the whole count, so a single flaky OU
+ * doesn't block the safety check that depends on this count — though note that "best
+ * effort" here is intentionally conservative in the wrong direction for a safety gate (an
+ * undercount could let a write through that should have been capped); this tradeoff is
+ * documented in the security review for this round.
+ */
+export async function countDevicesUnderOu(ouRef: string | number): Promise<number> {
+  const target = await resolveOuRef(ouRef);
+  const subtree = await collectOuSubtree(target.ouid);
+  const client = getClient();
+
+  const counts = await Promise.all(
+    subtree.map(async (ou) => {
+      try {
+        const qs = `?ouId=${encodeURIComponent(String(ou.ouid))}&searchTerm=${encodeURIComponent('%')}&limit=10000`;
+        const data = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
+        return extractSearchDevices(data).length;
+      } catch (err) {
+        process.stderr.write(
+          `[scout-mcp/resolver] countDevicesUnderOu: search failed for OU "${ou.path}" (id ${ou.ouid}): ` +
+            `${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 0;
+      }
+    }),
+  );
+
+  return counts.reduce((sum, c) => sum + c, 0);
+}
+
 function throwAmbiguous(ref: string, candidates: OuMatch[]): never {
   const list = candidates.map((c) => `  • "${c.name}"  ID: ${c.ouid}  path: ${c.path}`).join('\n');
   throw new Error(

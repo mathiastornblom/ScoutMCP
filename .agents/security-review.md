@@ -397,3 +397,199 @@ och är inte adresserade av denna runda — de tillhör senare WS-D-faser.
 Gap 1 är stängt: samtliga write-capable verktyg i kodbasen har nu Gate 1. SCOUT_MODE
 kan nu kommuniceras som en universell garanti för mutationsspärrning över hela
 verktygsytan (med de kvarstående, redan dokumenterade begränsningarna i gap 2–6).
+
+---
+
+# Security Review — 2026-06-22
+
+## Fas: Kod (feature/rsop-engine — config_update §3-validering + fleet-wide confirm, config_resolve, validation.ts)
+
+## Status: SECURITY: APPROVED
+
+## Granskat
+- `src/tools/config.ts` (config_update): gate-ordning verifierad som
+  checkMutationAllowed → checkBaseWriteAllowed → §3-validering (validateConfigWrite) →
+  fleet-wide confirm-check → checkBlastRadius (endast bulk-path) → mutating request.
+  `confirm=true` kan inte hoppa över validering eller mode/base-gates — de körs strikt
+  före confirm-kontrollen i kodflödet. `skipValidation=true` påverkar enbart §3
+  (schema-validering), inte Gate 1/2/3 i guardrails.ts.
+- `overrideBlastRadius` är fortsatt korrekt begränsad av HARD_BLAST_RADIUS_CEILING
+  (500) och påverkar bara bulk-deviceIds-grenen, oförändrat från tidigare granskning.
+- `src/validation.ts`: ren modul, inga nätverksanrop i kärnlogiken, ingen secret-
+  hantering. `apiSectionToSchemaSection` returnerar `null` (no-op, `valid: true`) för
+  sektioner utan schema-mappning — dokumenterat med kommentar, inte en tyst bugg.
+- `lookupRunningEluxVersion` är best-effort, fail-open till `undefined` (varning
+  hoppas över, gissas aldrig) — korrekt och ofarligt eftersom sinceVersion-resultatet
+  bara är en varning, inte en blockerande kontroll.
+- `config_resolve.ts` / `config_compare` inheritance-aware modes: read-only (GET-anrop
+  endast), ingen `mutating: true`, inget veto-behov.
+
+## Nytt fynd — INTE blockerande, men dokumenteras
+**OU-scope-writes (`target=ou`) saknar en faktisk blast-radius-beräkning.** Gate 3
+(`checkBlastRadius`) anropas bara i bulk-deviceIds-grenen. Single-target-grenen har
+kommentaren "count = 1, never exceeds the default cap" — det är korrekt för
+target=device/base, men felaktigt för target=ou: en enda OU-skrivning ärvs av alla
+underliggande enheter och kan i praktiken vara den största blast-radius som finns i
+API:et. Det enda skyddet för OU-scope idag är `confirm: true`, vilket är en boolean
+utan koppling till faktiskt antal påverkade enheter (ingen "X enheter påverkas,
+bekräfta" — modellen kan sätta confirm=true blint).
+
+Detta är **samma gap som redan är noterat och accepterat i föregående rundas
+"Kvarstående gap"-lista** ("blast-radius för indirekt OU-påverkan") och tillhör
+uttryckligen en senare WS-D-fas. Jag bekräftar att den här branchen inte gör gapet
+värre och inte introducerar något sätt att kringgå confirm-gaten — den lägger bara
+till confirm ovanpå ett redan känt och accepterat hål. Blockerar inte denna PR.
+
+## Bedömning av rapporterade "feature gaps"
+- **Sektioner utan schemamappning (Browser<n>, Store<n>, !NETDRIVE!#) hoppar §3-
+  validering**: detta är en täckningslucka, inte en bypass av säkerhetsgates.
+  Dessa skrivningar passerar fortfarande Gate 1 (mode), Gate 2 (base-write) och
+  fleet-wide confirm-gaten precis som alla andra sektioner — de saknar bara
+  typ/intervall-validering av värdet. Accepteras som feature-completeness-gap,
+  inte ett säkerhetsproblem.
+- **lookupRunningEluxVersion gissar properties utan att verifieras mot en
+  enhet**: fail-open till "hoppa varningen", aldrig fail-open till "skriv ett
+  ogiltigt värde". Inte ett säkerhetsproblem.
+
+## Rekommendationer (icke-blockerande)
+- Nästa WS-D-fas bör beräkna faktiskt antal enheter under en OU (t.ex. via
+  device_get/sub-OU-walk) innan `target=ou`-skrivningar tillåts, och köra det
+  resultatet genom `checkBlastRadius` precis som bulk-deviceIds-grenen — annars är
+  confirm-gaten för OU-scope kosmetisk jämfört med den kvantitativa cap som
+  device-bulk får.
+
+---
+
+# Security Review — 2026-06-22 (runda 2)
+
+## Fas: Kod (feature/safety-full, baserad på feature/rsop-engine — WS-D runda 2: kill
+switch, circuit breaker, protected/allowed OU-listor, private-writes-i-produktion,
+audit log, snapshot-before-mutate, samt stängning av OU-blast-radius-gapet ovan)
+
+## Status: SECURITY: APPROVED
+
+## Stängt gap (från föregående runda)
+**OU-scope blast-radius.** `src/tools/config.ts` (`config_update`, `target=ou`) löser
+nu OU:n tidigt (`resolveOuRef`), kör `checkOuWriteAllowed` mot den faktiska path:en,
+och anropar den nya `countDevicesUnderOu(resolvedOuId)` (i `src/resolver.ts`) — som
+går igenom hela OU-subträdet (via samma cachade OU-strukturanrop som `getOuChain`)
+och summerar `/api/v1/device/search`-resultat per OU med wildcard `%`
+(per projektminnet: `includeSubOus` rekurserar inte tillförlitligt, så fan-out görs
+manuellt) — och kör resultatet genom samma `checkBlastRadius()` som bulk-grenen
+använder, **innan** skrivningen tillåts. `confirm: true` är därmed inte längre den
+enda spärren för OU-scope; den kvantitativa cap:en (default 25, hård cap 500,
+`overrideBlastRadius` för att höja upp till cap:en) gäller nu lika för target=ou som
+för bulk deviceIds. Verifierat via statisk testning
+(`tests/rsop-readonly.test.ts`: `checkOuWriteAllowed` körs före confirm-gaten;
+`countDevicesUnderOu` följs av `checkBlastRadius`) — ingen live-anslutning krävs.
+
+**Känd kvarstående svaghet i denna fix:** `countDevicesUnderOu` är "best effort" —
+en OU i subträdet vars `/device/search`-anrop kastar fel räknas som 0 enheter för
+den OU:n (loggas till stderr, avbryter inte hela räkningen). Detta är medvetet
+dokumenterat i koden som en avvägning i FEL riktning för en säkerhetsgate (en
+underskattning kan släppa igenom en skrivning som borde ha stoppats av cap:en).
+Jag bedömer detta som en acceptabel, dokumenterad brist för denna runda — alternativet
+(abort hela skrivningen vid en enskild flckig sub-OU) skulle göra en ofarlig
+nätverksglitch till en hård blockering av en annars legitim skrivning — men det är
+inte en perfekt garanti och bör noteras för framtida granskning om Scout Board-API:et
+visar sig vara flakey i produktion.
+
+## Granskat — nya gates (alla i src/safety/guardrails.ts, samma chokepoint-modul)
+
+- **Gate 4 (kill switch, `SCOUT_KILL_SWITCH_FILE`):** `isKillSwitchEngaged()` gör en
+  färsk `existsSync` per anrop (ingen cache), och fail-closed vid filsystemfel
+  (behandlas som engaged om `existsSync` självt kastar). `checkKillSwitch` körs allra
+  först i `checkMutationAllowed`, före mode-gaten — så kill switch slår igenom även
+  om `SCOUT_MODE=write`. Verifierat med test som explicit sätter `SCOUT_MODE=write`
+  och bekräftar att kill switch fortfarande blockerar.
+- **Gate 5 (circuit breaker, `SCOUT_CIRCUIT_BREAKER_MAX_OPS` /
+  `_WINDOW_SECONDS`):** in-memory sliding window, trippas vid `> max` (inte `>=`)
+  inom fönstret. Re-arm är **inte** tidsbaserat automatiskt — kräver explicit
+  `resetCircuitBreaker()` (eller processomstart). Detta är ett medvetet
+  designval (dokumenterat i kodkommentar och README): ett rent tidsbaserat
+  cooldown skulle låta en agent i en oändlig loop bara vänta ut fönstret och
+  återuppta mutationer utan mänsklig inblandning — explicit re-arm tvingar ett
+  beslut. Avvägningen är operationell friktion: om ingen anropar
+  `resetCircuitBreaker()` förblir servern skriv-blockerad till nästa
+  processomstart. Detta är dokumenterat ärligt, inte dolt.
+- **Gate 6 (protected/allowed OU, `SCOUT_PROTECTED_OUS` / `SCOUT_ALLOWED_OUS`):**
+  matchning är path-segment-baserad (`isSameOrDescendant`), inte rå strängprefix —
+  `/Enterprise/Production2` matchar INTE mot skydd av `/Enterprise/Production`.
+  Domslut: en protected OU skyddar **hela sitt subträd**, inte bara exakt den noden
+  — dokumenterat i kod och README med motivering (annars vore skydd av en OU men
+  inte dess barn nästan meningslöst för det vanliga fallet). Känd begränsning:
+  det finns inget sätt att skydda enbart en nods egen config men lämna barnen
+  skrivbara i denna runda. Deny-listan vinner alltid över allow-listan vid overlap.
+  Rotskydd (`SCOUT_PROTECTED_OUS=/`) blockerar allt, verifierat med test.
+  **Detta gate är for närvarande endast inkopplat i `config_update` (target=ou)** —
+  det är inte ännu trådat genom `device_manage`(move), `move_devices_by_filter`,
+  eller `ou_manage`(delete/move), som också kan skriva mot en OU-scope. Detta är en
+  täckningslucka för denna runda, inte en bugg i gaten själv — se "Kvarstående gap"
+  nedan.
+- **Gate 7 (private writes i produktion,
+  `SCOUT_ALLOW_PRIVATE_WRITES_IN_PRODUCTION`):** no-op när `SCOUT_MODE` är
+  `read-only`/`dry-run` (Gate 1 täcker redan dessa lägen) — gaten är specifikt
+  riktad mot `SCOUT_MODE=write`. Inkopplad i `db_cleanup`(delete),
+  `system_settings`(alla `set_*`-actions, inte bara `set_device_password` — tolkat
+  brett enligt uppgiftens formulering "system_settings writes"), och
+  `admin_manage`(delete_admin). Verifierat att `false`/unset behandlas lika
+  (båda blockerar).
+- **Gate 8 (audit log, `SCOUT_AUDIT_LOG_PATH`):** `appendFileSync` med `flag: 'a'`
+  — aldrig `'w'`, aldrig trunkerar. Katalogen skapas vid första skrivningen om den
+  saknas. Skrivfel till loggen sväljs (loggas till stderr) snarare än kastas — en
+  trasig audit-logg får aldrig bli ett nytt sätt att blockera en i övrigt korrekt
+  gate-bedömning. `actor`-fältet rapporterar ärligt `"unknown"` om
+  `SCOUT_AUDIT_ACTOR` inte är satt — ingen gissning, eftersom denna kodbas (stdio,
+  en session per process) inte har någon per-anrop MCP-klientidentitet att luta sig
+  mot. Verifierat med riktiga filskrivningar i temp-katalog, läst tillbaka och
+  parsead som JSON i testerna.
+- **Gate 8b (snapshot-before-mutate, `SCOUT_SNAPSHOT_DIR`):** skriver med
+  `flag: 'wx'` (failar om filen redan finns — kollision är extremt osannolik given
+  timestamp+target i filnamnet, men hellre fail-loud än att tyst skriva över en
+  tidigare snapshot). Inkopplad i `config_update` för fleet-wide writes
+  (`target=ou` eller multi-device `deviceIds`), tas innan den muterande anropet
+  körs (eller hoppas över i dry-run, vilket är ofarligt). Push till git är
+  explicit INTE implementerad denna runda (per uppgiftens scope) — dokumenterat
+  som framtida möjlighet i kodkommentar.
+
+## Nytt fynd — INTE blockerande, men dokumenteras
+
+**Gate 6 (protected/allowed OU) är inte trådad genom alla OU-skrivande verktyg.**
+Som nämnt ovan är `checkOuWriteAllowed` bara inkopplad i `config_update`. Verktyg som
+`device_manage`(action=move, destination=OU), `ou_manage`(action=delete/move), och
+`move_devices_by_filter` kan också flytta enheter till eller radera en OU, och
+passerar idag INTE genom protected/allowed-OU-kontrollen. Detta är ett nytt,
+namngivet gap (inte samma som den stängda OU-blast-radius-luckan ovan) och bör
+adresseras i en kommande runda — annars är `SCOUT_PROTECTED_OUS` en partiell garanti
+("skyddar OU-config-skrivningar men inte OU/device-flytt/radering"), vilket bör
+kommuniceras tydligt om denna server driftsätts med en deny-list som operatören
+litar på fullt ut. Blockerar inte denna PR eftersom uppgiften för denna runda
+explicit avgränsade scope till `config_update`-flödet och guardrails-modulen; men
+det är en verklig lucka, inte en hypotetisk.
+
+## Bedömning av cirkelbrytarens re-arm-design
+Tidsbaserad-only re-arm avvisades medvetet till förmån för explicit re-arm. Detta är
+korrekt ur ett "stoppa en agent i en oändlig loop"-perspektiv, men introducerar en
+operationell risk i motsatt riktning: om servern körs obevakat och ingen extern
+mekanism anropar `resetCircuitBreaker()`, förblir den permanent skriv-blockerad efter
+en enda trippning tills processen startas om. Detta är ett medvetet, dokumenterat
+val — inte ett förbiseende — men noteras här explicit eftersom det är den typen av
+avvägning som bör vara synlig för en driftsättande operatör, inte bara begravd i en
+kodkommentar.
+
+## Verifiering
+- `npx tsc --noEmit`: rent, inga typfel.
+- `npm run test:unit`: 100/100 gröna totalt (38 Gate 1–3 + tool-wiring från tidigare
+  rundor, 7 RSoP, 14 validation, 5 read-only/gate-wiring inkl. 2 nya för
+  OU-blast-radius-stängningen, 36 nya för runda 2-gates: kill switch, circuit
+  breaker, protected/allowed OU, private-writes-i-produktion, audit log, snapshot).
+- Manuell granskning: samtliga nya gate-funktioner i guardrails.ts grep:ade för att
+  bekräfta de anropar `auditLog` vid refusal, och att inget nytt ad-hoc env-var-check
+  smugit sig in utanför guardrails.ts (per uppgiftens chokepoint-krav).
+
+## Slutsats
+Det tidigare dokumenterade OU-blast-radius-gapet är stängt. Sex nya gates (4–7 plus
+8/8b) är inkopplade genom samma chokepoint-modul. Ett nytt, mindre gap identifieras
+och dokumenteras ärligt ovan (Gate 6 inte trådad genom device/ou-manage-verktygen) —
+detta blockerar inte denna runda eftersom det låg utanför explicit scope, men ska
+inte glömmas bort. APPROVED med detta gap som öppet, namngivet uppföljningsobjekt.
