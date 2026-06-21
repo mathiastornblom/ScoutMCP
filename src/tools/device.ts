@@ -7,26 +7,9 @@ import { enrich } from '../enricher.js';
 import { isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
 import { checkMutationAllowed, checkOuWriteAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
+import { extractSearchDevices } from '../devices.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
-
-type DeviceRecord = Record<string, unknown>;
-
-/** Extract the flat device array from a Scout search response. */
-function extractSearchDevices(raw: unknown): DeviceRecord[] {
-  if (!raw || typeof raw !== 'object') return [];
-  const r = raw as Record<string, unknown>;
-  const response = r['response'];
-  if (response && typeof response === 'object') {
-    const status = (response as Record<string, unknown>)['status'];
-    if (status && typeof status === 'object') {
-      const msg = (status as Record<string, unknown>)['msg'];
-      if (Array.isArray(msg)) return msg as DeviceRecord[];
-    }
-  }
-  if (Array.isArray(r)) return r as DeviceRecord[];
-  return [];
-}
 
 function assertTestScope(ouPath: string): string | null {
   if (process.env.SCOUT_ENV !== 'test') return null;

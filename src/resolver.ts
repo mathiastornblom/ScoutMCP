@@ -7,6 +7,7 @@
  */
 
 import { getClient } from './client.js';
+import { parseSearchDevices } from './devices.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -139,22 +140,6 @@ export async function getOuChain(ouRef: string | number): Promise<OuMatch[]> {
   return chain.length > 0 ? chain : [target];
 }
 
-/** Extract the flat device array from a Scout /device/search response envelope. */
-function extractSearchDevices(raw: unknown): Array<Record<string, unknown>> {
-  if (!raw || typeof raw !== 'object') return [];
-  const r = raw as Record<string, unknown>;
-  const response = r['response'];
-  if (response && typeof response === 'object') {
-    const status = (response as Record<string, unknown>)['status'];
-    if (status && typeof status === 'object') {
-      const msg = (status as Record<string, unknown>)['msg'];
-      if (Array.isArray(msg)) return msg as Array<Record<string, unknown>>;
-    }
-  }
-  if (Array.isArray(r)) return r as Array<Record<string, unknown>>;
-  return [];
-}
-
 /** Recursively collects every OU in the subtree rooted at `ouid` (inclusive), by walking
  *  the cached OU tree structure directly rather than relying on includeSubOus — per known
  *  project behavior, the device/search `includeSubOus` flag does not reliably recurse, so
@@ -185,12 +170,17 @@ async function collectOuSubtree(ouid: number): Promise<OuMatch[]> {
  * to match every device in each OU. Used by config_update's Gate 3 (blast-radius) check
  * for target=ou writes, where a single OU-scope write inherits to every device under it.
  *
- * This is a best-effort count: OUs whose search call errors are treated as 0 devices for
- * that OU (logged to stderr) rather than aborting the whole count, so a single flaky OU
- * doesn't block the safety check that depends on this count — though note that "best
- * effort" here is intentionally conservative in the wrong direction for a safety gate (an
- * undercount could let a write through that should have been capped); this tradeoff is
- * documented in the security review for this round.
+ * FAILS CLOSED: if any sub-OU's device-search call errors, or returns a response that
+ * doesn't parse as a valid device-search envelope (see parseSearchDevices in devices.ts),
+ * the whole count throws rather than silently substituting 0 for that OU. A blast-radius
+ * cap that undercounts on a transient failure is worse than one that refuses outright — it
+ * would let a write through that should have been capped. checkBlastRadius's caller is
+ * expected to treat a thrown error here as "refuse the operation", not "proceed assuming a
+ * lower count than reality."
+ *
+ * (Previously this was a best-effort count that treated per-OU errors as 0 devices,
+ * documented as an intentionally-flagged fail-open tradeoff — that tradeoff is removed by
+ * this change; see security-review.md for the round that closed it.)
  */
 export async function countDevicesUnderOu(ouRef: string | number): Promise<number> {
   const target = await resolveOuRef(ouRef);
@@ -199,17 +189,26 @@ export async function countDevicesUnderOu(ouRef: string | number): Promise<numbe
 
   const counts = await Promise.all(
     subtree.map(async (ou) => {
+      const qs = `?ouId=${encodeURIComponent(String(ou.ouid))}&searchTerm=${encodeURIComponent('%')}&limit=10000`;
+      let data: unknown;
       try {
-        const qs = `?ouId=${encodeURIComponent(String(ou.ouid))}&searchTerm=${encodeURIComponent('%')}&limit=10000`;
-        const data = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
-        return extractSearchDevices(data).length;
+        data = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
       } catch (err) {
-        process.stderr.write(
-          `[scout-mcp/resolver] countDevicesUnderOu: search failed for OU "${ou.path}" (id ${ou.ouid}): ` +
-            `${err instanceof Error ? err.message : String(err)}\n`,
+        throw new Error(
+          `countDevicesUnderOu: device search failed for OU "${ou.path}" (id ${ou.ouid}): ` +
+            `${err instanceof Error ? err.message : String(err)}. Refusing to undercount — ` +
+            'the blast-radius check cannot proceed without a reliable count.',
         );
-        return 0;
       }
+      const parsed = parseSearchDevices(data);
+      if (!parsed.ok) {
+        throw new Error(
+          `countDevicesUnderOu: could not parse device search response for OU "${ou.path}" ` +
+            `(id ${ou.ouid}): ${parsed.reason}. Refusing to undercount — the blast-radius check ` +
+            'cannot proceed without a reliable count.',
+        );
+      }
+      return parsed.devices.length;
     }),
   );
 

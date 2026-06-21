@@ -25,7 +25,9 @@ import {
   checkOuWriteAllowed,
   isDryRunSkip,
   GuardrailError,
+  auditLog,
 } from '../safety/guardrails.js';
+import { parseSearchDevices, extractSearchDevices, deviceName, deviceOuId, type DeviceRecord } from '../devices.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -40,29 +42,31 @@ function testScopeError(path: string, label: string): string | null {
   return null;
 }
 
-// Normalise the many possible device-search response shapes into a flat array.
-type DeviceRecord = Record<string, unknown>;
-
-function extractDevices(raw: unknown): DeviceRecord[] {
-  if (Array.isArray(raw)) return raw as DeviceRecord[];
-  if (raw && typeof raw === 'object') {
-    const r = raw as Record<string, unknown>;
-    for (const key of ['Devices', 'devices', 'Items', 'items', 'Results', 'results', 'data']) {
-      if (Array.isArray(r[key])) return r[key] as DeviceRecord[];
-    }
+/**
+ * Parses a device-search response and throws (rather than returning an empty array) if the
+ * envelope doesn't match the documented `/api/v1/device/search` schema. Used by callers
+ * (move_devices_by_filter) where treating "couldn't parse the response" the same as "zero
+ * devices matched" would mean a safety gate downstream silently runs against an empty set
+ * instead of refusing — see resolveDistinctSourceOuPathsOrThrow below for why that matters.
+ */
+function extractDevicesOrThrow(raw: unknown): DeviceRecord[] {
+  const parsed = parseSearchDevices(raw);
+  if (!parsed.ok) {
+    auditLog({
+      opName: 'move_devices_by_filter',
+      target: 'unknown',
+      result: 'refused',
+      gate: 'unresolvable-source-ou',
+      detail: `device search response unparseable: ${parsed.reason}`,
+    });
+    throw new GuardrailError(
+      `Could not parse the device search response (${parsed.reason}). Refusing to proceed: ` +
+        'the protected-OU check requires a reliable device list to resolve source OUs from, ' +
+        'and an unparseable response must not be treated as "no devices matched."',
+      'unresolvable-source-ou',
+    );
   }
-  return [];
-}
-
-function deviceName(d: DeviceRecord): string | undefined {
-  return (d['Name'] ?? d['DeviceName'] ?? d['name']) as string | undefined;
-}
-
-/** Extract a device record's current OUID, if present (search results carry one per
- *  device — same field device_get returns). */
-function deviceOuId(d: DeviceRecord): number | undefined {
-  const raw = d['OUID'] ?? d['ouId'] ?? d['OuId'];
-  return typeof raw === 'number' ? raw : undefined;
+  return parsed.devices;
 }
 
 /**
@@ -71,22 +75,65 @@ function deviceOuId(d: DeviceRecord): number | undefined {
  * parallel). Used so move_devices_by_filter can run the protected-OU gate against every
  * *actual* source OU touched by the move — not just the search-root sourceOuPath/sourceOuId
  * the caller passed in, which (with includeSubOus=true) may not itself be the OU any
- * individual matched device lives in. Devices whose OUID can't be resolved are skipped
- * (best-effort, same posture as countDevicesUnderOu) rather than aborting the whole check.
+ * individual matched device lives in.
+ *
+ * FAILS CLOSED: unlike a generic best-effort lookup, this throws (refusing the whole bulk
+ * move) if there are matched devices but NONE of them yield a resolvable OU id — that
+ * combination means the protected-OU gate cannot evaluate any source OU at all, and
+ * proceeding would move devices with zero source-side protected-OU checks, defeating the
+ * gate entirely. The documented `/api/v1/device/search` response schema does not guarantee
+ * device records carry an OU id field, so this is not a hypothetical: a perfectly normal,
+ * well-formed response can legitimately have no per-device OU id.
+ *
+ * A *partial* resolution (some devices' OUIDs resolve, some don't) is still treated as a
+ * failure for the same reason — an unresolved device's source OU is exactly the kind of
+ * gap the gate exists to catch, so silently checking only the OUs we happened to resolve
+ * would be a narrower version of the same fail-open bug.
  */
-async function resolveDistinctSourceOuPaths(devices: DeviceRecord[]): Promise<string[]> {
-  const ids = Array.from(new Set(devices.map(deviceOuId).filter((id): id is number => id !== undefined)));
+async function resolveDistinctSourceOuPathsOrThrow(devices: DeviceRecord[]): Promise<string[]> {
+  const idsByDevice = devices.map(deviceOuId);
+  const unresolvedCount = idsByDevice.filter((id) => id === undefined).length;
+  if (unresolvedCount > 0) {
+    auditLog({
+      opName: 'move_devices_by_filter',
+      target: 'unknown',
+      result: 'refused',
+      gate: 'unresolvable-source-ou',
+      detail: `${unresolvedCount} of ${devices.length} matched device(s) had no resolvable OU id`,
+    });
+    throw new GuardrailError(
+      `Could not determine the source OU for ${unresolvedCount} of ${devices.length} matched device(s) ` +
+        '(no OUID/ouId field on the device-search record). Refusing to proceed: the protected-OU ' +
+        'check cannot run against an unresolvable source OU, and proceeding anyway would move ' +
+        'devices with zero source-side protected-OU checks.',
+      'unresolvable-source-ou',
+    );
+  }
+
+  const ids = Array.from(new Set(idsByDevice.filter((id): id is number => id !== undefined)));
   const paths = await Promise.all(
     ids.map(async (id) => {
       try {
         const match = await resolveOuRef(id);
         return match.path;
-      } catch {
-        return undefined;
+      } catch (err) {
+        auditLog({
+          opName: 'move_devices_by_filter',
+          target: `ouid:${id}`,
+          result: 'refused',
+          gate: 'unresolvable-source-ou',
+          detail: `OU id ${id} found on a matched device could not be resolved against the OU tree: ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+        });
+        throw new GuardrailError(
+          `Could not resolve OU id ${id} (found on a matched device) against the OU tree: ` +
+            `${err instanceof Error ? err.message : String(err)}. Refusing to proceed.`,
+          'unresolvable-source-ou',
+        );
       }
     }),
   );
-  return Array.from(new Set(paths.filter((p): p is string => p !== undefined)));
+  return Array.from(new Set(paths));
 }
 
 // ── onboard_branch ────────────────────────────────────────────────────────────
@@ -275,7 +322,10 @@ async function moveDevicesByFilterExecute(raw: unknown): Promise<McpToolResult> 
       limit: input.limit ?? 100,
     });
     const searchResp = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
-    const devices = extractDevices(searchResp);
+    // Throws (rather than silently treating an unparseable response as "no matches") because
+    // this tool's protected-OU gate (below) depends on resolving every matched device's
+    // source OU — see extractDevicesOrThrow / resolveDistinctSourceOuPathsOrThrow.
+    const devices = extractDevicesOrThrow(searchResp);
 
     if (devices.length === 0) {
       return ok({ status: 'ok', matched: 0, moved: 0, message: 'No devices matched the search criteria.' });
@@ -305,7 +355,12 @@ async function moveDevicesByFilterExecute(raw: unknown): Promise<McpToolResult> 
     if (destPathForGate) {
       checkOuWriteAllowed({ targetPath: destPathForGate });
     }
-    const sourcePaths = await resolveDistinctSourceOuPaths(devices);
+    // Fail closed: resolveDistinctSourceOuPathsOrThrow throws (rather than returning []) if
+    // any matched device's source OU can't be determined — see its doc comment. A thrown
+    // error here is caught by this function's outer catch and surfaced as a refusal, the
+    // same as any other guardrail gate, rather than letting the move proceed with zero
+    // source-OU checks.
+    const sourcePaths = await resolveDistinctSourceOuPathsOrThrow(devices);
     for (const sourcePath of sourcePaths) {
       checkOuWriteAllowed({ targetPath: sourcePath });
     }
@@ -439,7 +494,11 @@ async function bulkCommandExecute(raw: unknown): Promise<McpToolResult> {
       limit: input.limit ?? 100,
     });
     const searchResp = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
-    const devices = extractDevices(searchResp);
+    // bulk_command has no source-OU protected check (it sends device commands, not OU
+    // moves), so an unparseable response degrading to "no devices matched" is acceptable
+    // here — unlike move_devices_by_filter, nothing downstream silently skips a safety gate
+    // because of it.
+    const devices = extractSearchDevices(searchResp);
 
     if (devices.length === 0) {
       return ok({ status: 'ok', matched: 0, commanded: 0, message: 'No devices matched.' });

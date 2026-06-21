@@ -104,6 +104,11 @@ const DEVICES: Record<string, { OUID: number; Name: string; id: number }> = {
  *  (the gate must throw before client.request() is even attempted). */
 let mutatingCallsReceived: Array<{ method: string; path: string }> = [];
 
+/** When true, /device/search returns a response that does not match the documented
+ *  envelope shape at all — used to test that move_devices_by_filter fails closed (refuses)
+ *  rather than treating an unparseable response as "no devices matched". */
+let malformedSearchResponse = false;
+
 function startFakeScoutServer(): Promise<{ server: Server; baseUrl: string; cleanup: () => void }> {
   const tmpDir = mkdtempSync(join(tmpdir(), 'scout-mcp-test-certs-'));
   const keyPath = join(tmpDir, 'key.pem');
@@ -159,15 +164,41 @@ function startFakeScoutServer(): Promise<{ server: Server; baseUrl: string; clea
         }
 
         if (path === '/rest/api/v1/device/search' && method === 'GET') {
+          if (malformedSearchResponse) {
+            // Deliberately NOT the documented envelope shape (no response/status/msg
+            // wrapper at all) — exercises the fail-closed path in
+            // extractDevicesOrThrow/resolveDistinctSourceOuPathsOrThrow.
+            res.end(JSON.stringify({ unexpected: 'shape', devices: ['not', 'what', 'you', 'expect'] }));
+            return;
+          }
           const ouId = url.searchParams.get('ouId');
           const matched = Object.values(DEVICES).filter((d) => ouId === null || String(d.OUID) === ouId);
-          // workflow.ts's extractDevices() (used by move_devices_by_filter/bulk_command)
-          // expects a flat array or one of {Devices,devices,Items,items,Results,results,data}
-          // — a DIFFERENT envelope shape than device.ts's extractSearchDevices(), which
-          // expects {response:{status:{msg:[...]}}}. Both shapes are pre-existing,
-          // independent assumptions in this codebase about the same real endpoint; this
-          // fake server returns the shape each caller under test actually expects.
-          res.end(JSON.stringify({ devices: matched }));
+          // Single source of truth for the response envelope: matches the documented
+          // /api/v1/device/search schema in openapi.json exactly —
+          // response.status.msg.{visibleDevices,hiddenDevices} — the same shape
+          // src/devices.ts's parseSearchDevices()/extractSearchDevices() expect. Both
+          // device.ts and workflow.ts now parse this same shape via the shared helper, so
+          // this fixture serves ONE envelope for every caller rather than a different fake
+          // shape per caller (which is what let this class of bug hide previously).
+          res.end(
+            JSON.stringify({
+              code: 200,
+              message: 'OK',
+              response: {
+                status: {
+                  result: 0,
+                  msg: {
+                    visibleDevices: matched.map((d) => ({
+                      ClientIdentifier: `client-${d.id}`,
+                      Name: d.Name,
+                      OUID: d.OUID,
+                    })),
+                    hiddenDevices: 0,
+                  },
+                },
+              },
+            }),
+          );
           return;
         }
 
@@ -400,6 +431,38 @@ async function main(): Promise<void> {
       mutatingCallsReceived.some((c) => c.path.includes('/device/move')),
       'device move calls should have been issued when neither side is protected',
     );
+  });
+
+  await test('FAIL CLOSED: malformed/unparseable device-search response refuses the move (no source-OU bypass)', async () => {
+    configureSession();
+    process.env.SCOUT_PROTECTED_OUS = '/Enterprise/Production';
+    mutatingCallsReceived = [];
+    malformedSearchResponse = true;
+    try {
+      // Source root is unprotected (/Enterprise/Sandbox) and destination is unprotected too —
+      // if the protected-OU gate had a fail-open bug, this case would look completely safe
+      // and the move would proceed. It must not: an unparseable device-search response means
+      // the gate cannot determine source OUs at all, which must refuse, not silently pass.
+      const result = await moveDevicesByFilterTool.execute({
+        sourceOuId: '3',
+        searchTerm: '*',
+        destOuPath: '/Enterprise/Sandbox',
+        confirm: true,
+      });
+      assert(result.isError === true, 'expected an error result when the device-search response is unparseable');
+      const text = result.content[0]?.text ?? '';
+      assert(
+        /could not (parse|determine)/i.test(text),
+        `expected a "could not parse/determine" refusal message, got: ${text}`,
+      );
+      assert(
+        !mutatingCallsReceived.some((c) => c.path.includes('/device/move')),
+        'no device move should ever be issued when the device-search response could not be parsed — ' +
+          'this is exactly the fail-open gap the gate must close',
+      );
+    } finally {
+      malformedSearchResponse = false;
+    }
   });
 
   cleanup();

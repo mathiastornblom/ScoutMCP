@@ -670,3 +670,247 @@ källa-OCH-destination-kontroll där relevant. Inget nytt gap kvarstår inom det
 uppgiften definierade. De avgränsningar som finns (rename/converttobase/
 structure_import i ou_manage, bulk_command) är dokumenterade ovan som medvetna,
 inte glömda.
+
+---
+
+## 2026-06-22 — Independent Security re-review of feature/safety-full (WS-D round 2 + protected-OU wiring)
+
+Reviewed `git diff feature/rsop-engine..feature/safety-full`, `src/safety/guardrails.ts`, `src/tools/device.ts`,
+`src/tools/workflow.ts`, `src/tools/ou.ts`, and the two prior self-review entries. This is independent
+verification, not a rubber-stamp of the implementer's own conclusions.
+
+### Confirmed correct
+1. **Gate order in `checkMutationAllowed`**: kill switch (`checkKillSwitch`) and circuit breaker
+   (`checkCircuitBreaker`) run first, unconditionally, before the mode-tier check — confirmed by reading
+   the function body directly (guardrails.ts:113-146). Neither can be bypassed by an otherwise-valid write.
+2. **Circuit breaker re-arm**: `resetCircuitBreaker()` is not called anywhere in `src/` outside its own
+   definition and the test-only `__resetCircuitBreakerStateForTests()`. No auto-cooldown, no exploitable
+   reset path. Confirmed via grep across `src/`.
+3. **Audit log on refusal**: every throwing gate (mode, kill-switch, circuit-breaker, protected-ou,
+   private-write-production) calls `auditLog({ result: 'refused', ... })` before throwing. Confirmed by
+   reading each gate function body — not just trusting the comments.
+4. **device_manage(move) and move_devices_by_filter wiring**: `checkOuWriteAllowed` is called before the
+   mutating `client.request(...)` in both tools (device.ts:342-371 before the PUT at line 443;
+   workflow.ts:296-311 before the PUT loop at line 340). Order is correct in both.
+
+### BLOCKING FINDING — fail-open gap in move_devices_by_filter source-OU resolution
+
+The two prior self-review entries acknowledge but mischaracterize a severity-relevant bug as a cosmetic
+"pre-existing inconsistency, out of scope." It is not cosmetic — it defeats the very gate this branch
+claims to have closed:
+
+- `src/tools/device.ts`'s `extractSearchDevices()` reads devices from the envelope
+  `{response:{status:{msg:[...]}}}`.
+- `src/tools/workflow.ts`'s `extractDevices()` (used by `move_devices_by_filter`) reads from a flat array
+  or one of `{Devices,devices,Items,items,Results,results,data}` — a different shape entirely.
+- The new test fixture (`tests/protected-ou-wiring.test.ts` lines 161-171) admits this directly in a code
+  comment and serves **two different fake response shapes from the same fake endpoint** so that both
+  callers' parsers "succeed" in the test. This proves the test never exercises the real failure mode.
+
+Trace the actual consequence in `workflow.ts`:
+- `moveDevicesByFilterExecute` calls `extractDevices(searchResp)` → `devices`.
+- `resolveDistinctSourceOuPaths(devices)` reads `deviceOuId(d)` per device, filters out devices where it's
+  `undefined`, resolves the rest, and returns the resulting path list.
+- The protected-OU loop (`for (const sourcePath of sourcePaths) checkOuWriteAllowed(...)`) only runs for
+  paths that were resolved. If `extractDevices` returns the wrong shape against the real API (i.e. if the
+  real `/api/v1/device/search` actually wraps responses in `response.status.msg` the way `device.ts`
+  assumes), `devices` is `[]`, the early-return on line 280-282 fires ("No devices matched"), and the
+  bulk move silently no-ops — relatively safe, but masks a real result as "no matches" without surfacing
+  that the parser is broken.
+- The more dangerous case: if the real envelope is something in between, or `extractDevices` matches a
+  non-empty array via one of its many guessed keys but those records lack the literal `OUID`/`ouId`/`OuId`
+  fields `deviceOuId()` checks for, `devices.length > 0` (so blast-radius and the main loop proceed), but
+  `resolveDistinctSourceOuPaths` returns `[]` — **zero source-OU protected checks run, and the bulk move
+  proceeds to actually move devices** with only the destination OU checked. This is a fail-open path, not
+  fail-closed: nothing throws, nothing logs a refusal, the move just goes through as if no source devices
+  were ever in a protected OU. Given `device_manage`(move)'s analogous single-device source lookup
+  (`resolveCurrentDeviceOuPath` in device.ts) uses a single-device GET endpoint and a different code path,
+  it is not affected — this finding is specific to `move_devices_by_filter`'s bulk source-resolution path.
+
+This must be fixed before merge:
+1. Determine the actual `/api/v1/device/search` response envelope against a real Scout Board instance (or
+   from existing passing integration evidence elsewhere in the codebase) and make `extractDevices` in
+   workflow.ts and `extractSearchDevices` in device.ts agree — one parser, one source of truth, shared
+   helper if both files need it.
+   the live shape, the protected-OU check for `move_devices_by_filter` must fail closed (refuse the bulk
+   move) rather than silently proceeding with zero source-OU checks. A bulk move with unresolvable source
+   OUs is exactly the case this gate exists to catch — it must not be the case that silently bypasses it.
+3. Remove or rewrite the test fixture in `tests/protected-ou-wiring.test.ts` that serves two different
+   envelope shapes for the same endpoint — it currently guarantees the test suite can never catch this
+   class of bug, which is worse than not testing it at all (false confidence).
+
+## Status: SECURITY: BLOCKED
+
+Kill switch, circuit breaker, audit-on-refusal, and the device_manage(move)/ou_manage gate ordering are
+all correctly implemented and independently verified. However, the `move_devices_by_filter` protected-OU
+check has a fail-open gap rooted in the unresolved device-search envelope-format inconsistency between
+device.ts and workflow.ts — confirmed by the test fixture's own admission that it fakes two shapes to make
+both pass. This is the bulk/multi-device write path, i.e. the highest blast-radius tool covered by this
+gate, so the gap is not acceptable to ship. Must be fixed (real envelope confirmed + fail-closed fallback
++ test fixture corrected) before this branch proceeds.
+
+---
+
+## 2026-06-22 (later same day) — Fix for the BLOCKED finding: unified device-search parser + fail-closed protected-OU gate
+
+Addresses the independent re-review's BLOCKING FINDING above. All three required fixes plus
+both QA follow-ups (one fixed, one explicitly deferred) are described below with exact file
+references so this can be re-verified without re-deriving the reasoning.
+
+### 1. Real `/api/v1/device/search` envelope shape — confirmed from openapi.json
+
+Searched openapi.json directly for the `/api/v1/device/search` path's documented response
+example (the spec's own ground truth, not either existing parser's assumption):
+
+```
+{
+  "code": 200,
+  "message": "OK",
+  "response": {
+    "status": {
+      "result": 0,
+      "msg": {
+        "visibleDevices": [
+          { "ClientIdentifier": "...", "Name": "DEVICE-00001" },
+          { "ClientIdentifier": "...", "Name": "DEVICE-00002" }
+        ],
+        "hiddenDevices": 0
+      }
+    }
+  }
+}
+```
+
+Key correction versus BOTH prior parsers: `response.status.msg` is an OBJECT carrying
+`visibleDevices` (the array) and `hiddenDevices` (a count) — it is neither an array itself
+(device.ts's old `extractSearchDevices` assumption) nor one of the flat/`{Devices,...}` shapes
+workflow.ts's old `extractDevices` guessed. Neither prior parser matched the documented schema
+at all.
+
+Also confirmed: the documented example does **not** show any OU-id field (e.g. OUID) on
+individual device records returned by search — the example only has `ClientIdentifier`/`Name`.
+This is why the fix below treats "no per-device OU id" as an expected, schema-legal case that
+must fail closed, not as evidence of a bug to special-case away.
+
+### 2. Unified parser — `src/devices.ts` (new file)
+
+Created `src/devices.ts` as the single source of truth for parsing this response, replacing
+THREE independent copies that existed across the codebase (the two the prior review found,
+plus a third in `src/resolver.ts` that had the same bug and wasn't part of the original
+finding):
+
+- `parseSearchDevices(raw)` — returns `{ok:true, devices, hiddenDevices}` on a schema-matching
+  response, or `{ok:false, reason}` (never throws, never silently coerces) when the shape
+  doesn't match.
+- `extractSearchDevices(raw)` — convenience wrapper returning `devices` on success or `[]` on
+  parse failure, for callers where "couldn't parse" and "zero matches" are both safe to treat
+  as "nothing to do" (e.g. `device_get(search)`, `bulk_command`, `countDevicesUnderOu`'s
+  per-OU device count where the *aggregate* function now fails closed around it instead — see
+  point 3b).
+- `deviceName(d)` / `deviceOuId(d)` — field accessors, same names/semantics as before.
+
+Call sites updated:
+- `src/tools/device.ts` — local `extractSearchDevices` deleted, now imports from `devices.ts`.
+- `src/resolver.ts` — local `extractSearchDevices` deleted (this was the third, previously
+  unflagged copy), now imports `parseSearchDevices` from `devices.ts` for `countDevicesUnderOu`.
+- `src/tools/workflow.ts` — local `extractDevices`/`deviceOuId` deleted, now imports
+  `parseSearchDevices`/`deviceOuId`/`extractSearchDevices` from `devices.ts`. `bulk_command`
+  (no protected-OU dependency) uses the non-throwing `extractSearchDevices`; `move_devices_by_filter`
+  uses new throwing wrappers (point 3).
+
+### 3. Fail-closed protected-OU gate in `move_devices_by_filter` (src/tools/workflow.ts)
+
+Two new throwing helpers replace the old best-effort `extractDevices`/`resolveDistinctSourceOuPaths`
+for this tool specifically (bulk_command keeps best-effort parsing — it has no source-OU gate,
+so degrading to "no devices matched" on a bad response can't bypass anything):
+
+- `extractDevicesOrThrow(raw)` — throws `GuardrailError('unresolvable-source-ou')` if the
+  response doesn't match the documented envelope at all (parse failure), instead of returning
+  `[]`. A parse failure must never look like "no devices matched."
+- `resolveDistinctSourceOuPathsOrThrow(devices)` — throws `GuardrailError('unresolvable-source-ou')`
+  if ANY matched device has no resolvable OU id (not just "all of them" — a partial resolution
+  is treated as a failure too, since an unresolved device's source OU is exactly the gap the
+  gate exists to catch), or if an OU id present on a device can't be resolved against the live
+  OU tree. Both throw sites also call `auditLog({..., result: 'refused', gate: 'unresolvable-source-ou'})`
+  before throwing, so the refusal is recorded the same way every other gate's refusal is.
+
+Added `'unresolvable-source-ou'` to `GuardrailError`'s `gate` union in `src/safety/guardrails.ts`
+so this is a typed gate like the other seven, not a generic Error.
+
+`moveDevicesByFilterExecute`'s existing outer try/catch (already present, unchanged) catches
+`GuardrailError` and returns `fail('move_devices_by_filter blocked: ...')` — same path every
+other gate refusal in this tool already used, so no new error-handling plumbing was needed
+there.
+
+Net effect: the previously fail-open case (devices matched, but the gate can't determine any
+of their source OUs) now refuses the entire move with a clear message and an audit-logged
+refusal, instead of proceeding with zero source-OU checks.
+
+### 4. Test fixture fixed — `tests/protected-ou-wiring.test.ts`
+
+The `/device/search` handler in the fake server now serves exactly ONE envelope shape — the
+real, schema-accurate `response.status.msg.{visibleDevices,hiddenDevices}` shape — to every
+caller, instead of the previous two-different-shapes-for-two-different-callers setup that the
+prior review correctly identified as guaranteeing this bug class could never be caught.
+
+Added a new test: **"FAIL CLOSED: malformed/unparseable device-search response refuses the
+move (no source-OU bypass)"**. It flips a new `malformedSearchResponse` flag so `/device/search`
+returns a response with no `response/status/msg` wrapper at all, then calls
+`move_devices_by_filter` with an otherwise completely unprotected source and destination (the
+case that would look totally safe if the old fail-open bug were still present). Asserts:
+  - the tool call returns `isError: true` with a "could not parse/determine" message, and
+  - the `/device/move` HTTP endpoint is NEVER called.
+
+This is exactly the trace the independent review walked through by hand (devices matched, but
+the gate's source-OU resolution silently returns `[]`) — now it's a thrown refusal instead.
+
+### QA follow-up 1 — `countDevicesUnderOu` fail-open (src/resolver.ts) — FIXED
+
+Previously: per-sub-OU search errors were caught and treated as 0 devices for that OU (logged
+to stderr), so a transient failure could silently undercount and let a blast-radius-capped
+write through that should have been blocked.
+
+Now: both an HTTP error AND a parse failure (via the same `parseSearchDevices` used above) on
+any sub-OU's search call throw immediately, aborting the whole count with a clear error
+message naming the failing OU. `countDevicesUnderOu`'s only caller (`config.ts`'s
+`configUpdateExecute`, inside its own try/catch) already propagates a thrown error to a
+`fail()` result, so no caller-side change was needed — confirmed by reading `src/tools/config.ts`
+lines ~204-211 and its outer catch at line 329.
+
+### QA follow-up 2 — generic chokepoint audit logs `target: 'unknown'` — NOT FIXED, deferred
+
+`checkMutationAllowed(opName)` is called from 54 sites across `src/tools/*.ts` with only an
+`opName` string; the function itself has no `target`/blast-radius parameter to thread through,
+which is why its own `auditLog()` calls (guardrails.ts lines ~122, 131, 143) always log
+`target: 'unknown'` for Gates 1/4/5 refusals. Making this informative would require either (a)
+adding a second parameter to `checkMutationAllowed` and updating call sites that have a
+meaningful target/count available to pass it (most do, by the time they call it), or (b)
+moving the call later in each tool after target resolution — neither is a one-line change, and
+with 54 call sites touching nearly every tool file, this is a genuine refactor, not the "quick
+fix" the review explicitly gated this follow-up on. Left as-is per the review's own
+instruction ("if a quick fix, do it; if it requires a larger refactor, leave it and say so
+explicitly"). Not blocking — Gates 2/3/6/7's own dedicated `checkOuWriteAllowed`/
+`checkBlastRadius` audit calls already carry real target/count context; only the generic
+Gate 1/4/5 chokepoint is affected.
+
+### Verification
+
+```
+npx tsc --noEmit                 → exit 0, no errors
+npm run test:unit                → 111 passed, 0 failed across all 6 suites:
+  tests/guardrails.test.ts          38 passed
+  tests/rsop.test.ts                 7 passed
+  tests/validation.test.ts          14 passed
+  tests/rsop-readonly.test.ts        5 passed
+  tests/safety-round2.test.ts       36 passed
+  tests/protected-ou-wiring.test.ts 11 passed (incl. the new fail-closed test)
+```
+
+## Status: Awaiting re-review (fixes complete, branch not merged)
+
+All three required fixes from the BLOCKED finding are implemented (real envelope confirmed,
+single unified parser across all three previously-divergent call sites, fail-closed gate with
+audit logging, test fixture corrected + new regression test added). QA follow-up 1
+(`countDevicesUnderOu` fail-open) is fixed. QA follow-up 2 (generic chokepoint target context)
+is explicitly deferred as a larger refactor, not attempted. Not pushed, not merged — awaiting
+Security re-verification.
