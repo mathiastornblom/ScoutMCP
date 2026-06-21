@@ -9,6 +9,7 @@ import { getWorkingOu } from '../context.js';
 import {
   checkMutationAllowed,
   checkBaseWriteAllowed,
+  checkOuWriteAllowed,
   isRootOuTarget,
   isDryRunSkip,
   GuardrailError,
@@ -269,6 +270,36 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
         isBaseOrRoot: isRoot,
         label: 'the root OU (ancestor of every OU in the fleet)',
       });
+    }
+
+    // Gate 6: protected/allowed OU lists. delete and move both change what becomes of an
+    // existing OU's subtree, so the *target* OU (the one being deleted/moved/renamed) is
+    // always checked when resolved. move additionally relocates that whole subtree under
+    // a new parent, which changes what config it inherits going forward — so the
+    // *destination* OU is checked too, the same source+destination reasoning used for
+    // device_manage(move). rename/converttobase/add are not gated here: rename doesn't
+    // change the subtree's position or inheritance, add only affects a brand-new (not yet
+    // protected-relevant) OU, and the new OU's parent is the actual write target for add,
+    // which is covered by the destination check below when present.
+    if (isMutatingAction && (input.action === 'delete' || input.action === 'move')) {
+      let targetPathForGate = resolvedPath;
+      if (!targetPathForGate && resolvedId !== undefined) {
+        const match = await resolveOuRef(resolvedId);
+        targetPathForGate = match.path;
+      }
+      if (targetPathForGate) {
+        checkOuWriteAllowed({ targetPath: targetPathForGate });
+      }
+    }
+    if (isMutatingAction && (input.action === 'move' || input.action === 'add')) {
+      let destPathForGate = resolvedDestPath;
+      if (!destPathForGate && resolvedDestId !== undefined) {
+        const match = await resolveOuRef(resolvedDestId);
+        destPathForGate = match.path;
+      }
+      if (destPathForGate) {
+        checkOuWriteAllowed({ targetPath: destPathForGate });
+      }
     }
 
     if (!modeCheck.proceed) {

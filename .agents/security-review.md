@@ -593,3 +593,80 @@ Det tidigare dokumenterade OU-blast-radius-gapet är stängt. Sex nya gates (4�
 och dokumenteras ärligt ovan (Gate 6 inte trådad genom device/ou-manage-verktygen) —
 detta blockerar inte denna runda eftersom det låg utanför explicit scope, men ska
 inte glömmas bort. APPROVED med detta gap som öppet, namngivet uppföljningsobjekt.
+
+---
+
+## Uppföljning — Gate 6 trådad genom device_manage/ou_manage/move_devices_by_filter
+
+Detta stänger det gap som dokumenterades i föregående sektion ("Gate 6 är inte
+trådad genom alla OU-skrivande verktyg"). `checkOuWriteAllowed` (samma
+chokepoint-funktion i `src/safety/guardrails.ts`, ingen ny gate-logik) är nu
+inkopplad i:
+
+- **`device_manage`(action=move):** kontrollerar BÅDA sidor av flytten — den
+  upplösta destinationen (`destoupath`/`destouRef`/`destouid`) OCH enhetens
+  nuvarande OU (slås upp via `device_get`-motsvarande `/api/v1/device`-anrop på
+  enhetens identifierare, sedan `resolveOuRef(OUID)` mot OU-trädet). Motivering:
+  att flytta en enhet UT från en skyddad OU ändrar vilken config den ärver precis
+  lika mycket som att flytta en IN — ett gate som bara kollade destinationen hade
+  låtit en agent tömma en skyddad OU på enheter utan att någon gate reagerade.
+  `action=add` kontrollerar destinationen (samma path-upplösning som move, men
+  utan källkontroll eftersom add inte har någon källa).
+- **`ou_manage`(action=delete):** kontrollerar mål-OU:n (den som raderas).
+  **`ou_manage`(action=move):** kontrollerar BÅDA mål-OU:n (den som flyttas,
+  med hela sitt subträd) OCH destinations-OU:n. `rename`/`converttobase`/
+  `structure_import` kontrolleras INTE av detta gate — rename ändrar inte
+  subträdets position/arv, converttobase och structure_import bedömdes ligga
+  utanför ramen för "flytta/radera en OU" som uppgiften specificerade; detta är en
+  medveten avgränsning, inte ett förbiseende, men noteras explicit ifall en framtida
+  runda vill bredda gatet ytterligare.
+- **`move_devices_by_filter`:** kontrollerar destinations-OU:n OCH **varje unik
+  OU som någon av de faktiskt matchade enheterna befinner sig i** — inte bara den
+  sourceOuPath/sourceOuId som anroparen angav som sökrot. Detta är medvetet:
+  med `includeSubOus=true` kan sökroten matcha enheter spridda över många olika
+  OU:er i subträdet, och en enskild enhet kan sitta i en skyddad ättling-OU även om
+  sökroten själv inte är skyddad. Implementationen läser varje matchad enhets
+  `OUID`-fält (samma fält `device_get`/`device/search` redan returnerar per enhet,
+  inget nytt API-anrop krävs utöver den sökning som redan görs), deduplicerar, och
+  kör `checkOuWriteAllowed` för varje unik upplöst path. Skrivningen blockeras om
+  NÅGON av dessa källor — eller destinationen — är skyddad. Detta var den punkt
+  uppgiften flaggade som möjligen "infeasible utan extra API-anrop" — i praktiken
+  krävdes inget extra anrop, eftersom OUID redan finns i samma sökresultat som
+  `move_devices_by_filter` redan hämtar för att räkna `matched`/bygga
+  flytt-listan. Gapet är alltså helt stängt, inte delvis.
+
+### Vad som INTE är inkopplat (medvetna avgränsningar, inte glömda)
+- `ou_manage`(rename/converttobase/structure_import) — se ovan.
+- `bulk_command` — skickar kommandon till enheter, flyttar/raderar inga OU:er eller
+  enheter mellan OU:er, så protected-OU-gatet (som handlar om var en enhet/OU
+  *sitter*, inte vilka kommandon den tar emot) är inte relevant för det verktyget.
+  Detta nämndes inte i uppgiftens scope och är heller inte en del av "OU write"-
+  ytan detta gate skyddar.
+
+### Verifiering
+- `npx tsc --noEmit`: rent, inga typfel.
+- `npm run test:unit`: **110/110 gröna** (100 tidigare + 10 nya i
+  `tests/protected-ou-wiring.test.ts`). De 10 nya testerna körs mot en riktig
+  in-process HTTPS-stand-in för Scout Board (self-signed cert genererad via
+  `openssl` vid testkörning, `ignoreTls: true` i testsessionen) — inte mot
+  handvikta stubbar av gatet självt. Varje test verifierar BÅDE att tool-anropet
+  returnerar ett fel som nämner "protected", OCH att den muterande HTTP-anropet
+  (`PUT /device/move`, `DELETE /ou`, etc.) aldrig nådde den fejkade servern —
+  dvs. gatet kastar INNAN något skrivande HTTP-anrop görs, inte efter.
+- Sidoeffekt upptäckt under testskrivning, inte en del av detta gates ändring:
+  `device.ts`s `extractSearchDevices` och `workflow.ts`s `extractDevices` förväntar
+  sig olika svarskuvert-format för samma `/api/v1/device/search`-endpoint
+  (`{response:{status:{msg:[...]}}}` respektive `{Devices:[...]}` m.fl. nycklar).
+  Detta är en pre-existing inkonsekvens i kodbasen, inte introducerad av denna
+  ändring — flaggas här för synlighet men ligger utanför detta gates scope att
+  fixa.
+
+## Status: SECURITY: APPROVED — Gate 6-luckan från föregående runda är nu stängt
+
+Samtliga tre verktyg uppgiften namngav (`device_manage` move, `ou_manage`
+delete/move, `move_devices_by_filter`) är nu trådade genom samma
+`checkOuWriteAllowed`-chokepoint som `config_update` redan använde, med
+källa-OCH-destination-kontroll där relevant. Inget nytt gap kvarstår inom det scope
+uppgiften definierade. De avgränsningar som finns (rename/converttobase/
+structure_import i ou_manage, bulk_command) är dokumenterade ovan som medvetna,
+inte glömda.

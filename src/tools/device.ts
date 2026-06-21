@@ -6,7 +6,7 @@ import { resolveOuRef } from '../resolver.js';
 import { enrich } from '../enricher.js';
 import { isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
-import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
+import { checkMutationAllowed, checkOuWriteAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -36,6 +36,37 @@ function assertTestScope(ouPath: string): string | null {
     return `Target OU "${ouPath}" is outside SCOUT_TEST_OU_PATH "${testRoot}". Blocked in test mode.`;
   }
   return null;
+}
+
+/**
+ * Resolves the OU path a device currently sits in, by fetching the device record (which
+ * carries an OUID field) and resolving that ID against the OU tree. Used by
+ * action=move to identify the *source* OU before issuing the move — moving a device OUT
+ * of a protected OU changes what config it inherits just as much as moving one IN, so the
+ * protected-OU gate (checkOuWriteAllowed) must see both sides of a move, not just the
+ * destination. Returns undefined (rather than throwing) if the device can't be resolved,
+ * so a not-found device surfaces its normal "device not found" error from the move call
+ * itself rather than a confusing failure from this pre-check.
+ */
+async function resolveCurrentDeviceOuPath(
+  client: ReturnType<typeof getClient>,
+  identifiers: { name?: string; mac?: string; id?: string; clientid?: string },
+): Promise<string | undefined> {
+  try {
+    const qs = buildQuery({
+      name: identifiers.name,
+      mac: identifiers.mac,
+      id: identifiers.id,
+      clientid: identifiers.clientid,
+    });
+    const data = await client.request<Record<string, unknown>>('GET', `/api/v1/device${qs}`);
+    const ouId = data?.['OUID'];
+    if (typeof ouId !== 'number') return undefined;
+    const match = await resolveOuRef(ouId);
+    return match.path;
+  } catch {
+    return undefined;
+  }
 }
 
 // ── device_get ────────────────────────────────────────────────────────────────
@@ -293,6 +324,7 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
     if (input.destouRef !== undefined) {
       const match = await resolveOuRef(input.destouRef);
       resolvedDestId = match.ouid;
+      resolvedDestPath = match.path;
     } else {
       resolvedDestPath =
         input.destoupath ?? ((input.action === 'add' || input.action === 'move') ? getWorkingOu()?.path : undefined);
@@ -304,6 +336,37 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
       if (checkPath) {
         const err = assertTestScope(checkPath);
         if (err) return fail(err);
+      }
+    }
+
+    // Gate 6: protected/allowed OU lists. action=move changes which config an existing
+    // device inherits on BOTH ends of the move — moving a device out of a protected OU
+    // changes its effective config just as much as moving one in — so both the resolved
+    // destination and the device's current (source) OU are checked. Destination is
+    // checked unconditionally for add/move (a device's resolved destination matters even
+    // if the device doesn't exist yet, for add); the source is resolved by looking up the
+    // device's current OUID before the move executes.
+    if (input.action === 'move' || input.action === 'add') {
+      let destPathForGate = resolvedDestPath;
+      if (!destPathForGate && resolvedDestId !== undefined) {
+        // destouid was supplied without a path (no destouRef) — resolve it so the
+        // protected-OU gate can do its path-prefix match.
+        const match = await resolveOuRef(resolvedDestId);
+        destPathForGate = match.path;
+      }
+      if (destPathForGate) {
+        checkOuWriteAllowed({ targetPath: destPathForGate });
+      }
+    }
+    if (input.action === 'move') {
+      const sourcePath = await resolveCurrentDeviceOuPath(client, {
+        name: input.name,
+        mac: input.mac,
+        id: input.id,
+        clientid: input.clientid,
+      });
+      if (sourcePath) {
+        checkOuWriteAllowed({ targetPath: sourcePath });
       }
     }
 

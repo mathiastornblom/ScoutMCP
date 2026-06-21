@@ -18,9 +18,11 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
+import { resolveOuRef } from '../resolver.js';
 import {
   checkMutationAllowed,
   checkBlastRadius,
+  checkOuWriteAllowed,
   isDryRunSkip,
   GuardrailError,
 } from '../safety/guardrails.js';
@@ -54,6 +56,37 @@ function extractDevices(raw: unknown): DeviceRecord[] {
 
 function deviceName(d: DeviceRecord): string | undefined {
   return (d['Name'] ?? d['DeviceName'] ?? d['name']) as string | undefined;
+}
+
+/** Extract a device record's current OUID, if present (search results carry one per
+ *  device — same field device_get returns). */
+function deviceOuId(d: DeviceRecord): number | undefined {
+  const raw = d['OUID'] ?? d['ouId'] ?? d['OuId'];
+  return typeof raw === 'number' ? raw : undefined;
+}
+
+/**
+ * Resolves the distinct set of OU paths that the matched devices currently sit in, by
+ * reading each device's OUID and resolving it against the OU tree (deduplicated, in
+ * parallel). Used so move_devices_by_filter can run the protected-OU gate against every
+ * *actual* source OU touched by the move — not just the search-root sourceOuPath/sourceOuId
+ * the caller passed in, which (with includeSubOus=true) may not itself be the OU any
+ * individual matched device lives in. Devices whose OUID can't be resolved are skipped
+ * (best-effort, same posture as countDevicesUnderOu) rather than aborting the whole check.
+ */
+async function resolveDistinctSourceOuPaths(devices: DeviceRecord[]): Promise<string[]> {
+  const ids = Array.from(new Set(devices.map(deviceOuId).filter((id): id is number => id !== undefined)));
+  const paths = await Promise.all(
+    ids.map(async (id) => {
+      try {
+        const match = await resolveOuRef(id);
+        return match.path;
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+  return Array.from(new Set(paths.filter((p): p is string => p !== undefined)));
 }
 
 // ── onboard_branch ────────────────────────────────────────────────────────────
@@ -259,6 +292,23 @@ async function moveDevicesByFilterExecute(raw: unknown): Promise<McpToolResult> 
 
     // Gate 3: blast-radius cap, now that the device count is resolved.
     checkBlastRadius({ affectedCount: devices.length, overrideBlastRadius: input.overrideBlastRadius });
+
+    // Gate 6: protected/allowed OU lists. A bulk move can touch many distinct source OUs
+    // at once (the resolved matches under sourceOuPath/sourceOuId, recursively if
+    // includeSubOus=true) plus a single destination — every one of those is checked, not
+    // just the search root, because the search root the caller passed in is not
+    // necessarily the OU any individual matched device actually lives in once sub-OUs are
+    // included. The write is blocked if ANY resolved source OU or the destination is
+    // protected (or, with an allow-list configured, not allowed).
+    const destPathForGate =
+      input.destOuPath ?? (input.destOuId !== undefined ? (await resolveOuRef(input.destOuId)).path : undefined);
+    if (destPathForGate) {
+      checkOuWriteAllowed({ targetPath: destPathForGate });
+    }
+    const sourcePaths = await resolveDistinctSourceOuPaths(devices);
+    for (const sourcePath of sourcePaths) {
+      checkOuWriteAllowed({ targetPath: sourcePath });
+    }
 
     // Gate 1: mode tiers.
     const modeCheck = checkMutationAllowed('move_devices_by_filter');
