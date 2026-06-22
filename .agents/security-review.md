@@ -934,3 +934,27 @@ Independently re-verified commit ef791c5 on `feature/safety-full` against my own
 **Deferred item (target:'unknown' in generic chokepoint audit logs):** Acceptable to leave. It's a logging-fidelity gap, not a fail-open defect — Gates 2/3/6/7 (the gates that actually prevent the bypass class I blocked on) have their own dedicated audit calls with real target/count context. The generic Gate 1/4/5 chokepoint's `target:'unknown'` only degrades forensic audit-trail readability for those specific gates, it does not allow any mutation to proceed that should be blocked. Genuinely a 54-call-site refactor, correctly not bundled into a fail-open fix. Not blocking.
 
 **Verdict: SECURITY: APPROVED.** The fail-open gap is closed at its root (unified, schema-correct parser) and defended in depth (fail-closed gate + audit log + regression test that asserts the mutate call never fires). Branch may proceed to merge per QA sign-off; not pushed/merged by me.
+
+---
+
+## 2026-06-22 (final) — SECURITY: FINAL APPROVED
+
+Reviewed `feature/http-transport` (based on approved `feature/protocol-hygiene`): adds Streamable-HTTP transport (`src/transport.ts`, `src/http.ts`) and OIDC bearer-auth as connection-level gate for HTTP mode (`src/auth/oidc.ts`, `src/auth/middleware.ts`), `jose` promoted to direct dependency.
+
+1. **Default unchanged.** `src/index.ts` (~line 264): `resolveTransportMode()` defaults to `'stdio'` when `SCOUT_TRANSPORT` unset; the `else` branch is the original `new StdioServerTransport(); server.connect(transport)` — byte-identical to pre-existing code. No auth/middleware module is imported or invoked anywhere on this path.
+
+2. **Fail-closed startup confirmed by trace.** `startHttpTransport` (`src/http.ts:67-73`) calls `loadOidcConfig()` and throws synchronously if either `SCOUT_OIDC_ISSUER_URL` or `SCOUT_OIDC_AUDIENCE` is missing, before the HTTP listener is created. `loadOidcConfig` (`oidc.ts:34-39`) returns `undefined` unless both are present — no partial-config bypass.
+
+3. **Gate ordering confirmed.** `routeRequest` (`http.ts:163-191`) calls `requireBearerAuth` before any branch that reaches `handlePost`/`handleGetOrDelete`, which are the only entry points to `transport.handleRequest()` and `mcpServer.connect()`. A failed auth returns early (`if (!authenticated) return`) — no MCP body parsing, session lookup, or tool dispatch can occur first.
+
+4. **Token verification correctness confirmed.** `verifyBearerToken`/`verifyBearerTokenWithJwks` (`oidc.ts:130-133`, `155-158`) pass `{ issuer: config.issuerUrl, audience: config.audience }` into `jose`'s `jwtVerify` — both checked, not just shape. `jwtVerify` itself enforces signature validity and `exp`/`nbf` by default (jose's documented behavior; no `clockTolerance`/`maxTokenAge` overrides that would weaken this). Test suite (`tests/oidc-auth.test.ts`, 18/18 passing) explicitly exercises and asserts rejection of: expired token, wrong audience, wrong issuer, bad signature, and unknown `kid` — confirms the options actually take effect, not just present in source.
+
+5. **No SSRF/issuer-confusion vector.** `issuerUrl` is only ever sourced from `loadOidcConfig()` (env vars, read once at startup) and threaded by reference through `OidcConfig` into `routeRequest` → `requireBearerAuth` → `verifyBearerToken` → `resolveJwksUri`. No client header, request body, or token claim is read before or used to construct the discovery URL or JWKS URI. Per-issuer discovery/JWKS results are cached (`discoveryCache`, `jwksByUri`), keyed by the fixed configured issuer string only.
+
+6. **Dependency claim verified true.** Diffed lockfiles: `jose@6.2.3` is present and pinned identically in both `feature/protocol-hygiene` and `feature/http-transport` lockfiles (transitive via MCP SDK before this branch). `package.json` now adds it directly at `^6.1.0`, whose range includes the already-locked `6.2.3` — no version change, no newly introduced surface. 6.2.3 is the current latest on the registry; no known-bad version pinned.
+
+7. **Scope boundary confirmed.** `git diff feature/protocol-hygiene..feature/http-transport -- src/guardrails.ts` is empty — untouched. Nothing in `oidc.ts`, `middleware.ts`, or `http.ts` reads or sets `SCOUT_MODE`, nor passes any auth-derived value into tool dispatch or `ToolContext`. OIDC success only permits the HTTP connection to proceed to the existing `CallToolRequestSchema` handler, which still applies guardrails identically regardless of transport. Connection-level auth and write-level guardrails remain fully independent.
+
+Ran `tests/oidc-auth.test.ts` (18/18) and `tests/transport.test.ts` (17/17) myself — both pass, all green.
+
+**Verdict: SECURITY: FINAL APPROVED.** All seven points trace cleanly to source; no shortcuts, no silently-skipped checks, no scope creep into write-permission territory. This closes out the full multi-round build. Not pushed, not merged.
