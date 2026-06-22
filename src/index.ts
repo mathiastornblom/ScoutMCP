@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { startHttpTransport } from './http.js';
+import { resolveTransportMode, InvalidTransportError } from './transport.js';
 import {
   CallToolRequestSchema,
   CallToolResult,
@@ -253,5 +255,23 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   return { contents: [content] };
 });
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+// Transport selection — defaults to stdio, completely unchanged for existing users who
+// don't set SCOUT_TRANSPORT. SCOUT_TRANSPORT=http switches to the Streamable-HTTP
+// transport (src/http.ts), which adds its own OIDC bearer-auth gate and manages its own
+// per-session transport instances; it calls server.connect() itself per session, so we
+// must NOT call server.connect() with a StdioServerTransport in that branch.
+try {
+  const transportMode = resolveTransportMode(process.env.SCOUT_TRANSPORT);
+  if (transportMode === 'http') {
+    await startHttpTransport(server);
+  } else {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+  }
+} catch (err) {
+  if (err instanceof InvalidTransportError) {
+    process.stderr.write(`[scout-mcp] ${err.message}\n`);
+    process.exit(1);
+  }
+  throw err;
+}

@@ -111,10 +111,44 @@ docker build \
 | `SCOUT_AUDIT_ACTOR` | no | Identity string recorded as `actor` in audit log entries. Default: `"unknown"` — there is no per-call MCP caller identity available to this server (single stdio session), so this is honestly reported rather than guessed unless a wrapping deployment sets it explicitly. |
 | `SCOUT_SNAPSHOT_DIR` | no | Directory for pre-write effective-config snapshots (default `./logs/scout-snapshots`). |
 | `SCOUT_KILL_SWITCH_FILE` | no | Path to a sentinel file (default `./KILL_SWITCH`). If the file exists, **every** mutating call is forced read-only regardless of `SCOUT_MODE`. See [Safety gates](#safety-gates) for the operator workflow. |
+| `SCOUT_TRANSPORT` | no | `stdio` (default) \| `http` — selects the MCP transport. `stdio` is unchanged local-process behavior. `http` starts the Streamable-HTTP transport instead — see [HTTP transport & OIDC auth](#http-transport--oidc-auth) below. |
+| `SCOUT_HTTP_PORT` | no | TCP port for the HTTP transport (default `3000`). Only read when `SCOUT_TRANSPORT=http`. |
+| `SCOUT_OIDC_ISSUER_URL` | http transport only | OIDC issuer URL (e.g. your Entra ID or Okta tenant). **Required** when `SCOUT_TRANSPORT=http` — the server refuses to start without it, since HTTP is a network-reachable surface. |
+| `SCOUT_OIDC_AUDIENCE` | http transport only | Expected `aud` claim on incoming bearer tokens. **Required** when `SCOUT_TRANSPORT=http`. |
 
 > **Note:** You can also configure credentials at runtime using the `scout_configure` tool — no `.env` file needed.
 
 > **Warning:** `SCOUT_IGNORE_TLS=true` disables certificate verification. Use only with self-signed certificates in controlled environments.
+
+### HTTP transport & OIDC auth
+
+By default this server runs over **stdio** — a local trusted process, with no connection-level
+auth needed (whoever can spawn the process can talk to it). Setting `SCOUT_TRANSPORT=http`
+switches to the **Streamable-HTTP** transport instead, for hosted/remote deployments where the
+server isn't a local child process.
+
+This is a *different* auth layer from `SCOUT_USERNAME`/`SCOUT_PASSWORD` (which authenticate
+*this server* to the Scout Board REST API, and are unaffected by transport choice). HTTP mode
+adds a connection-level gate in front of MCP message handling: every request to `/mcp` must
+carry a valid `Authorization: Bearer <token>` issued by the OIDC provider configured via
+`SCOUT_OIDC_ISSUER_URL` / `SCOUT_OIDC_AUDIENCE`. The token's signature, issuer, audience, and
+expiry are verified against the provider's JWKS (resolved via standard OIDC discovery at
+`<issuer>/.well-known/openid-configuration`) using the [`jose`](https://github.com/panva/jose)
+library. Requests without a valid token are rejected with `401` before reaching any tool
+dispatch — this is independent of, and does not replace, the `SCOUT_MODE`/guardrails
+write-safety gates described below, which still apply to every write regardless of transport.
+
+This is also unrelated to eLux device OIDC (the `[OpenId]` section of `terminal.ini`) — that
+configures device-to-IdP auth for managed endpoints, a separate concern from admin-to-MCP-server
+auth.
+
+Both env vars are required when `SCOUT_TRANSPORT=http` — the server refuses to start otherwise,
+since an HTTP listener with no auth would be a network-reachable surface with no gate. `stdio`
+mode never reads or requires these vars.
+
+This implementation only validates bearer tokens (resource-server role) — it does not implement
+a full OIDC client (no login/consent flow, no refresh tokens). That's standard for an
+OIDC-protected API and out of scope here.
 
 ### Safety gates
 
