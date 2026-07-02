@@ -91,8 +91,14 @@ docker build \
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `SCOUT_BASE_URL` | yes | `https://your-server:22160` — must use `https://` |
-| `SCOUT_USERNAME` | yes | Scout Board login username |
-| `SCOUT_PASSWORD` | yes | Scout Board login password |
+| `SCOUT_USERNAME` | password auth | Scout Board login username (not needed with `SCOUT_AUTH=citrix-cloud`) |
+| `SCOUT_PASSWORD` | password auth | Scout Board login password (not needed with `SCOUT_AUTH=citrix-cloud`) |
+| `SCOUT_AUTH` | no | `password` (default, unchanged behavior) \| `citrix-cloud` — auth method to Scout Board, see [Citrix Cloud service-principal auth](#citrix-cloud-service-principal-auth) |
+| `SCOUT_CC_CLIENT_ID` | citrix-cloud auth | Citrix Cloud service-principal client ID |
+| `SCOUT_CC_CLIENT_SECRET` | citrix-cloud auth | Citrix Cloud service-principal client secret |
+| `SCOUT_CC_CUSTOMER_ID` | citrix-cloud auth | Citrix Cloud customer ID (not needed for `staging` region or with `SCOUT_CC_TOKEN_URL`) |
+| `SCOUT_CC_REGION` | citrix-cloud auth | Token endpoint region: `us` \| `eu` \| `ap-s` \| `jp` \| `staging` |
+| `SCOUT_CC_TOKEN_URL` | no | Full Citrix Cloud token-endpoint URL override — takes precedence over region/customer id |
 | `SCOUT_DOMAIN` | no | Login domain (leave empty if not required) |
 | `SCOUT_IGNORE_TLS` | no | `true` to accept self-signed certificates |
 | `SCOUT_REQUEST_TIMEOUT_MS` | no | HTTP timeout in ms (default: 30000) |
@@ -361,6 +367,39 @@ Five pre-built workflow templates are exposed via the MCP `prompts/list` and `pr
 ## Authentication
 
 Scout Board uses JWT authentication. The client sends credentials to `POST /rest/api/v1/user/login` and receives a token stored in-memory. The token is sent as a `Cookie: ScoutBoardAuthJWT=<token>` header on every request. On a 401 response the client re-authenticates once and retries automatically.
+
+### Citrix Cloud service-principal auth
+
+As an alternative to username/password, set `SCOUT_AUTH=citrix-cloud` to authenticate with a
+Citrix Cloud **service principal** — no shared admin credentials needed. The flow is three
+calls: (1) mint a Citrix Cloud bearer token via an OAuth2 client-credentials grant at
+`POST <token_base>/cctrustoauth2/<customer_id>/tokens/clients` (the body **must** be
+`application/x-www-form-urlencoded`); (2) exchange it at
+`POST https://<scout_host>/rest/auth/v1/ccauth/login` with a **standard** `Authorization: Bearer <token>`
+header (not Citrix's `CwsAuth Bearer=` prefix); (3) use the returned Scout Board JWT exactly like
+password auth. Tokens live 1 hour and are re-minted automatically on 401.
+
+Token endpoint bases per region:
+
+| `SCOUT_CC_REGION` | Base URL |
+|---|---|
+| `us` | `https://api-us.cloud.com` |
+| `eu` | `https://api-eu.cloud.com` |
+| `ap-s` | `https://api-ap-s.cloud.com` |
+| `jp` | `https://api.citrixcloud.jp` |
+| `staging` | `https://api.cloudburrito.com` — uses `/root/` in place of `/<customer_id>/` in the token path (no customer id needed) |
+
+Troubleshooting:
+
+| Symptom | Cause / fix |
+|---|---|
+| 401 minting the CC token | Wrong `client_id`/`client_secret` (or region) — verify the service principal credentials |
+| 403 minting the CC token | Token endpoint region doesn't match the service principal's tenant region — pick the right `SCOUT_CC_REGION` |
+| 400 minting the CC token | Request body not form-urlencoded (JSON is rejected) |
+| 401 exchanging at `/ccauth/login` | Scout Board can't validate the CC token — server-side CC service configuration issue, contact the Scout Board admin |
+| 403 exchanging at `/ccauth/login` | CC token is valid but the service principal's client_id UUID isn't registered as a Scout Board user — add it under Users with **Login + WebService** rights (no auto-provisioning) |
+
+Password auth remains the default and is completely unchanged.
 
 ---
 

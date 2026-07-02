@@ -58,7 +58,7 @@ if (startupConfig) {
   try {
     await getClient().login();
     process.stderr.write(
-      `[scout-mcp] Authenticated — connected to ${startupConfig.baseUrl} as ${startupConfig.username}\n`,
+      `[scout-mcp] Authenticated — connected to ${startupConfig.baseUrl} as ${startupConfig.authMethod === 'citrix-cloud' ? `service principal ${startupConfig.ccClientId}` : startupConfig.username}\n`,
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
