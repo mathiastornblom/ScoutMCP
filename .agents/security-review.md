@@ -995,3 +995,17 @@ Addressed the single blocker from the entry above:
 - Regression tests added to tests/ccauth.test.ts: http:// rejected via env path, http:// rejected via scout_configure path, https:// accepted unchanged on all paths, and buildCcTokenUrl throws directly (defense-in-depth).
 
 Verified: `npx tsc --noEmit` clean; tests/ccauth.test.ts 23/23; full `npm run test:unit` 192 passed, 0 failed across all suites. Ready for security re-review.
+
+---
+
+## 2026-07-02 — SECURITY: APPROVED (feature/ccauth, commit 7b33a08 — re-review of BLOCKED item)
+
+Independently re-verified the ccTokenUrl fix; did not rely on the dev report.
+
+1. **All three config paths validated — CONFIRMED.** `missingCcFields()` (src/session.ts:66) now rejects any set-but-non-https `ccTokenUrl`. Traced call sites myself: `resolveConfig()` env path throws on non-empty missing list (session.ts:160); `loadSavedConfig()` returns null (fails closed) when the saved citrix-cloud config has missing fields (session.ts:110); `scout_configure` citrix-cloud branch calls `missingCcFields(candidate)` and fails the tool call (configure.ts:96). No path constructs a CC config without passing through it.
+2. **Defense in depth — CONFIRMED.** `buildCcTokenUrl()` throws on a non-https override at the top of `loginCitrixCloud()` (client.ts:113), before `fetchWithTimeout` — no code path reaches the mint POST with a non-https URL.
+3. **Bypass check.** `startsWith('https://')` rejects `HTTPS://evil` (case), `https:evil` (no slashes), and whitespace-prefixed URLs — every edge case fails *closed* (over-strict), never open. Adequate for the threat model (accidental http / misconfiguration, not adversarial URL parsing); stated explicitly.
+4. **Verified myself on 7b33a08:** `npx tsc --noEmit` clean; `npm run test:unit` 192 passed, 0 failed (ccauth suite 23/23 incl. the 4 new regression tests).
+5. **Scope — CONFIRMED.** Diff 18c8f24..7b33a08 touches only the session.ts validation, tests/ccauth.test.ts, and this review file. No other behavior changed.
+
+**Verdict: SECURITY: APPROVED.** The 2026-07-02 block is resolved; feature/ccauth is now fully approved (all six original checks pass). Not pushed, not merged.
