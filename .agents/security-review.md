@@ -958,3 +958,40 @@ Reviewed `feature/http-transport` (based on approved `feature/protocol-hygiene`)
 Ran `tests/oidc-auth.test.ts` (18/18) and `tests/transport.test.ts` (17/17) myself — both pass, all green.
 
 **Verdict: SECURITY: FINAL APPROVED.** All seven points trace cleanly to source; no shortcuts, no silently-skipped checks, no scope creep into write-permission territory. This closes out the full multi-round build. Not pushed, not merged.
+
+---
+
+## 2026-07-02 — SECURITY: BLOCKED (feature/ccauth, commit 18c8f24)
+
+Reviewed CC service-principal auth against the six requested checks. Five pass; one blocks.
+
+1. **Password mode unchanged — PASS.** `resolveConfig()` defaults `SCOUT_AUTH` to `'password'` and the password branch is byte-equivalent to before (same env vars, same missing-cred error). `login()` password path only changed `username`/`password` to `?? ''` for the now-optional types — unreachable difference in password mode since config validation still requires both. Unknown `SCOUT_AUTH` values fail closed with an explicit error. `scout_configure` password path identical (the `https://` check moved but applies unchanged).
+
+2. **Secret handling — PASS.** `ccClientSecret` flows only into the form body of the mint POST and the `getClient()` cache key. All mint/exchange error messages are static strings (no request body, no credential echo). `scout_configure` set/status responses expose only `ccClientId`/`ccRegion`, never the secret. `auditLog` call sites (workflow.ts, config.ts) untouched; nothing auth-related enters the audit log. Startup stderr logs `ccClientId` only. Plaintext-at-0600 in `~/.scout-mcp.json` matches the existing password pattern — acceptable to extend, not blocking.
+
+3. **Token URL construction — PARTIAL FAIL (the blocker).**
+   - Region bases are a hardcoded https allowlist; `ccRegion` is validated against `CC_REGIONS` in both env and Zod paths. `ccCustomerId` is concatenated into the *path* after a fixed scheme+host — `evil.com/`, `../`, or a smuggled full URL cannot change the host. No host-redirect via customerId/region. Good.
+   - **BLOCKED:** `buildCcTokenUrl()` returns `config.ccTokenUrl` verbatim with no validation. Neither `SCOUT_CC_TOKEN_URL` nor the `scout_configure` `ccTokenUrl` parameter is checked for `https://` — the client secret is form-POSTed to whatever this string contains, including `http://` (plaintext credential on the wire) or an arbitrary host. This is inconsistent with the project's own enforced `baseUrl.startsWith('https://')` policy (client.ts:58, configure.ts:116). Exploit path via the tool is limited (caller supplies the secret in the same call), but the env/saved-config path is a real cleartext-credential misconfiguration hazard, and an LLM-driven configure call can set it.
+   - **Required fix (one line each path):** reject `ccTokenUrl` not starting with `https://` in `missingCcFields()`/validation so it fails closed in env, saved-config, and tool paths alike.
+
+4. **Exchange step — PASS.** CC bearer is sent only to `${this.baseUrl}/rest/auth/v1/ccauth/login`; the ScoutClient constructor still enforces https on baseUrl for both auth modes. Scout JWT stored in the same `token`/`tokenExpiresAt` fields; `parseJwtExpiry` preferred, now+1h fallback matches the documented lifetime and only affects proactive refresh (401 re-mint still covers staleness). Existing 401→re-login retry re-runs the full two-step flow. No lifecycle weakening.
+
+5. **Gate independence — PASS.** `git diff feature/http-transport..feature/ccauth -- src/guardrails.ts src/auth` is empty. No `mutating:` plumbing touched; no SCOUT_MODE reads/writes in the diff.
+
+6. **Cache key — PASS.** Composite key including the secret is a module-local string (`_instanceKey`), compared in memory only; grep confirms it is never logged, serialized, or persisted.
+
+Verified myself on 18c8f24: `tsc --noEmit` clean; `tests/ccauth.test.ts` 19/19 pass.
+
+**Verdict: SECURITY: BLOCKED** — solely on the missing https validation of `ccTokenUrl`. Everything else is approved as-is; fix that one validation (plus a regression test asserting an `http://` ccTokenUrl is rejected before any network call) and request re-review.
+
+---
+
+## 2026-07-02 — DEV: ccTokenUrl https validation fixed (feature/ccauth, follow-up to BLOCKED)
+
+Addressed the single blocker from the entry above:
+
+- `missingCcFields()` (src/session.ts) now rejects any `ccTokenUrl` not starting with `https://` with the message `ccTokenUrl (SCOUT_CC_TOKEN_URL) must start with https://`. This fails closed on all three config paths, since all call `missingCcFields()`: env vars (`resolveConfig()`), saved config file (`loadSavedConfig()`), and the `scout_configure` tool (configure.ts).
+- Defense in depth: `buildCcTokenUrl()` (src/session.ts) also throws on a non-https `ccTokenUrl` before any network call, mirroring the enforced https policy on baseUrl.
+- Regression tests added to tests/ccauth.test.ts: http:// rejected via env path, http:// rejected via scout_configure path, https:// accepted unchanged on all paths, and buildCcTokenUrl throws directly (defense-in-depth).
+
+Verified: `npx tsc --noEmit` clean; tests/ccauth.test.ts 23/23; full `npm run test:unit` 192 passed, 0 failed across all suites. Ready for security re-review.

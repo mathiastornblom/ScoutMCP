@@ -29,6 +29,7 @@ import {
   type ScoutConfig,
 } from '../src/session.js';
 import { ScoutClient, ScoutError } from '../src/client.js';
+import { configureTool } from '../src/tools/configure.js';
 
 // ─── Minimal test harness ─────────────────────────────────────────────────────
 
@@ -335,6 +336,75 @@ async function main(): Promise<void> {
     process.env.SCOUT_CC_CLIENT_SECRET = 'b';
     process.env.SCOUT_CC_REGION = 'mars';
     await expectError(() => resolveConfig(), 'Invalid SCOUT_CC_REGION');
+  });
+
+  await test('http:// ccTokenUrl is rejected via env path (fails closed)', async () => {
+    process.env.SCOUT_AUTH = 'citrix-cloud';
+    process.env.SCOUT_BASE_URL = 'https://scout:22160';
+    process.env.SCOUT_CC_CLIENT_ID = 'a';
+    process.env.SCOUT_CC_CLIENT_SECRET = 'b';
+    process.env.SCOUT_CC_TOKEN_URL = 'http://evil.example.com/token';
+    await expectError(() => resolveConfig(), 'ccTokenUrl (SCOUT_CC_TOKEN_URL) must start with https://');
+  });
+
+  await test('http:// ccTokenUrl is rejected via scout_configure path', async () => {
+    const result = await configureTool.execute({
+      action: 'set',
+      authMethod: 'citrix-cloud',
+      baseUrl: 'https://scout:22160',
+      ccClientId: 'a',
+      ccClientSecret: 'b',
+      ccTokenUrl: 'http://evil.example.com/token',
+      test: false,
+    });
+    assert(result.isError === true, 'scout_configure rejects http:// ccTokenUrl');
+    const text = result.content[0]?.text ?? '';
+    assert(
+      text.includes('ccTokenUrl (SCOUT_CC_TOKEN_URL) must start with https://'),
+      `error names the offending field, got "${text}"`,
+    );
+  });
+
+  await test('https:// ccTokenUrl is accepted unchanged on all paths', async () => {
+    // Validation helper accepts it
+    const missing = missingCcFields({
+      baseUrl: 'https://scout:22160',
+      ccClientId: 'a',
+      ccClientSecret: 'b',
+      ccTokenUrl: 'https://custom.example.com/token',
+    });
+    assert(missing.length === 0, `expected valid, missing: ${missing.join('; ')}`);
+    // buildCcTokenUrl returns it verbatim
+    const url = buildCcTokenUrl({
+      baseUrl: 'https://scout:22160',
+      authMethod: 'citrix-cloud',
+      ccClientId: 'a',
+      ccClientSecret: 'b',
+      ccTokenUrl: 'https://custom.example.com/token',
+    });
+    assert(url === 'https://custom.example.com/token', 'https URL passes through unchanged');
+    // Env path resolves it
+    process.env.SCOUT_AUTH = 'citrix-cloud';
+    process.env.SCOUT_BASE_URL = 'https://scout:22160';
+    process.env.SCOUT_CC_CLIENT_ID = 'a';
+    process.env.SCOUT_CC_CLIENT_SECRET = 'b';
+    process.env.SCOUT_CC_TOKEN_URL = 'https://custom.example.com/token';
+    const cfg = resolveConfig();
+    assert(cfg !== null && cfg.ccTokenUrl === 'https://custom.example.com/token', 'env path accepts https ccTokenUrl');
+  });
+
+  await test('buildCcTokenUrl throws on non-https ccTokenUrl (defense in depth)', async () => {
+    await expectError(
+      () =>
+        buildCcTokenUrl({
+          baseUrl: 'https://scout:22160',
+          authMethod: 'citrix-cloud',
+          ccClientId: 'a',
+          ccClientSecret: 'b',
+          ccTokenUrl: 'http://evil.example.com/token',
+        }),
+      'must start with https://',
+    );
   });
 
   console.log('\nLogin flow (HTTPS stand-in)');

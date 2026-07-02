@@ -38,7 +38,16 @@ export const CC_REGIONS = Object.keys(CC_REGION_BASES) as CcRegion[];
  * ccTokenUrl override wins; staging substitutes `/root/` for the customer id.
  */
 export function buildCcTokenUrl(config: ScoutConfig): string {
-  if (config.ccTokenUrl) return config.ccTokenUrl;
+  if (config.ccTokenUrl) {
+    // Fail closed: the client secret is form-POSTed to this URL, so it must be https.
+    // Mirrors the enforced https policy on baseUrl (client.ts / configure.ts).
+    if (!config.ccTokenUrl.startsWith('https://')) {
+      throw new Error(
+        `ccTokenUrl (SCOUT_CC_TOKEN_URL) must start with https:// — got "${config.ccTokenUrl}"`,
+      );
+    }
+    return config.ccTokenUrl;
+  }
   const region = config.ccRegion;
   if (!region) {
     throw new Error('citrix-cloud auth requires ccRegion or ccTokenUrl');
@@ -52,13 +61,17 @@ export function buildCcTokenUrl(config: ScoutConfig): string {
 }
 
 /**
- * Validate a citrix-cloud config, returning a list of what's missing (empty = valid).
+ * Validate a citrix-cloud config, returning a list of what's missing or invalid (empty = valid).
  */
 export function missingCcFields(config: Partial<ScoutConfig>): string[] {
   const missing: string[] = [];
   if (!config.baseUrl) missing.push('baseUrl (SCOUT_BASE_URL)');
   if (!config.ccClientId) missing.push('ccClientId (SCOUT_CC_CLIENT_ID)');
   if (!config.ccClientSecret) missing.push('ccClientSecret (SCOUT_CC_CLIENT_SECRET)');
+  if (config.ccTokenUrl && !config.ccTokenUrl.startsWith('https://')) {
+    // The client secret is POSTed to this URL — never allow http:// or other schemes.
+    missing.push('ccTokenUrl (SCOUT_CC_TOKEN_URL) must start with https://');
+  }
   if (!config.ccTokenUrl) {
     if (!config.ccRegion) {
       missing.push('ccRegion (SCOUT_CC_REGION) or ccTokenUrl (SCOUT_CC_TOKEN_URL)');
