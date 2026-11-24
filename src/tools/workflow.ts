@@ -19,7 +19,8 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { confirmDestructiveAction, supportsElicitation } from '../elicitation.js';
-import { resolveOuRef, invalidateOuCache, resolveWriteTarget, assertOuPathUnchanged } from '../resolver.js';
+import { resolveOuRef, invalidateOuCache, assertOuPathUnchanged } from '../resolver.js';
+import { gateOuWrite, gateOuSubtree } from '../safety/ou_gate.js';
 import {
   checkMutationAllowed,
   checkBlastRadius,
@@ -33,15 +34,6 @@ import { parseSearchDevices, extractSearchDevices, deviceName, deviceOuId, type 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 const MAX_BULK = 500;
-
-function testScopeError(path: string, label: string): string | null {
-  if (process.env.SCOUT_ENV !== 'test') return null;
-  const root = process.env.SCOUT_TEST_OU_PATH;
-  if (!root) return 'SCOUT_TEST_OU_PATH must be set when SCOUT_ENV=test';
-  if (!path.startsWith(root))
-    return `${label} "${path}" is outside SCOUT_TEST_OU_PATH "${root}". Blocked in test mode.`;
-  return null;
-}
 
 /**
  * Parses a device-search response and throws (rather than returning an empty array) if the
@@ -164,30 +156,41 @@ async function onboardBranchExecute(raw: unknown): Promise<McpToolResult> {
   if (!input.parentOuPath && input.parentOuId === undefined)
     return fail('parentOuPath or parentOuId is required');
 
-  const parentPath = input.parentOuPath;
-  if (parentPath) {
-    const err = testScopeError(parentPath, 'Parent OU');
-    if (err) return fail(err);
-  }
-
   const steps: string[] = [];
 
   try {
     // Gate 1: mode tiers — onboard_branch is a multi-step composite write.
     const modeCheck = checkMutationAllowed('onboard_branch');
+
+    // The parent OU is the write target (the new OU is created under it and inherits from it).
+    // Resolve every supplied reference from a fresh tree (they must agree), run the
+    // SCOUT_ENV=test scope and SCOUT_PROTECTED_OUS / SCOUT_ALLOWED_OUS on the RESOLVED path, and
+    // send ONLY the resolved id. The filter rule added in step 2 targets the new OU, which sits
+    // inside the gated parent.
+    const parent = await gateOuWrite(
+      'onboard_branch',
+      [input.parentOuPath, input.parentOuId],
+      'parent OU',
+      { requiredMessage: 'parentOuPath or parentOuId is required' },
+    );
+    if (!parent) throw new Error('parent OU unresolved');
+
     if (!modeCheck.proceed) {
       return ok({
         status: 'dry_run',
         wouldCreate: input.name,
+        parent: parent.path,
         wouldAddFilter: input.subnetCidr ?? null,
         message: modeCheck.dryRunNotice,
       });
     }
 
+    // Re-assert, immediately before the mutating call, that the gated parent still has the gated path.
+    await assertOuPathUnchanged(parent.ouid, parent.path);
+
     // Step 1 — create the new OU
     const qs = buildQuery({
-      destoupath: input.parentOuPath,
-      destouid: input.parentOuId,
+      destouid: parent.ouid,
       name: input.name,
     });
     const createResp = await client.request<unknown>('POST', `/api/v1/ou${qs}`, undefined, {
@@ -287,6 +290,9 @@ const moveDevicesByFilterSchema = z.object({
 
 type MoveDevicesByFilterInput = z.infer<typeof moveDevicesByFilterSchema>;
 
+/** Devices moved/commanded between path re-assertions (one fresh OU-tree read per batch). */
+const BATCH_SIZE = 25;
+
 async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Promise<McpToolResult> {
   const input = moveDevicesByFilterSchema.parse(raw) as MoveDevicesByFilterInput;
   const client = getClient();
@@ -307,21 +313,35 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
         'Use dryRun=true first to preview what would be moved.',
     );
 
-  // Test-scope guard on destination
-  if (!isDryRun && input.destOuPath) {
-    const err = testScopeError(input.destOuPath, 'Destination OU');
-    if (err) return fail(err);
-  }
-  if (!isDryRun && input.sourceOuPath) {
-    const err = testScopeError(input.sourceOuPath, 'Source OU');
-    if (err) return fail(err);
-  }
-
   try {
-    // Search for devices
+    // Gate 1: mode tiers. read-only throws here (before any search or prompt); dry-run is
+    // reported after the confirmation/blast-radius steps below so the preview stays complete.
+    const modeCheck = isDryRun ? { proceed: true } : checkMutationAllowed('move_devices_by_filter');
+
+    // Resolve BOTH OUs once, from a fresh tree, and gate/scope them on the RESOLVED canonical
+    // path (never the raw caller string). destOuPath and destOuId (if both given) must name the
+    // same OU; the move requests send ONLY the resolved destination id, so the gated and the
+    // written destination are identical. The source root is resolved for the SCOUT_ENV=test scope
+    // and to search by its canonical path; the protected-OU check on the sources below runs on
+    // every matched device's actual OU.
+    const destMatch = await gateOuWrite(
+      'move_devices_by_filter',
+      [input.destOuPath, input.destOuId],
+      'destination OU',
+      { requiredMessage: 'destOuPath or destOuId is required' },
+    );
+    if (!destMatch) throw new Error('destOuPath or destOuId is required');
+    const srcRoot = await gateOuWrite(
+      'move_devices_by_filter',
+      [input.sourceOuPath, input.sourceOuId],
+      'source OU',
+      { skipProtectedCheck: true, requiredMessage: 'sourceOuPath or sourceOuId is required' },
+    );
+    if (!srcRoot) throw new Error('sourceOuPath or sourceOuId is required');
+
+    // Search for devices (read; by the canonical resolved path)
     const qs = buildQuery({
-      ouPath: input.sourceOuPath,
-      ouId: input.sourceOuId,
+      ouPath: srcRoot.path,
       searchTerm: input.searchTerm,
       includeSubOus: input.includeSubOus,
       limit: input.limit ?? 100,
@@ -340,19 +360,19 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
       return ok({
         status: 'dry_run',
         matched: devices.length,
+        destination: destMatch.path,
         wouldMove: devices.map((d) => deviceName(d) ?? '(unknown)'),
         message: `${devices.length} device(s) would be moved. Set dryRun=false and confirm=true to proceed.`,
       });
     }
 
-    // Confirmation gate, now that the real matched-device count is known. If the client
-    // supports elicitation, prompt with the actual count and destination; otherwise the
-    // early confirm=true fail-fast above has already gated this.
+    // Confirmation gate, now that the real matched-device count is known. The prompt names the
+    // RESOLVED destination (canonical path and id), not the caller's raw input.
     const moveOutcome = await confirmDestructiveAction(
       { server: ctx?.server },
       {
         opName: 'move_devices_by_filter',
-        summary: `Move ${devices.length} device(s) to "${input.destOuPath ?? `OU id ${input.destOuId}`}".`,
+        summary: `Move ${devices.length} device(s) to "${destMatch.path}" (OU id ${destMatch.ouid}).`,
         confirmFlag: input.confirm,
       },
     );
@@ -363,49 +383,57 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
     // Gate 3: blast-radius cap, now that the device count is resolved.
     checkBlastRadius({ affectedCount: devices.length, overrideBlastRadius: input.overrideBlastRadius });
 
-    // Gate 6: protected/allowed OU lists. A bulk move can touch many distinct source OUs
-    // at once (the resolved matches under sourceOuPath/sourceOuId, recursively if
-    // includeSubOus=true) plus a single destination — every one of those is checked, not
-    // just the search root, because the search root the caller passed in is not
-    // necessarily the OU any individual matched device actually lives in once sub-OUs are
-    // included. The write is blocked if ANY resolved source OU or the destination is
-    // protected (or, with an allow-list configured, not allowed).
-    // Canonical path from a FRESH tree read, never the raw caller string.
-    // destOuPath and destOuId (if both given) must name the same OU; the move request below
-    // sends ONLY the resolved id, so the gated and the written destination are identical.
-    const destMatch = await resolveWriteTarget([input.destOuPath, input.destOuId], 'destination OU');
-    if (!destMatch) throw new Error('destOuPath or destOuId is required');
-    checkOuWriteAllowed({ targetPath: destMatch.path });
-    // Fail closed: resolveDistinctSourceOuPathsOrThrow throws (rather than returning []) if
-    // any matched device's source OU can't be determined — see its doc comment. A thrown
-    // error here is caught by this function's outer catch and surfaced as a refusal, the
-    // same as any other guardrail gate, rather than letting the move proceed with zero
-    // source-OU checks.
+    // Gate 6 (sources): a bulk move can touch many distinct source OUs at once (recursively if
+    // includeSubOus=true) — every one of those is checked, not just the search root, because the
+    // search root the caller passed in is not necessarily the OU any individual matched device
+    // actually lives in. Fail closed: resolveDistinctSourceOuPathsOrThrow throws (rather than
+    // returning []) if any matched device's source OU can't be determined — see its doc comment.
+    // The device GroupID is NOT assumed to be an OU id; only an explicit OUID counts.
     const sourcePaths = await resolveDistinctSourceOuPathsOrThrow(devices);
     for (const sourcePath of sourcePaths) {
       checkOuWriteAllowed({ targetPath: sourcePath });
     }
 
-    // Gate 1: mode tiers.
-    const modeCheck = checkMutationAllowed('move_devices_by_filter');
     if (!modeCheck.proceed) {
       return ok({
         status: 'dry_run',
         matched: devices.length,
+        destination: destMatch.path,
         wouldMove: devices.map((d) => deviceName(d) ?? '(unknown)'),
         message: modeCheck.dryRunNotice,
       });
     }
 
-    // Re-assert (after the confirmation prompt, immediately before writing) that the gated
-    // destination still has the gated path.
-    await assertOuPathUnchanged(destMatch.ouid, destMatch.path);
-
-    // Move each device
+    // Move each device, re-asserting the gated destination path before EACH batch (one fresh
+    // tree read per BATCH_SIZE devices) so an out-of-band rename/move of the destination part-way
+    // through a long loop stops the remaining moves instead of letting them through.
     let moved = 0;
+    let aborted = false;
     const failed: Array<{ device: string; error: string }> = [];
 
-    for (const device of devices) {
+    // The first assertion throws (nothing has been moved yet: a plain refusal); later ones abort the loop.
+    await assertOuPathUnchanged(destMatch.ouid, destMatch.path);
+    for (let i = 0; i < devices.length; i++) {
+      if (i > 0 && i % BATCH_SIZE === 0) {
+        try {
+          await assertOuPathUnchanged(destMatch.ouid, destMatch.path);
+        } catch (err) {
+          auditLog({
+            opName: 'move_devices_by_filter',
+            target: destMatch.path,
+            result: 'refused',
+            gate: 'protected-ou',
+            detail: `aborted before device ${i + 1}/${devices.length}: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          failed.push({
+            device: `${devices.length - i} remaining device(s)`,
+            error: `aborted: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          aborted = true;
+          break;
+        }
+      }
+      const device = devices[i];
       const name = deviceName(device);
       if (!name) {
         failed.push({ device: JSON.stringify(device), error: 'Could not determine device name' });
@@ -428,9 +456,10 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
     }
 
     return ok({
-      status: failed.length === 0 ? 'ok' : 'partial',
+      status: aborted ? 'aborted' : failed.length === 0 ? 'ok' : 'partial',
       matched: devices.length,
       moved,
+      destination: destMatch.path,
       failed: failed.length > 0 ? failed : undefined,
     });
   } catch (err) {
@@ -514,16 +543,32 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
   }
 
   try {
+    // Gate 1: mode tiers. read-only throws here (before any search or prompt); dry-run is
+    // reported after the confirmation/blast-radius steps below so the preview stays complete.
+    const baseModeCheck = isDryRun ? { proceed: true } : checkMutationAllowed(`bulk_command(${input.command})`);
+
+    // The source OU is the write scope (commands go to every device under it). Resolve it once
+    // from a fresh tree (path/id must agree), gate it - and, with includeSubOus, every sub-OU - on
+    // the RESOLVED path (SCOUT_ENV=test scope, SCOUT_PROTECTED_OUS / SCOUT_ALLOWED_OUS), and
+    // search by that canonical path only.
+    const srcRoot = await gateOuWrite(
+      `bulk_command(${input.command})`,
+      [input.sourceOuPath, input.sourceOuId],
+      'source OU',
+      { requiredMessage: 'sourceOuPath or sourceOuId is required' },
+    );
+    if (!srcRoot) throw new Error('sourceOuPath or sourceOuId is required');
+    if (input.includeSubOus) await gateOuSubtree(`bulk_command(${input.command})`, srcRoot);
+
     // Search for devices
     const qs = buildQuery({
-      ouPath: input.sourceOuPath,
-      ouId: input.sourceOuId,
+      ouPath: srcRoot.path,
       searchTerm: input.searchTerm,
       includeSubOus: input.includeSubOus,
       limit: input.limit ?? 100,
     });
     const searchResp = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
-    // bulk_command has no source-OU protected check (it sends device commands, not OU
+    // bulk_command has no per-device source-OU check (it sends device commands, not OU
     // moves), so an unparseable response degrading to "no devices matched" is acceptable
     // here — unlike move_devices_by_filter, nothing downstream silently skips a safety gate
     // because of it.
@@ -561,8 +606,7 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
     // Gate 3: blast-radius cap, now that the device count is resolved.
     checkBlastRadius({ affectedCount: devices.length, overrideBlastRadius: input.overrideBlastRadius });
 
-    // Gate 1: mode tiers.
-    const modeCheck = checkMutationAllowed(`bulk_command(${input.command})`);
+    const modeCheck = baseModeCheck;
     if (!modeCheck.proceed) {
       return ok({
         status: 'dry_run',
@@ -578,7 +622,30 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
     const failed: Array<{ device: string; error: string }> = [];
     let processed = 0;
 
+    let aborted = false;
+    // The first assertion throws (nothing sent yet: a plain refusal); later ones abort the loop.
+    await assertOuPathUnchanged(srcRoot.ouid, srcRoot.path);
     for (const device of devices) {
+      if (processed > 0 && processed % BATCH_SIZE === 0) {
+        // Re-assert the gated source OU path before each batch (one fresh tree read per batch).
+        try {
+          await assertOuPathUnchanged(srcRoot.ouid, srcRoot.path);
+        } catch (err) {
+          auditLog({
+            opName: `bulk_command(${input.command})`,
+            target: srcRoot.path,
+            result: 'refused',
+            gate: 'protected-ou',
+            detail: `aborted before device ${processed + 1}/${devices.length}: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          failed.push({
+            device: `${devices.length - processed} remaining device(s)`,
+            error: `aborted: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          aborted = true;
+          break;
+        }
+      }
       processed++;
       if (ctx?.sendProgress) {
         await ctx.sendProgress(processed, devices.length, `${input.command}: device ${processed}/${devices.length}`);
@@ -604,7 +671,7 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
     }
 
     return ok({
-      status: failed.length === 0 ? 'ok' : 'partial',
+      status: aborted ? 'aborted' : failed.length === 0 ? 'ok' : 'partial',
       matched: devices.length,
       commanded,
       command: input.command,

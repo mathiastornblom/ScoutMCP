@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
-import { resolveOuRef } from '../resolver.js';
+import { assertOuPathUnchanged, type OuMatch } from '../resolver.js';
+import { gateOuWrite, gateOuSubtree } from '../safety/ou_gate.js';
 import { getProgressReporter } from '../progress.js';
 import { confirmDestructiveAction } from '../elicitation.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -52,27 +53,7 @@ type DeviceCommandInput = z.infer<typeof deviceCommandSchema>;
 
 async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpToolResult> {
   const input = deviceCommandSchema.parse(raw) as DeviceCommandInput;
-
-  // Security: require explicit confirmation for irreversible commands. Real elicitation
-  // prompt if the client supports it, otherwise the confirm:true fallback.
-  if (input.command === 'factoryreset' || input.command === 'halt') {
-    const target =
-      input.target === 'device'
-        ? (input.name ?? input.mac ?? input.id ?? input.clientid ?? '(unspecified device)')
-        : `${input.target} scope`;
-    const outcome = await confirmDestructiveAction(
-      { server: ctx?.server },
-      {
-        opName: `device_command(${input.command})`,
-        summary: `Send irreversible command "${input.command}" to ${target}.`,
-        confirmFlag: input.confirm,
-      },
-    );
-    if (!outcome.proceed) {
-      return fail(`device_command blocked: ${outcome.reason}`);
-    }
-  }
-
+  const opName = `device_command(${input.command})`;
   const client = getClient();
   const path = `/api/v1/command/${input.target}/${input.command}`;
 
@@ -83,23 +64,39 @@ async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<Mc
       : '';
 
   try {
-    let body = input.body;
-
-    // Resolve ouRef and inject into body for target=ou
-    let preflightOuId: number | undefined;
-    let preflightOuLabel = 'ou';
-    if (input.target === 'ou' && input.ouRef !== undefined) {
-      const match = await resolveOuRef(input.ouRef);
-      body = { ouId: match.ouid, ...body };
-      preflightOuId = match.ouid;
-      preflightOuLabel = match.path;
-    } else if (input.target === 'ou' && typeof body?.['ouId'] === 'number') {
-      preflightOuId = body['ouId'];
-    }
-
     // Gate 1: mode tiers — every device_command invocation sends a command that
     // changes device state (restart, halt, factoryreset, custom payloads, etc).
-    const modeCheck = checkMutationAllowed(`device_command(${input.command})`);
+    // read-only throws here, before any resolution or confirmation prompt.
+    const modeCheck = checkMutationAllowed(opName);
+
+    let body = input.body;
+
+    // target=ou: the OU is the write scope (the command reaches every device under it). Resolve ALL
+    // supplied references (ouRef, body.ouId, body.ouPath) from a fresh tree - they must agree -
+    // gate the RESOLVED path (SCOUT_ENV=test scope, SCOUT_PROTECTED_OUS / SCOUT_ALLOWED_OUS; with
+    // includeSubOus also every sub-OU), and send ONLY the resolved id (body.ouPath is dropped and
+    // a body.ouId can no longer override the gated ouRef).
+    // target=device|devicelist|ddg cannot be tied to an OU from the input alone (see README).
+    let ou: OuMatch | undefined;
+    if (input.target === 'ou') {
+      const bodyOuId = input.body?.['ouId'];
+      const bodyOuPath = input.body?.['ouPath'];
+      ou = await gateOuWrite(
+        opName,
+        input.ouRef !== undefined
+          ? [input.ouRef, ...(typeof bodyOuId === 'number' ? [bodyOuId] : []), ...(typeof bodyOuPath === 'string' ? [bodyOuPath] : [])]
+          : [typeof bodyOuId === 'number' ? bodyOuId : undefined, typeof bodyOuPath === 'string' ? bodyOuPath : undefined],
+        'target OU',
+        { requiredMessage: 'target=ou requires ouRef (or body.ouId / body.ouPath); refusing rather than leaving the OU to the server.' },
+      );
+      if (!ou) throw new Error('target OU unresolved');
+      if (input.body?.['includeSubOus'] === true) await gateOuSubtree(opName, ou);
+      const { ouId: _ouId, ouPath: _ouPath, ...rest } = input.body ?? {};
+      void _ouId;
+      void _ouPath;
+      body = { ...rest, ouId: ou.ouid };
+    }
+
     if (!modeCheck.proceed) {
       return ok({
         status: 'dry_run',
@@ -114,16 +111,43 @@ async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<Mc
     const neededRight = DEVICE_COMMAND_RIGHTS[input.command];
     if (neededRight !== undefined) {
       await checkOuRightPreflight({
-        opName: `device_command(${input.command})`,
-        target: `ou:${preflightOuLabel}`,
-        ouId: preflightOuId,
+        opName,
+        target: `ou:${ou?.path ?? 'ou'}`,
+        ouId: ou?.ouid,
         requiredRight: neededRight,
       });
     }
 
+    // Security: require explicit confirmation for irreversible commands. Real elicitation
+    // prompt if the client supports it, otherwise the confirm:true fallback. Runs after the
+    // gates (so the user is never asked to confirm something that is refused anyway) and names
+    // the RESOLVED OU.
+    if (input.command === 'factoryreset' || input.command === 'halt') {
+      const target =
+        input.target === 'device'
+          ? (input.name ?? input.mac ?? input.id ?? input.clientid ?? '(unspecified device)')
+          : ou
+            ? `OU "${ou.path}" (id ${ou.ouid})`
+            : `${input.target} scope`;
+      const outcome = await confirmDestructiveAction(
+        { server: ctx?.server },
+        {
+          opName,
+          summary: `Send irreversible command "${input.command}" to ${target}.`,
+          confirmFlag: input.confirm,
+        },
+      );
+      if (!outcome.proceed) {
+        return fail(`device_command blocked: ${outcome.reason}`);
+      }
+    }
+
+    // Re-assert, after the prompt and immediately before the write, that the gated OU still has the gated path.
+    if (ou) await assertOuPathUnchanged(ou.ouid, ou.path);
+
     const data = await client.request<unknown>('POST', `${path}${qs}`, body, {
       mutating: true,
-      opName: `device_command(${input.command})`,
+      opName,
     });
     if (isDryRunSkip(data)) {
       return ok({ status: 'dry_run', target: input.target, command: input.command, message: data.notice });

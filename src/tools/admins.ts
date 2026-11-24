@@ -17,6 +17,8 @@ import {
   auditLog,
   GuardrailError,
 } from '../safety/guardrails.js';
+import { gateOuWrite } from '../safety/ou_gate.js';
+import { assertOuPathUnchanged, type OuMatch } from '../resolver.js';
 
 // ── Logging helpers ───────────────────────────────────────────────────────────
 
@@ -293,6 +295,15 @@ async function adminManageExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
         }
         checkPrivateWriteAllowedInProduction('admin_manage(update_admin)');
         const modeCheck = checkMutationAllowed('admin_manage(update_admin)');
+        // root_ou / root_ou_fmd name OUs the administrator is rooted at (an access-control change on
+        // that subtree): resolve each from a fresh tree, gate the RESOLVED path, send only the
+        // resolved id.
+        let rootOu: OuMatch | undefined;
+        let rootOuFmd: OuMatch | undefined;
+        if (input.root_ou !== undefined) rootOu = await gateOuWrite('admin_manage(update_admin)', [input.root_ou], 'root OU');
+        if (input.root_ou_fmd !== undefined) {
+          rootOuFmd = await gateOuWrite('admin_manage(update_admin)', [input.root_ou_fmd], 'root OU (follow-me desktop)');
+        }
         if (!modeCheck.proceed) {
           return ok({ status: 'dry_run', action: input.action, adminId: input.admin_id, message: modeCheck.dryRunNotice });
         }
@@ -312,8 +323,11 @@ async function adminManageExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
         );
         if (!outcome.proceed) return fail(`admin_manage blocked: ${outcome.reason}`);
         const body: Record<string, unknown> = { AdministratorID: input.admin_id };
-        if (input.root_ou !== undefined) body['RootOu'] = input.root_ou;
-        if (input.root_ou_fmd !== undefined) body['RootOUFMD'] = input.root_ou_fmd;
+        if (rootOu) body['RootOu'] = rootOu.ouid;
+        if (rootOuFmd) body['RootOUFMD'] = rootOuFmd.ouid;
+        // Re-assert (after the confirm prompt, right before the write) that the gated OUs keep their paths.
+        if (rootOu) await assertOuPathUnchanged(rootOu.ouid, rootOu.path);
+        if (rootOuFmd) await assertOuPathUnchanged(rootOuFmd.ouid, rootOuFmd.path);
         if (input.menu_rights !== undefined) body['menuRightsArray'] = input.menu_rights;
         if (input.base_rights !== undefined) body['baseRightsArray'] = input.base_rights;
         const path = '/api/v1/admins/modify';

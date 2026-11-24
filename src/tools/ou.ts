@@ -6,27 +6,9 @@ import { resolveOuRef, invalidateOuCache, resolveWriteTarget, assertOuPathUnchan
 import { enrich, invalidateEnrichmentCache } from '../enricher.js';
 import { suggestOus, formatOuSuggestions, isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
-import {
-  checkMutationAllowed,
-  checkBaseWriteAllowed,
-  checkOuWriteAllowed,
-  isRootOuTarget,
-  isDryRunSkip,
-  GuardrailError,
-} from '../safety/guardrails.js';
+import { checkMutationAllowed, checkBaseWriteAllowed, isDryRunSkip, GuardrailError, auditLog } from '../safety/guardrails.js';
+import { gateOuWrite, refuseOuWrite } from '../safety/ou_gate.js';
 import { checkOuRightPreflight, OU_MANAGE_RIGHTS } from '../safety/preflight.js';
-
-// ── Shared helpers ────────────────────────────────────────────────────────────
-
-function assertTestScope(path: string): string | null {
-  if (process.env.SCOUT_ENV !== 'test') return null;
-  const testRoot = process.env.SCOUT_TEST_OU_PATH;
-  if (!testRoot) return 'SCOUT_TEST_OU_PATH must be set when SCOUT_ENV=test';
-  if (!path.startsWith(testRoot)) {
-    return `Target path "${path}" is outside SCOUT_TEST_OU_PATH "${testRoot}". Blocked in test mode.`;
-  }
-  return null;
-}
 
 // ── ou_get ────────────────────────────────────────────────────────────────────
 
@@ -209,6 +191,41 @@ const ouManageSchema = z.object({
 
 type OuManageInput = z.infer<typeof ouManageSchema>;
 
+/**
+ * Validates the structure_import payload against the documented request shape
+ * (`{parentOuId, data, importOuStructure, importDeviceConfig, importAdvancedConfig, importDevices}`)
+ * and returns ONLY those known keys, never the raw caller object. Returns a refusal message string
+ * for anything else (unknown key, wrong type, missing `data`) - fail closed.
+ * `dryRun` is taken from the tool's own `dryRun` input, not from the payload.
+ */
+function parseImportPayload(
+  payload: Record<string, unknown>,
+): { parentOuId: number | undefined; body: Record<string, unknown> } | string {
+  const boolKeys = ['importOuStructure', 'importDeviceConfig', 'importAdvancedConfig', 'importDevices'];
+  const known = new Set(['parentOuId', 'data', ...boolKeys]);
+  for (const k of Object.keys(payload)) {
+    if (!known.has(k)) {
+      return `Refusing structure_import: importPayload has the unexpected key "${k}". Allowed keys: ${[...known].join(', ')} (dryRun is a separate tool input).`;
+    }
+  }
+  const data = payload['data'];
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    return 'Refusing structure_import: importPayload.data must be the export payload object (importPayload = {data, parentOuId?, import* flags}).';
+  }
+  const parent = payload['parentOuId'];
+  if (parent !== undefined && (typeof parent !== 'number' || !Number.isInteger(parent))) {
+    return 'Refusing structure_import: importPayload.parentOuId must be an integer OU id.';
+  }
+  const body: Record<string, unknown> = { data };
+  for (const k of boolKeys) {
+    const v = payload[k];
+    if (v === undefined) continue;
+    if (typeof v !== 'boolean') return `Refusing structure_import: importPayload.${k} must be a boolean.`;
+    body[k] = v;
+  }
+  return { parentOuId: parent as number | undefined, body };
+}
+
 async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
   const input = ouManageSchema.parse(raw) as OuManageInput;
   const client = getClient();
@@ -220,97 +237,100 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
       : (input.path ?? (input.id !== undefined ? String(input.id) : null));
 
   try {
-    // Resolve ouRef → target OU
     let resolvedId: number | undefined = input.id;
     let resolvedPath: string | undefined = input.path;
-    if (input.ouRef !== undefined) {
-      const match = await resolveOuRef(input.ouRef);
-      resolvedId = match.ouid;
-      resolvedPath = match.path;
-    }
-
-    // Resolve destouRef → destination OU
     let resolvedDestPath: string | undefined = input.destoupath;
     let resolvedDestId: number | undefined = input.destouid;
-    if (input.destouRef !== undefined) {
-      const match = await resolveOuRef(input.destouRef);
-      resolvedDestId = match.ouid;
-      resolvedDestPath = match.path;
-    }
-
-    // Destructive guard: delete restricted to test scope
-    if (input.action === 'delete' && resolvedPath) {
-      const err = assertTestScope(resolvedPath);
-      if (err) return fail(err);
-    }
 
     // structure_export is read-only (it doesn't mutate); everything else does.
     const isMutatingAction = input.action !== 'structure_export';
+    const opName = `ou_manage(${input.action})`;
 
-    // Gate 1: mode tiers.
-    const modeCheck = isMutatingAction
-      ? checkMutationAllowed(`ou_manage(${input.action})`)
-      : { proceed: true };
+    // Gate 1: mode tiers (read-only throws here, before any resolution or confirm).
+    const modeCheck = isMutatingAction ? checkMutationAllowed(opName) : { proceed: true };
 
-    // Resolve the write target/destination ONCE, from a fresh tree, requiring that every
-    // supplied reference (ouRef / path / id) names the same OU. From here on the gates AND the
-    // request use only this resolved OU (requests carry the id, never the raw caller path), so
-    // the gated OU and the written OU are the same by construction.
+    // Resolve the write target/destination ONCE, from a fresh tree, requiring that every supplied
+    // reference (ouRef / path / id) names the same OU. From here on the gates AND the request use
+    // only this resolved OU (requests carry the id, never the raw caller path), so the gated OU and
+    // the written OU are the same by construction. gateOuWrite applies, in order: a top-level OU
+    // needs SCOUT_ALLOW_BASE_WRITES (Gate 2, derived from the parsed tree - no /ou/root call), the
+    // SCOUT_ENV=test scope on the RESOLVED path, then SCOUT_PROTECTED_OUS / SCOUT_ALLOWED_OUS. Every
+    // refusal is audit-logged. rename and converttobase are gated too: renaming a protected OU would
+    // make its SCOUT_PROTECTED_OUS entry stop matching, and converttobase changes its inheritance.
     let tgt: OuMatch | undefined;
     let dst: OuMatch | undefined;
-    if (['rename', 'delete', 'move', 'converttobase'].includes(input.action)) {
-      tgt = await resolveWriteTarget(
-        input.ouRef !== undefined ? [input.ouRef] : [input.path, input.id],
-        'target OU',
-      );
-      if (tgt) { resolvedId = tgt.ouid; resolvedPath = tgt.path; }
-    }
-    if (input.action === 'move' || input.action === 'add') {
-      dst = await resolveWriteTarget(
-        input.destouRef !== undefined ? [input.destouRef] : [input.destoupath, input.destouid],
-        'destination OU',
-      );
-      if (dst) { resolvedDestId = dst.ouid; resolvedDestPath = dst.path; }
-    }
-
-    // Gate 2: root OU is protected the same way as Base config — it's the ancestor of
-    // every other OU, so rename/delete/move/converttobase against it is fleet-wide blast
-    // radius. We only know "root" by comparing the resolved target against the live
-    // root lookup (the API has no syntactic "is root" marker).
-    if (isMutatingAction && (resolvedPath !== undefined || resolvedId !== undefined)) {
-      const rootResp = await client.request<{ OUID?: number; OUPath?: string }>(
-        'GET',
-        '/api/v1/ou/root',
-      );
-      const isRoot = isRootOuTarget({
-        resolvedPath,
-        resolvedId,
-        rootPath: rootResp?.OUPath,
-        rootId: rootResp?.OUID,
-      });
-      checkBaseWriteAllowed({
-        isBaseOrRoot: isRoot,
-        label: 'the root OU (ancestor of every OU in the fleet)',
-      });
-    }
-
-    // Gate 6: protected/allowed OU lists. delete and move both change what becomes of an
-    // existing OU's subtree, so the *target* OU (the one being deleted/moved/renamed) is
-    // always checked when resolved. move additionally relocates that whole subtree under
-    // a new parent, which changes what config it inherits going forward — so the
-    // *destination* OU is checked too, the same source+destination reasoning used for
-    // device_manage(move). rename/converttobase/add are not gated here: rename doesn't
-    // change the subtree's position or inheritance, add only affects a brand-new (not yet
-    // protected-relevant) OU, and the new OU's parent is the actual write target for add,
-    // which is covered by the destination check below when present.
-    if (isMutatingAction && (input.action === 'delete' || input.action === 'move')) {
-      // Gate on the canonical, server-derived path from a FRESH tree read, never the raw
-      // caller string (case/whitespace/slash variants must not dodge SCOUT_PROTECTED_OUS).
-      // Unresolvable refs throw -> refused.
-      if (tgt) checkOuWriteAllowed({ targetPath: tgt.path });
-    }
-    if (isMutatingAction && (input.action === 'move' || input.action === 'add')) {
-      if (dst) checkOuWriteAllowed({ targetPath: dst.path });
+    let importParent: OuMatch | undefined;
+    let importBody: Record<string, unknown> | undefined;
+    if (!isMutatingAction) {
+      if (input.ouRef !== undefined) {
+        const match = await resolveOuRef(input.ouRef);
+        resolvedId = match.ouid;
+        resolvedPath = match.path;
+      }
+    } else {
+      if (['rename', 'delete', 'move', 'converttobase'].includes(input.action)) {
+        tgt = await gateOuWrite(
+          opName,
+          input.ouRef !== undefined ? [input.ouRef] : [input.path, input.id],
+          'target OU',
+          { topLevelNeedsBase: true, requiredMessage: `${input.action} requires a target OU (ouRef, path or id).` },
+        );
+        if (tgt) { resolvedId = tgt.ouid; resolvedPath = tgt.path; }
+      }
+      if (input.action === 'move' || input.action === 'add') {
+        dst = await gateOuWrite(
+          opName,
+          input.destouRef !== undefined ? [input.destouRef] : [input.destoupath, input.destouid],
+          'destination OU',
+          {
+            requiredMessage:
+              `${input.action} requires a destination OU (destouRef, destoupath or destouid); ` +
+              'refusing rather than leaving the destination to the server.',
+          },
+        );
+        if (dst) { resolvedDestId = dst.ouid; resolvedDestPath = dst.path; }
+      }
+      if (input.action === 'structure_import') {
+        if (!input.importPayload) return fail('importPayload is required for action=structure_import');
+        const parsed = parseImportPayload(input.importPayload);
+        if (typeof parsed === 'string') return refuseOuWrite(opName, 'structure_import', parsed);
+        importParent = await gateOuWrite(
+          opName,
+          input.ouRef !== undefined
+            ? [input.ouRef, parsed.parentOuId]
+            : [input.path, input.id, input.ouId, parsed.parentOuId],
+          'import parent OU',
+          {
+            topLevelNeedsBase: true,
+            requiredMessage: 'structure_import requires a parent OU (ouRef, path, id, ouId or importPayload.parentOuId).',
+          },
+        );
+        if (!importParent) throw new Error('structure_import: parent OU unresolved');
+        // The export payload format is not documented, so the OUs an import would create or
+        // overwrite cannot be enumerated and gated one by one. Fail closed: such an import needs
+        // the explicit base-write arming flag, in addition to the parent OU gates above.
+        try {
+          checkBaseWriteAllowed({
+            isBaseOrRoot: true,
+            label:
+              'an OU structure import (the payload is not enumerable, so the OUs it would create or ' +
+              `overwrite under "${importParent.path}" cannot be checked against SCOUT_PROTECTED_OUS / SCOUT_ALLOWED_OUS)`,
+          });
+        } catch (err) {
+          auditLog({
+            opName,
+            target: importParent.path,
+            result: 'refused',
+            gate: 'base-write',
+            detail: 'structure_import payload not enumerable; SCOUT_ALLOW_BASE_WRITES not set',
+          });
+          throw err;
+        }
+        importBody = { ...parsed.body, parentOuId: importParent.ouid };
+        if (input.dryRun !== undefined) importBody['dryRun'] = input.dryRun;
+        resolvedId = importParent.ouid;
+        resolvedPath = importParent.path;
+      }
     }
 
     if (!modeCheck.proceed) {
@@ -326,16 +346,9 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
     // Runs after every gate above and after the dry-run short-circuit, before the write.
     const neededRight = OU_MANAGE_RIGHTS[input.action];
     if (isMutatingAction && neededRight !== undefined) {
-      let preflightOuId: number | undefined =
-        input.action === 'add' ? resolvedDestId : input.action === 'structure_import' ? input.ouId : resolvedId;
+      // Every mutating action has a resolved, gated OU by now (target, destination, or import parent).
+      const preflightOuId: number | undefined = input.action === 'add' ? resolvedDestId : resolvedId;
       const preflightPath = input.action === 'add' ? resolvedDestPath : resolvedPath;
-      if (preflightOuId === undefined && preflightPath) {
-        try {
-          preflightOuId = (await resolveOuRef(preflightPath)).ouid;
-        } catch {
-          preflightOuId = undefined; // unresolvable -> preflight skipped; server still enforces
-        }
-      }
       await checkOuRightPreflight({
         opName: `ou_manage(${input.action})`,
         target: `ou:${preflightPath ?? preflightOuId ?? 'unknown'}`,
@@ -348,6 +361,7 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
     // gated paths (a rename/move by someone else since the gate must not slip through).
     if (tgt) await assertOuPathUnchanged(tgt.ouid, tgt.path);
     if (dst) await assertOuPathUnchanged(dst.ouid, dst.path);
+    if (importParent) await assertOuPathUnchanged(importParent.ouid, importParent.path);
 
     let result: unknown;
 
@@ -420,9 +434,8 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
       }
 
       case 'structure_import': {
-        if (!input.importPayload) return fail('importPayload is required for action=structure_import');
-        const body = { ...input.importPayload, dryRun: input.dryRun };
-        result = await client.request<unknown>('POST', '/api/v1/ou/structure/import', body, {
+        // importBody was built from the validated shape and the resolved parent id above.
+        result = await client.request<unknown>('POST', '/api/v1/ou/structure/import', importBody, {
           mutating: true,
           opName: 'ou_manage(structure_import)',
         });
@@ -461,9 +474,9 @@ export const ouManageTool = {
     'Create, rename, delete, or move OUs in Scout Board, and export/import OU structures. ' +
     'Use ouRef to identify the target OU and destouRef for the destination — both accept names, partial names, paths, or IDs. ' +
     'DESTRUCTIVE: action=delete permanently removes an OU and all its contents. ' +
-    'In SCOUT_ENV=test mode, delete operations are restricted to paths under SCOUT_TEST_OU_PATH. ' +
+    'In SCOUT_ENV=test mode, every write target/destination must be under SCOUT_TEST_OU_PATH (checked on the resolved path). ' +
     'Gated by SCOUT_MODE (read-only blocks all writes, dry-run plans without executing); ' +
-    'rename/delete/move/converttobase against the root OU requires SCOUT_ALLOW_BASE_WRITES=true.',
+    'rename/delete/move/converttobase of a top-level OU and structure_import require SCOUT_ALLOW_BASE_WRITES=true; all OU targets are checked against SCOUT_PROTECTED_OUS / SCOUT_ALLOWED_OUS.',
   inputSchema: zodToJsonSchema(ouManageSchema),
   execute: ouManageExecute,
 };

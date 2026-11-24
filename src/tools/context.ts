@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { getClient } from '../client.js';
-import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
+import { ok, fail, type McpToolResult } from '../types.js';
+import { resolveWriteTarget } from '../resolver.js';
 import { getWorkingOu, setWorkingOu, clearWorkingOu } from '../context.js';
 
 // ── scout_context ─────────────────────────────────────────────────────────────
@@ -19,15 +19,8 @@ const contextSchema = z.object({
 
 type ContextInput = z.infer<typeof contextSchema>;
 
-interface OuResponse {
-  OUPath?: string;
-  OUName?: string;
-  OUID?: number;
-}
-
 async function contextExecute(raw: unknown): Promise<McpToolResult> {
   const input = contextSchema.parse(raw) as ContextInput;
-  const client = getClient();
 
   switch (input.action) {
     case 'set_ou': {
@@ -35,18 +28,19 @@ async function contextExecute(raw: unknown): Promise<McpToolResult> {
         return fail('set_ou requires either path or id');
       }
       try {
-        const qs = buildQuery({ path: input.path, id: input.id });
-        const data = await client.request<OuResponse>('GET', `/api/v1/ou${qs}`);
-        const ouPath = data.OUPath ?? input.path ?? String(input.id ?? '');
-        const ouName = data.OUName ?? ouPath;
-        setWorkingOu(ouPath, ouName);
+        // Name and path come from the parsed OU tree (real rows carry OUID/Name, not OUPath/OUName;
+        // see src/ou_tree.ts), looked up by id. If the OU cannot be resolved there is NO working OU
+        // (fail soft, nothing stored) - never a numeric string used as a name.
+        const match = await resolveWriteTarget([input.path, input.id], 'working OU');
+        if (!match) return fail('set_ou requires either path or id');
+        setWorkingOu(match.path, match.name);
         return ok({
-          workingOu: { path: ouPath, name: ouName },
-          message: `Working OU set to "${ouName}" (${ouPath}). Tools that accept ouPath or destoupath will now use this as their default.`,
+          workingOu: { path: match.path, name: match.name },
+          message: `Working OU set to "${match.name}" (${match.path}). Tools that accept ouPath or destoupath will now use this as their default.`,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        return fail(`set_ou failed: ${msg}`);
+        return fail(`set_ou failed: ${msg}. No working OU was set.`);
       }
     }
 
