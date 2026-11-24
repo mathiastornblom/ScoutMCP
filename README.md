@@ -84,6 +84,25 @@ docker build \
   .
 ```
 
+#### Running the local image
+
+```bash
+cp .env.example .env            # fill in SCOUT_BASE_URL etc.; keep SCOUT_MODE=read-only at first
+docker compose build
+docker compose run --rm -i scout-mcp
+```
+
+For an MCP client (e.g. Claude Desktop) use:
+
+```json
+{ "command": "docker",
+  "args": ["run", "-i", "--rm", "--env-file", "/absolute/path/to/.env", "-v", "scout-logs:/app/logs", "scout-mcp:local"] }
+```
+
+The audit log and pre-write snapshots go to `/app/logs` (the `scout-logs` volume). The container talks to
+your Scout server over the network; a self-signed certificate needs `SCOUT_IGNORE_TLS=true`.
+The container uses stdio. HTTP mode (`SCOUT_TRANSPORT=http`) additionally requires the OIDC settings.
+
 ---
 
 ## Configuration

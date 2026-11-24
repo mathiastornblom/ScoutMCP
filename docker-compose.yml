@@ -1,0 +1,21 @@
+# Local use:  cp .env.example .env  (edit it; keep SCOUT_MODE=read-only until you trust it)
+#   docker compose build
+#   docker compose run --rm -i scout-mcp        # stdio MCP server
+# MCP clients (Claude Desktop etc.) should launch it with `docker compose run --rm -i -T scout-mcp`
+# or the equivalent `docker run -i --rm --env-file .env -v scout-logs:/app/logs scout-mcp:local`.
+services:
+  scout-mcp:
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-local}
+        VERSION: ${VERSION:-local}
+    image: scout-mcp:local
+    env_file: .env
+    environment:
+      SCOUT_MODE: ${SCOUT_MODE:-read-only}
+    stdin_open: true
+    volumes:
+      - scout-logs:/app/logs
+volumes:
+  scout-logs:
