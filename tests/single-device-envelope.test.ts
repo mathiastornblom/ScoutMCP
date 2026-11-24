@@ -60,7 +60,10 @@ const writes: string[] = [];
 let searchBody: unknown = listEnvelope(liveRows());
 let singleDevice: unknown = getEnv();
 const c = getClient() as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+const searches: string[] = [];
+let searchFn: ((path: string) => unknown) | undefined;
 c.request = async (method: string, path: string) => {
+  if (path.startsWith('/api/v1/device/search')) { searches.push(path); if (searchFn) return searchFn(path); }
   if (method !== 'GET') { writes.push(`${method} ${path}`); return { ok: true }; }
   if (path.startsWith('/api/v1/ou/structure')) return LIVE_TREE;
   if (path.startsWith('/api/v1/device/search')) return searchBody;
@@ -68,6 +71,7 @@ c.request = async (method: string, path: string) => {
   return {};
 };
 const reset = (): void => {
+  searches.length = 0; searchFn = undefined;
   writes.length = 0; searchBody = listEnvelope(liveRows()); singleDevice = getEnv();
   process.env.SCOUT_MODE = 'write';
 };
@@ -164,6 +168,61 @@ await test('move_devices_by_filter / bulk_command: envelope with integer counts 
   reset(); searchBody = env({});
   const r = await moveDevicesByFilterTool.execute(bulk);
   assert(!r.isError && writes.length === 1, `${writes.join('|')} ${text(r)}`);
+});
+
+// ── search request shape + per-OU fan-out ─────────────────────────────────────
+console.log('\nbulk search request: searchFields, % wildcard, per-OU fan-out, cap, de-dup');
+const bc = { sourceOuPath: '/NorthCreek/SmartCard', searchTerm: 'Thin*', command: 'restart', confirm: true };
+const q = (path: string): URLSearchParams => new URLSearchParams(path.split('?')[1] ?? '');
+await test('search carries searchFields=Name (default) and "*" -> "%"; includeSubOus is not sent', async () => {
+  reset(); searchBody = legacyEnvelope([{ Name: 'a', GroupID: 6 }]);
+  await bulkCommandTool.execute(bc);
+  assert(searches.length === 1, `one search: ${searches.join('|')}`);
+  const p = q(searches[0]!);
+  assert(p.get('searchFields') === 'Name' && p.get('searchTerm') === 'Thin%' && p.get('ouPath') === '/NorthCreek/SmartCard' && !p.has('includeSubOus'), searches[0]!);
+  reset(); searchBody = legacyEnvelope([{ Name: 'a', GroupID: 6 }]);
+  await moveDevicesByFilterTool.execute({ sourceOuPath: '/NorthCreek/SmartCard', searchTerm: '*', searchFields: 'Mac_Address', destOuPath: '/NorthCreek/Imprivata', dryRun: true });
+  const p2 = q(searches[0]!);
+  assert(p2.get('searchTerm') === '%' && p2.get('searchFields') === 'Mac_Address', searches[0]!);
+});
+await test('invalid searchFields is rejected by the schema', async () => {
+  reset();
+  let threw = false;
+  try { await bulkCommandTool.execute({ ...bc, searchFields: 'Name; DROP' }); } catch { threw = true; }
+  assert(threw && searches.length === 0, 'rejected before any search');
+});
+await test('includeSubOus: one search per OU of the fresh subtree (SmartCard, fmnt, Mpollux), de-duplicated by DeviceID', async () => {
+  reset(); searchFn = () => legacyEnvelope([{ Name: 'a', DeviceID: 1, GroupID: 6 }]);
+  const r = await bulkCommandTool.execute({ ...bc, includeSubOus: true });
+  const ous = searches.map((x) => q(x).get('ouPath')).sort();
+  assert(JSON.stringify(ous) === JSON.stringify(['/NorthCreek/SmartCard', '/NorthCreek/SmartCard/Mpollux', '/NorthCreek/SmartCard/fmnt']), ous.join(','));
+  assert(!r.isError && writes.length === 1, `one device commanded once: ${writes.join('|')} ${text(r)}`);
+});
+await test('includeSubOus with a protected DESCENDANT -> refused before any search (bulk_command)', async () => {
+  reset(); process.env.SCOUT_PROTECTED_OUS = '/NorthCreek/SmartCard/fmnt';
+  await refused('protected descendant', () => bulkCommandTool.execute({ ...bc, includeSubOus: true }));
+  assert(searches.length === 0, `no search issued: ${searches.join('|')}`);
+});
+await test('more than 500 devices across the fan-out -> refused, not truncated (both tools)', async () => {
+  let n = 0;
+  const big = (): unknown => legacyEnvelope(Array.from({ length: 200 }, () => ({ Name: `d${n}`, DeviceID: n++, GroupID: 6 })));
+  reset(); searchFn = big;
+  await refused('bulk cap', () => bulkCommandTool.execute({ ...bc, includeSubOus: true }), /500/);
+  n = 0; reset(); searchFn = big;
+  await refused('move cap', () => moveDevicesByFilterTool.execute({ sourceOuPath: '/NorthCreek/SmartCard', searchTerm: '*', includeSubOus: true, destOuPath: '/NorthCreek/Imprivata', confirm: true }), /500/);
+});
+await test('a per-OU response that is unparseable or has unlisted counts -> whole call refused', async () => {
+  reset(); searchFn = (p) => (q(p).get('ouPath') === '/NorthCreek/SmartCard/fmnt' ? { nope: 1 } : legacyEnvelope([{ Name: 'a', DeviceID: 1, GroupID: 6 }]));
+  await refused('unparseable in one OU', () => bulkCommandTool.execute({ ...bc, includeSubOus: true }), /parse/);
+  reset(); searchFn = (p) => (q(p).get('ouPath') === '/NorthCreek/SmartCard/Mpollux'
+    ? { response: { status: { msg: { visibleDevices: [], hiddenDevices: 3, pendingDevices: 0, deniedDevices: 0 } } } }
+    : legacyEnvelope([{ Name: 'a', DeviceID: 1, GroupID: 6 }]));
+  await refused('hidden in one OU', () => moveDevicesByFilterTool.execute({ sourceOuPath: '/NorthCreek/SmartCard', searchTerm: '*', includeSubOus: true, destOuPath: '/NorthCreek/Imprivata', confirm: true }), /hidden|not listed/i);
+});
+await test('move_devices_by_filter fan-out: row in a protected descendant -> refused by the per-device gate', async () => {
+  reset(); process.env.SCOUT_PROTECTED_OUS = '/NorthCreek/SmartCard/fmnt';
+  searchFn = (p) => legacyEnvelope(q(p).get('ouPath') === '/NorthCreek/SmartCard/fmnt' ? [{ Name: 'p', DeviceID: 9, GroupID: 14 }] : [{ Name: 'a', DeviceID: 1, GroupID: 6 }]);
+  await refused('protected row', () => moveDevicesByFilterTool.execute({ sourceOuPath: '/NorthCreek/SmartCard', searchTerm: '*', includeSubOus: true, destOuPath: '/NorthCreek/Imprivata', confirm: true }), /protected/i);
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed (${passed + failed} total)`);

@@ -19,7 +19,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { confirmDestructiveAction, supportsElicitation } from '../elicitation.js';
-import { resolveOuRef, invalidateOuCache, assertOuPathUnchanged } from '../resolver.js';
+import { resolveOuRef, invalidateOuCache, assertOuPathUnchanged, collectOuSubtree } from '../resolver.js';
 import { gateOuWrite, gateOuSubtree, subOusRequested, sanitizeOuBody, resolveDeviceSourceOus, gateSourceOus, sourceOuChecksActive } from '../safety/ou_gate.js';
 import {
   checkMutationAllowed,
@@ -103,6 +103,54 @@ async function resolveDistinctSourceOuPathsOrThrow(devices: DeviceRecord[]): Pro
   const sources = await resolveDeviceSourceOus('move_devices_by_filter', 'unknown', devices);
   return Array.from(new Set(sources.map((m) => m.path)));
 }
+
+/**
+ * Device search shared by move_devices_by_filter and bulk_command. Scout 26.11.0 REQUIRES `searchFields`
+ * (capitalised column, e.g. `Name`), uses SQL LIKE wildcards (`%`, so a caller's `*` is translated) and
+ * does NOT recurse on includeSubOus (the flag is therefore never sent). With includeSubOus requested the
+ * subtree is enumerated from a FRESH parsed OU tree and searched OU by OU (ouPath each); results are
+ * de-duplicated by DeviceID. Every response goes through the strict parser (unparseable or unlisted
+ * hidden/pending/denied devices refuse) and a merged total above MAX_BULK refuses rather than truncating.
+ * Callers gate the subtree BEFORE calling this (bulk_command) or gate each matched device's own OU after.
+ */
+async function searchDevicesAcrossOus(
+  client: ReturnType<typeof getClient>,
+  opName: string,
+  srcRoot: { ouid: number; path: string },
+  input: { searchTerm: string; searchFields?: string; includeSubOus?: unknown; limit?: number },
+): Promise<DeviceRecord[]> {
+  const searchTerm = input.searchTerm.replace(/\*/g, '%');
+  const searchFields = input.searchFields ?? 'Name';
+  const paths = subOusRequested(input.includeSubOus)
+    ? (await collectOuSubtree(srcRoot.ouid)).map((o) => o.path)
+    : [srcRoot.path];
+  const merged: DeviceRecord[] = [];
+  const seen = new Set<string>();
+  for (const ouPath of paths) {
+    const qs = buildQuery({ ouPath, searchTerm, searchFields, limit: input.limit ?? 100 });
+    const resp = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
+    for (const d of extractDevicesOrThrow(resp, opName)) {
+      const key = String(d['DeviceID'] ?? d['ClientIdentifier'] ?? JSON.stringify(d));
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(d);
+      if (merged.length > MAX_BULK) {
+        auditLog({ opName, target: srcRoot.path, result: 'refused', gate: 'blast-radius', detail: `more than ${MAX_BULK} devices matched across ${paths.length} OU(s)` });
+        throw new GuardrailError(
+          `More than ${MAX_BULK} devices matched across ${paths.length} OU(s). Refusing rather than truncating: narrow the search term or the source OU.`,
+          'blast-radius',
+        );
+      }
+    }
+  }
+  return merged;
+}
+
+const searchFieldsSchema = z
+  .string()
+  .regex(/^[A-Za-z_][A-Za-z0-9_,]*$/, 'searchFields must be comma-separated capitalised column names, e.g. "Name"')
+  .optional()
+  .describe('Device column(s) the search term is matched against (Scout requires one; default "Name")');
 
 // ── onboard_branch ────────────────────────────────────────────────────────────
 
@@ -241,9 +289,11 @@ const moveDevicesByFilterSchema = z.object({
   sourceOuPath: z.string().optional().describe('OU path to search for devices'),
   sourceOuId: z.string().optional().describe('OU ID to search for devices'),
   searchTerm: z.string().describe(
-    'Device search term — use "*" to match all devices, or a name fragment like "ThinClient"',
+    'Device search term, matched against searchFields. "*" is translated to the server wildcard "%" ' +
+      '(so "*" matches all, "Thin*" matches a prefix); or a name fragment like "ThinClient"',
   ),
-  includeSubOus: z.boolean().optional().describe('Include sub-OU devices in the search (default false)'),
+  searchFields: searchFieldsSchema,
+  includeSubOus: z.boolean().optional().describe('Include sub-OU devices (default false). The server flag does not recurse, so each OU of the subtree is searched separately'),
 
   destOuPath: z.string().optional().describe('Destination OU path to move matched devices to'),
   destOuId: z.number().int().optional().describe('Destination OU numeric ID'),
@@ -314,18 +364,9 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
     );
     if (!srcRoot) throw new Error('sourceOuPath or sourceOuId is required');
 
-    // Search for devices (read; by the canonical resolved path)
-    const qs = buildQuery({
-      ouPath: srcRoot.path,
-      searchTerm: input.searchTerm,
-      includeSubOus: input.includeSubOus,
-      limit: input.limit ?? 100,
-    });
-    const searchResp = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
-    // Throws (rather than silently treating an unparseable response as "no matches") because
-    // this tool's protected-OU gate (below) depends on resolving every matched device's
-    // source OU — see extractDevicesOrThrow / resolveDistinctSourceOuPathsOrThrow.
-    const devices = extractDevicesOrThrow(searchResp);
+    // Search for devices (read; canonical resolved path, per-OU fan-out for includeSubOus). Strict parse:
+    // an unparseable response must refuse, because the per-device source gate below depends on this list.
+    const devices = await searchDevicesAcrossOus(client, 'move_devices_by_filter', srcRoot, input);
 
     if (devices.length === 0) {
       return ok({ status: 'ok', matched: 0, moved: 0, message: 'No devices matched the search criteria.' });
@@ -466,9 +507,11 @@ const bulkCommandSchema = z.object({
   sourceOuPath: z.string().optional().describe('OU path to search for target devices'),
   sourceOuId: z.string().optional().describe('OU ID to search for target devices'),
   searchTerm: z.string().describe(
-    'Device search term — "*" matches all, or a name fragment like "Thin"',
+    'Device search term, matched against searchFields. "*" is translated to the server wildcard "%" ' +
+      '(so "*" matches all); or a name fragment like "Thin"',
   ),
-  includeSubOus: z.boolean().optional().describe('Include sub-OU devices in search (default false)'),
+  searchFields: searchFieldsSchema,
+  includeSubOus: z.boolean().optional().describe('Include sub-OU devices (default false). The server flag does not recurse, so each OU of the subtree is searched separately'),
 
   command: z
     .enum(['restart', 'halt', 'start', 'factoryreset', 'update', 'updateuefi', 'custom', 'predefined', 'delivery', 'message'])
@@ -536,17 +579,8 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
     if (!srcRoot) throw new Error('sourceOuPath or sourceOuId is required');
     if (subOusRequested(input.includeSubOus)) await gateOuSubtree(`bulk_command(${input.command})`, srcRoot);
 
-    // Search for devices
-    const qs = buildQuery({
-      ouPath: srcRoot.path,
-      searchTerm: input.searchTerm,
-      includeSubOus: input.includeSubOus,
-      limit: input.limit ?? 100,
-    });
-    const searchResp = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
-    // Strict parse: an unparseable / unknown-shape response must REFUSE (audited), never read as
-    // "no devices matched" (the per-device source gate below depends on this list).
-    const devices = extractDevicesOrThrow(searchResp, `bulk_command(${input.command})`);
+    // Search (subtree already gated above; strict parse, per-OU fan-out).
+    const devices = await searchDevicesAcrossOus(client, `bulk_command(${input.command})`, srcRoot, input);
 
     if (devices.length === 0) {
       return ok({ status: 'ok', matched: 0, commanded: 0, message: 'No devices matched.' });
