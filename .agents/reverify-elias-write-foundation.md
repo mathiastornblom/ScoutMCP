@@ -1,0 +1,43 @@
+# Re-verification: feature/elias-write-foundation @ 033f1fc (Security + QA)
+
+Method: adversarial probes (scripts in scratchpad/rv/p1-p5.ts, no src/ edits, no tests added) against both client.rawRequest and client.request, token module, mutex, audit, config, registration, scrubber.
+Numbers: `npx tsc --noEmit` clean. `npm run test:unit` exit 0, 26 suites, 576 passed, 0 failed (elias-write: optable 25, config 23, client 22, pipeline 34, scrub 11, hardening 23). main (origin/main) is an ancestor of HEAD.
+
+## Fix verification (tried to break each)
+
+- B2/F2 token: HOLDS. ctor without key, fake Symbol, Symbol.for, subclass (super with no key), Object.create(proto), setPrototypeOf, structuredClone, JSON roundtrip, Proxy (consume -> "Invalid mutation token"), getOwnPropertySymbols (none), re-import of token.js with ?query (separate WeakSet; client refuses), replay (refused), concurrent x3 on one token (1 sent), other body/other method/other path/extra key (refused), read-only at use, expired, token+mutating:true: all refused. Residuals (Low): `expiresAt` is a writable property at runtime; `mintMutationToken` is exported and accepts any plain `{proceed:true}` object, so the boundary is import discipline (static test), not the type.
+- F4: binds method + template + normalised concrete path + body sha256. HOLDS (different body or path refused; key order irrelevant).
+- F1/F3 path policy: Tier C variants (case, %2F, `;`, `./`, signing-keys, trust-certificates, trustCertificates, %73ign, double-encoded %2573ign, NUL, tab, RLO, long path with sign, pfx/PKCS/signature) are refused for POST/PUT/DELETE/PATCH/OPTIONS via rawRequest with and without mutating:true. `/rest/../api/v1/...` and `/rest/%2e%2e/...` refused by request(). Unknown ELIAS paths refused for rawRequest unless exact legacy path. HOLDS, with the gaps N1/N3 below.
+- Legacy allow-list: exact normalised paths, built from existing callers. I grepped every non-GET rawRequest caller (system_settings, server_instances, license, ou_filtering, predefined_*, db_cleanup, admins, workflow, system_info treefilter, elias my-container-roles): all path constants are on the list or are enabled read-posts; all non-GET request() callers have uuid/enum/encoded-query paths and none contains a Tier C word. No existing caller broken. Suite green.
+- B3 mutex: A holds, B times out, C/D queue FIFO and are not admitted early; double release idempotent; 50 concurrent jobs with mixed timeouts: max 1 inside, no key leak afterwards; waitMs 0 behaves; pipeline releases in `finally`. HOLDS.
+- B1/F5: audit-write refusal is "error code X" only (no path). 4xx server text is capped, single-line, quote-neutralised, labelled untrusted. read-failed message is fixed text plus HTTP status. Status tool prints basename only, no secrets. The remaining server-derived text reaching model output is the quoted 4xx message (by design, F5). HOLDS.
+- F7: short-write loop and dir fsync present; recovery: foreign live+recent skipped, dead pid / >15 min / no pid / own pid / bad timestamp / non-numeric pid recovered, resolved ones ignored. A dead process whose pid was reused by a live one stays unresolved for up to 15 min (fails toward "unknown", never hides). EPERM counts as alive. Residual (Low): a write that fails mid-row can leave a partial line with no newline, so the next row is glued onto it (both unparseable); no repair on failure.
+- Ruling (a): PROTECTED prefix >=2: `uc-*` valid; `u*`/`M*`/`-*`/`.*`/`*`/`**` and fullwidth rejected; a short protected prefix overlapping ALLOWED invalidates the whole scope (DoS only, fail closed), so no bypass and no allow-widening. HOLDS.
+- D0: default config -> no tools; all switches on with no SCOUT_ENV -> only elias_write_status; SCOUT_ENV TEST/Test/production/"test "/"test\n"/1/true/dev/staging, UNVERIFIED 1/True/TRUE/yes/" true"/"true ", NODE_ENV=test: status only; only SCOUT_ENV=test + UNVERIFIED=true (+ private + tier) adds elias_container_create; no private / tier off -> none. WRITE_BODY_CONTRACTS has no verified-live. index.ts diff: only the guarded spread plus startup recovery. Default tool list unchanged.
+- Scrubber synthetic HAR (JWT cookie, password, email, host, query tokens, container names in paths, Tier C paths): none of the secrets/host/emails/names/tokens appear in the output; auth and Tier C skipped; path names collapse to `{x}`. Residual (unchanged, previously accepted F8): GUID/name-like JSON object KEYS in a response are kept verbatim (probe: `0f8fad5b-...` key survived; a name key survives unless it matches the omit regex).
+
+## Judgement of the 4 altered assertions
+1. optable test: `'/api/v1//containers/import'` removed from "must not match an op". WEAKENING (partial). Behaviour changed so `//`, case and trailing slash now normalise to the op, which contradicts the F1 remedy (2) ("refuse `//`"). See N1.
+2. client token helper: adds concretePath/bodySha256 to the binding. LEGITIMATE (F4).
+3. read-failed gate expectation (`validation` -> `read-failed`): LEGITIMATE (QA N5 asked for a distinct gate).
+4. scrubber toPathTemplate inputs (`/api/v1/a/12345` -> `/api/v1/images/12345`, same for e-mail): LEGITIMATE consequence of the vocabulary allow-list (QA N3); the test intent (int and email segments templated) is kept.
+
+## Findings (no Critical/High; none blocks merge of this slice, all latent today)
+
+| # | Sev | Where | Finding / repro | Required |
+|---|---|---|---|---|
+| N1 | Medium (latent) | optable.ts normalizeWritePath; client.ts enforceRawWritePolicy/doRawRequest:536 | Validated path is not the sent path. The check runs on the normalised path, the request is sent as the raw string. Repro (rawRequest, mutating:true, SCOUT_MODE=write): `rawRequest('POST','api/v1/license/reconfigure')` (no leading slash) passes and is sent as `${baseUrl}api/v1/...`; with a port-less baseUrl `new URL('https://scout.corp'+'api/v1/license/reconfigure')` is `https://scout.corpapi/v1/license/reconfigure` (Bearer token goes to a different host). Also `/api/v1//license/reconfigure`, `/API/V1/LICENSE/RECONFIGURE`, trailing `/`, and with a token `/api/v1//containers/import` and `/API/V1/Containers/Import` pass and are sent verbatim. Not reachable: every caller and builder uses constants. | Reject any non-GET path that does not start with `/` or has an empty segment, or send the normalised path; restore the `//` assertion. Before the next op. |
+| N2 | Low-Medium (latent) | optable.ts BODY_KEY_DENY | The F8 narrowing under-matches lowercase compounds that the old substring regex denied: NOT denied: `signkey`, `pemfile`, `certfile`, `mycert`, `cacert`, `x509`, `signer`, `signerName`, `keystore`, `privateKey`, `thumbprint`. Denied (good): signing/signature/certificate/password/secret/trust/pkcs substrings, camel/snake `signKey`, `certPem`, `Cert`, `pem`, nested objects and arrays to depth 8, `__proto__` JSON keys. Builder emits only `{name}`, so no exposure today; values are not scanned (a PEM in `name` is only stopped by the name regex). | Keep substring matching for sign/cert/pem and add explicit exceptions (design, assign, resign, consign) instead of whole-word-only matching. Before any op with a caller-supplied body field. |
+| N3 | Low | optable.ts LEGACY_MUTATING / isLegacyMutating | Allow-list pins the path only, not the method: PUT/PATCH/DELETE/OPTIONS on any listed path (e.g. `PATCH /api/v1/license/reconfigure`) pass with mutating:true. Callers use fixed methods. | Pin method per entry. |
+| N4 | Low | token.ts | `expiresAt` writable on a live token; `mintMutationToken` accepts a plain `{proceed:true}`. | Object.freeze the instance / make expiresAt a getter; leave the static test in place. |
+| N5 | Low | audit.ts appendRow | Mid-row failure leaves an unterminated line; next row is glued to it. | On failure try to append "\n". |
+| N6 | Info | client.ts request() | A non-GET via request() without mutating:true is not mode-gated (pre-existing; only the write-policy backstop is new). | Track. |
+| N7 | Info | fixture-scrub.ts | Response dictionary keys (GUID/name) kept (accepted earlier as F8 residual). | Before the first real HAR is committed: scrub key names that look like GUIDs or are not in the vocabulary. |
+
+## Previous blockers
+Security F1 fixed, F2 fixed, F3 fixed, F4 fixed, F5 fixed, F6 (rebase onto main) done, F7 fixed (residual N5), F8 narrowed (see N2 regression and N7). QA B1, B2, B3 fixed; QA N2 (variants), N3 (vocabulary), N4 (any), N5, N6 (reserved names), N1 (rebase) addressed.
+
+Conditions for the next slice (not for this merge): N1 and N2 fixed with tests; planDigest required on the confirm-flag path; builder-vs-fixture evidence test before any verified-live flip.
+
+SECURITY: APPROVED
+QA: APPROVED
