@@ -116,6 +116,27 @@ export function normalizeWritePath(path: string): NormalizedPath {
   return { ok: true, path: `/${segs.join('/').toLowerCase()}`, query };
 }
 
+/**
+ * N1: the string that was validated must be the string that is sent. For a non-GET the bare path
+ * (query stripped) must start with '/', contain no empty segment ('//') and no trailing slash, and
+ * the fixed segments of the matched template (or legacy path) must match EXACTLY (case included), so
+ * `api/v1/...` (host rewrite), `/API/V1/...`, `/api/v1//x` and `/api/v1/x/` never reach fetch().
+ * `fixed` is a template such as `/api/v1/images/{c}/{id}`; `{...}` segments are free (ids may be
+ * mixed-case). When omitted only the structural checks apply.
+ */
+export function isCanonicalSentPath(path: string, fixed?: string): boolean {
+  if (typeof path !== 'string') return false;
+  const qi = path.indexOf('?');
+  const bare = qi === -1 ? path : path.slice(0, qi);
+  if (!bare.startsWith('/') || bare.startsWith('//')) return false;
+  const segs = bare.slice(1).split('/');
+  if (segs.some((x) => x === '')) return false; // '//' or a trailing slash
+  if (fixed === undefined) return true;
+  const want = fixed.slice(1).split('/');
+  if (want.length !== segs.length) return false;
+  return want.every((w, i) => (w.startsWith('{') ? segs[i] !== '' : w === segs[i]));
+}
+
 // ── Tier C: permanently excluded ─────────────────────────────────────────────────
 
 /**
@@ -197,6 +218,10 @@ export function classifyRequest(method: string, path: string): Classification {
   if (isTierCPath(m, path)) return { kind: 'tier-c' };
   const n = normalizeWritePath(path);
   if (!n.ok) return { kind: 'rejected', reason: n.reason };
+  // N1: structural ambiguity is rejected here, not collapsed: a missing leading '/' or an empty
+  // segment ('//') can change what the URL means once it is concatenated onto the base URL.
+  const bare = path.split('?', 1)[0] ?? '';
+  if (!bare.startsWith('/') || bare.includes('//')) return { kind: 'rejected', reason: 'missing leading "/" or empty path segment' };
   for (const op of OPS) {
     if (op.method === m && op.pattern.test(n.path) && (n.query === '' || op.allowQuery)) return { kind: 'op', op, path: n.path };
   }
@@ -208,37 +233,44 @@ export function classifyRequest(method: string, path: string): Classification {
  * built from the existing rawRequest write callers. Anything else that is a non-GET and not in the op
  * table is refused even with `mutating:true`.
  */
-export const LEGACY_MUTATING: ReadonlyArray<{ path: string; allowQuery?: boolean }> = [
-  '/api/v1/license/reconfigure',
-  '/api/v1/ui/instances',
-  '/api/v1/predefinedcommands/add',
-  '/api/v1/predefinedcommands/modify',
-  '/api/v1/predefinedcommands/delete',
-  '/api/v1/predefinedcommands/auth',
-  '/api/v1/predefinedcommands/modifytemplates',
-  '/api/v1/predefinedpaths/add',
-  '/api/v1/predefinedpaths/delete',
-  '/api/v1/loggingoptions/set',
-  '/api/v1/discoveroptions/set',
-  '/api/v1/retainlocalconfig/set',
-  '/api/v1/devicenameoptions/set',
-  '/api/v1/recoverysettings',
-  '/api/v1/devicepassword/set',
-  '/api/v1/admins/add',
-  '/api/v1/admins/modify',
-  '/api/v1/oufilter/setsettings',
-  '/api/v1/oufilter/add',
-  '/api/v1/oufilter/modify',
-  '/api/v1/oufilter/delete',
-  '/api/v1/newdeviceoptions/set',
-].map((path) => ({ path }))
-  .concat([
-    { path: '/api/v1/admins', allowQuery: true }, // DELETE /admins?adminName=
-    { path: '/api/v1/dbcleanup', allowQuery: true }, // POST/DELETE with ?filter=
-  ] as Array<{ path: string; allowQuery?: boolean }>);
+export type LegacyMethod = 'POST' | 'PUT' | 'DELETE';
+/** N3: method is pinned per entry; only the listed verb(s) may be sent to a listed path. */
+export const LEGACY_MUTATING: ReadonlyArray<{ path: string; methods: readonly LegacyMethod[]; allowQuery?: boolean }> = [
+  { path: '/api/v1/license/reconfigure', methods: ['PUT'] },
+  { path: '/api/v1/ui/instances', methods: ['PUT', 'DELETE'] },
+  { path: '/api/v1/predefinedcommands/add', methods: ['POST'] },
+  { path: '/api/v1/predefinedcommands/modify', methods: ['POST'] },
+  { path: '/api/v1/predefinedcommands/delete', methods: ['POST'] },
+  { path: '/api/v1/predefinedcommands/auth', methods: ['POST'] },
+  { path: '/api/v1/predefinedcommands/modifytemplates', methods: ['POST'] },
+  { path: '/api/v1/predefinedpaths/add', methods: ['POST'] },
+  { path: '/api/v1/predefinedpaths/delete', methods: ['POST'] },
+  { path: '/api/v1/loggingoptions/set', methods: ['POST'] },
+  { path: '/api/v1/discoveroptions/set', methods: ['POST'] },
+  { path: '/api/v1/retainlocalconfig/set', methods: ['POST'] },
+  { path: '/api/v1/devicenameoptions/set', methods: ['POST'] },
+  { path: '/api/v1/recoverysettings', methods: ['POST'] },
+  { path: '/api/v1/devicepassword/set', methods: ['POST'] },
+  { path: '/api/v1/admins/add', methods: ['POST'] },
+  { path: '/api/v1/admins/modify', methods: ['POST'] },
+  { path: '/api/v1/oufilter/setsettings', methods: ['POST'] },
+  { path: '/api/v1/oufilter/add', methods: ['POST'] },
+  { path: '/api/v1/oufilter/modify', methods: ['POST'] },
+  { path: '/api/v1/oufilter/delete', methods: ['POST'] },
+  { path: '/api/v1/newdeviceoptions/set', methods: ['POST'] },
+  { path: '/api/v1/admins', methods: ['DELETE'], allowQuery: true }, // DELETE /admins?adminName=
+  { path: '/api/v1/dbcleanup', methods: ['POST', 'DELETE'], allowQuery: true }, // POST with body; query form kept
+];
 
-export function isLegacyMutating(normPath: string, query: string): boolean {
-  return LEGACY_MUTATING.some((e) => e.path === normPath && (query === '' || e.allowQuery === true));
+/**
+ * True when (normalised path, query, method) is on the legacy allow-list. `method` is pinned (N3);
+ * omitting it answers "is this path listed at all" (path-only lookups in tests).
+ */
+export function isLegacyMutating(normPath: string, query: string, method?: string): boolean {
+  const m = method?.toUpperCase();
+  return LEGACY_MUTATING.some(
+    (e) => e.path === normPath && (query === '' || e.allowQuery === true) && (m === undefined || (e.methods as readonly string[]).includes(m)),
+  );
 }
 
 /** Throws NotInOpTable for Tier C, rejected and unknown requests; returns the op otherwise. */
@@ -257,20 +289,24 @@ export function getOp(key: string): OpDef {
 // ── Body deny-list (C14) ─────────────────────────────────────────────────────────
 
 /**
- * Keys that must never appear in any body this MCP builds. Long words match as substrings
- * (signature, signing, certificate, password, secret, trust, pkcs); short words match only as whole
- * words after camelCase/separator splitting (sign, cert, pem, pfx, p12), so `design` and `assignedTo`
- * are not caught. Exposed with a RegExp-like `test` for callers and tests.
+ * Keys that must never appear in any body this MCP builds (N2). Matching is by SUBSTRING on the
+ * normalised key (lower-cased, `-`/`_`/whitespace/dots removed), so `signKey`, `sign_key`, `pemfile`,
+ * `certfile`, `myCert`, `caCert`, `x509`, `signer`, `keystore`, `privateKey`, `password`, `secret`,
+ * `trust`, `pkcs`, `pfx`, `p12`, `pem`, `thumbprint` are all denied in any spelling. Legitimate words that
+ * merely contain `sign` (design, assign, assignedTo, resign, consign, ...) are removed from the key
+ * before the `sign`/`cert` check, so they are not caught. Exposed with a RegExp-like `test`.
  */
+const BODY_ALLOWED_WORDS = /design|assign|resign|consign|cosign|insignia|signal|signif|signpost|assert|desert|concert|certain|certify|uncertain/g;
+const BODY_ALWAYS = /signature|signing|certificate|password|passwd|secret|trust|pkcs|privatekey|privkey|keystore|pemfile|certfile|x509|pfx|p12|thumbprint/;
 export const BODY_KEY_DENY = {
   test(key: string): boolean {
-    if (/signature|signing|certificate|password|passwd|secret|trust|pkcs/i.test(key)) return true;
-    const w = key
-      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-      .split(/[^A-Za-z0-9]+/)
-      .filter(Boolean)
-      .map((x) => x.toLowerCase());
-    return w.some((x) => ['sign', 'signed', 'cert', 'certs', 'pem', 'pfx', 'p12'].includes(x));
+    const n = key.toLowerCase().replace(/[\s_.\-]+/g, '');
+    if (BODY_ALWAYS.test(n)) return true;
+    const cleaned = n.replace(BODY_ALLOWED_WORDS, '');
+    if (/sign|cert/.test(cleaned)) return true;
+    // `pem` is short: whole word (camelCase split), a suffix (certPem, keyPem) or a prefix of a known compound.
+    const w = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').split(/[^A-Za-z0-9]+/).filter(Boolean).map((x) => x.toLowerCase());
+    return w.includes('pem') || n.endsWith('pem') || /pem(file|data|key|cert|body|string|text|content|blob|bundle)/.test(n);
   },
 };
 

@@ -210,10 +210,15 @@ async function main(): Promise<void> {
     const c = newClient();
     await c.login();
     let err: unknown;
+    const prevMode = process.env.SCOUT_MODE;
+    process.env.SCOUT_MODE = 'write'; // N6: an undeclared DELETE is now mode-gated; this test is about 401 handling
     try {
       await c.request('DELETE', '/api/v1/device?id=1');
     } catch (e) {
       err = e;
+    } finally {
+      if (prevMode === undefined) delete process.env.SCOUT_MODE;
+      else process.env.SCOUT_MODE = prevMode;
     }
     assert(err instanceof ScoutError, 'ScoutError');
     assert(err.message.includes('not allowed action') && err.message.includes('rights denials'), err.message);

@@ -9,6 +9,7 @@
  * This module must not import client.ts.
  */
 
+import { types } from 'node:util';
 import { GuardrailError, checkKillSwitch, getScoutMode, type MutationCheckResult } from '../safety/guardrails.js';
 import { sha256Hex } from './sanitize.js';
 
@@ -39,15 +40,21 @@ const DEFAULT_TTL_MS = 120_000;
 
 class MutationToken {
   readonly binding: Readonly<TokenBinding>;
-  readonly expiresAt: number;
+  /** Read-only: a getter over a private field (N4). */
+  readonly #expiresAt: number;
   #used = false;
 
   constructor(key: symbol, binding: TokenBinding, ttlMs: number) {
     // `new token.constructor(...)` from outside cannot supply the module-private key.
     if (key !== MINT_KEY) throw new GuardrailError('MutationToken cannot be constructed directly.', 'mutation-token');
     this.binding = Object.freeze({ ...binding });
-    this.expiresAt = Date.now() + ttlMs;
+    this.#expiresAt = Date.now() + ttlMs;
     MINTED.add(this);
+    Object.freeze(this); // no property can be added, changed or redefined afterwards (N4)
+  }
+
+  get expiresAt(): number {
+    return this.#expiresAt;
   }
 
   get used(): boolean {
@@ -75,7 +82,7 @@ class MutationToken {
         'mutation-token',
       );
     }
-    if (Date.now() > this.expiresAt) {
+    if (Date.now() > this.#expiresAt) {
       throw new GuardrailError('Mutation token expired.', 'mutation-token');
     }
     // Authoritative re-checks right before the request leaves (kill switch + mode).
@@ -95,10 +102,29 @@ export function isMutationToken(x: unknown): x is MutationToken {
   return typeof x === 'object' && x !== null && MINTED.has(x);
 }
 
-/** Mints a token from the gate-13 result. Refuses unless `check.proceed === true`. */
+const CHECK_KEYS = new Set(['proceed', 'dryRunNotice']);
+
+/** True only for a plain data object shaped exactly like a MutationCheckResult with proceed === true (N4). */
+function isProceedingCheck(check: unknown): check is MutationCheckResult {
+  if (check === null || typeof check !== 'object' || types.isProxy(check)) return false;
+  const proto = Object.getPrototypeOf(check);
+  if (proto !== Object.prototype && proto !== null) return false;
+  const keys = Reflect.ownKeys(check);
+  if (keys.some((k) => typeof k !== 'string' || !CHECK_KEYS.has(k))) return false;
+  const d = Object.getOwnPropertyDescriptor(check, 'proceed');
+  return !!d && 'value' in d && d.value === true; // data property only: no getter that flips
+}
+
+/** Mints a token from the gate-13 result. Refuses unless `check` is a plain `{proceed: true}` result. */
 export function mintMutationToken(check: MutationCheckResult, binding: TokenBinding, ttlMs = DEFAULT_TTL_MS): MutationToken {
-  if (!check || check.proceed !== true) {
+  if (!isProceedingCheck(check)) {
     throw new GuardrailError('Cannot mint a mutation token without a proceeding mutation check.', 'mutation-token');
+  }
+  if (typeof ttlMs !== 'number' || !Number.isFinite(ttlMs) || ttlMs > DEFAULT_TTL_MS) {
+    throw new GuardrailError('Invalid mutation token lifetime.', 'mutation-token');
+  }
+  for (const k of ['opId', 'opName', 'method', 'pathTemplate', 'concretePath', 'bodySha256'] as const) {
+    if (typeof binding?.[k] !== 'string') throw new GuardrailError(`Invalid mutation token binding (${k}).`, 'mutation-token');
   }
   return new MutationToken(MINT_KEY, binding, ttlMs);
 }

@@ -6,7 +6,7 @@ import {
   type MutationCheckResult,
   DRY_RUN_SKIP_MARKER,
 } from './safety/guardrails.js';
-import { classifyRequest, assertBodyAllowed, isSendableWrite, isLegacyMutating, normalizeWritePath } from './elias/optable.js';
+import { classifyRequest, assertBodyAllowed, isSendableWrite, isLegacyMutating, normalizeWritePath, isCanonicalSentPath } from './elias/optable.js';
 import { isMutationToken, bodyHashOf, type MutationToken } from './elias/token.js';
 
 function makeDryRunSkip<T>(notice?: string): T {
@@ -306,8 +306,13 @@ export class ScoutClient {
     opts?: { mutating?: boolean; opName?: string },
   ): Promise<T> {
     this.enforceRestWritePolicy(method, path);
-    if (opts?.mutating) {
-      const check = this.checkMode(opts.opName ?? `${method} ${path}`);
+    // N6: PUT/PATCH/DELETE are always state changes, so they are mode-gated even when the caller
+    // forgot `mutating:true` (read-only refuses, dry-run skips). A bare POST stays ungated because
+    // several /rest read/search calls are POSTs.
+    const verb = method.toUpperCase();
+    const implicitMutation = !opts?.mutating && (verb === 'PUT' || verb === 'PATCH' || verb === 'DELETE');
+    if (opts?.mutating || implicitMutation) {
+      const check = this.checkMode(opts?.opName ?? `${method} ${path}`);
       if (!check.proceed) return makeDryRunSkip<T>(check.dryRunNotice);
     }
     // A token minted by this very call cannot have expired: a 401 then is a denial, so no re-login.
@@ -357,6 +362,15 @@ export class ScoutClient {
     if (cls.kind === 'rejected') {
       throw new GuardrailError(`Refused: ${m} ${label}: path rejected (${cls.reason}).`, 'mutation-token');
     }
+    // N1: the validated path must be byte-identical to the sent path. Any non-canonical spelling
+    // (no leading '/', '//', trailing '/', upper-case api/v1, non-matching fixed segments) is refused
+    // here, never normalised-then-sent-raw. Without this, `api/v1/x` + baseUrl can rewrite the host.
+    if (!isCanonicalSentPath(path) || !path.startsWith('/api/v1/')) {
+      throw new GuardrailError(`Refused: ${m} ${label}: path is not in canonical form (leading "/api/v1/", no empty segments, no trailing "/").`, 'mutation-token');
+    }
+    if (cls.kind === 'op' && !isCanonicalSentPath(path, cls.op.template)) {
+      throw new GuardrailError(`Refused: ${m} ${label}: path spelling differs from the op template ${cls.op.template}.`, 'mutation-token');
+    }
     const token = opts?.mutationToken;
     if (token !== undefined && !isMutationToken(token)) {
       throw new GuardrailError('Refused: invalid mutation token.', 'mutation-token');
@@ -395,7 +409,14 @@ export class ScoutClient {
     if (token !== undefined) {
       throw new GuardrailError(`Refused: ${m} ${label} is not in the closed ELIAS op table; a token cannot be used for it.`, 'mutation-token');
     }
-    if (opts?.mutating && isLegacyMutating(cls.path, cls.query)) return; // gated by checkMutationAllowed below
+    if (opts?.mutating && isLegacyMutating(cls.path, cls.query, m)) {
+      // N1: a legacy path is sent only when it is identical (ignoring case) to the validated one:
+      // no percent-encoding or other spelling that the normaliser resolved but the server might not.
+      if ((path.split('?', 1)[0] ?? '').toLowerCase() !== cls.path) {
+        throw new GuardrailError(`Refused: ${m} ${label}: path spelling differs from its validated form.`, 'mutation-token');
+      }
+      return; // gated by checkMutationAllowed below
+    }
     throw new GuardrailError(
       `Refused: ${m} ${label} is a non-GET that is neither in the ELIAS op table nor on the legacy private-write allow-list.`,
       'mutation-token',
@@ -412,6 +433,10 @@ export class ScoutClient {
     const label = path.split(/[?#]/, 1)[0].replace(/[^\x20-\x7e]/g, '?').slice(0, 120);
     const n = normalizeWritePath(path);
     if (!n.ok) throw new GuardrailError(`Refused: ${m} ${label}: path rejected (${n.reason}).`, 'mutation-token');
+    // N1: `${baseUrl}/rest${path}` must stay inside /rest and be sent exactly as validated.
+    if (!isCanonicalSentPath(path)) {
+      throw new GuardrailError(`Refused: ${m} ${label}: path is not in canonical form (leading "/", no empty segments, no trailing "/").`, 'mutation-token');
+    }
     const cls = classifyRequest(m, path);
     if (cls.kind === 'tier-c') {
       throw new GuardrailError(`Refused: ${m} ${label} is Tier C (signing/trust/certificates) and is permanently excluded from this MCP.`, 'tier-c');
