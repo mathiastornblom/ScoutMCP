@@ -190,7 +190,7 @@ async function main(): Promise<void> {
     assert(r.capabilities['ourights-preflight'].state === 'unknown', 'ourights');
     assert(r.capabilities['advanced-file-entries'].state === 'unknown', 'fileEntries');
     assert(r.capabilities['ou-filter-and-or'].state === 'unknown', 'not probeable');
-    assert(r.capabilities['elias'].status === 'har-only', 'status carried');
+    assert(r.capabilities['elias'].status === 'verified-live', 'status carried');
   });
   await test('timeout -> unknown', async () => {
     const c: ProbeClient = {

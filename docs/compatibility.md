@@ -15,21 +15,31 @@ a minimum release. Status values:
 
 | Capability id | Min Scout | Status | 2605 | 2609 | 2611 | Notes |
 |---------------|-----------|--------|------|------|------|-------|
-| `elias` | 2611 | har-only | ? | ? | expected | Private `/api/v1/systemcheck/elias` and friends; 16 read-only `elias_*` tools. README: "built into Scout Board 2611". The HAR host exposes it, but its own Scout version was not captured. |
-| `ourights-preflight` | - | har-only | ? | ? | ? | `GET /api/v1/ourights?ouId=` seen in the HAR. No source gives the release that introduced it. The probe omits `ouId`; the server answers 404 `OuId not found` (no 400 path), which counts as available, while a plain route-404 means unavailable. UX aid only; the preflight proceeds when the endpoint is missing or errors. |
-| `advanced-file-entries` | - | untested | ? | ? | ? | Public `/config/advanced/*/fileEntries` are in `openapi.json`; never exercised live. Only `config_resolve` consumes them. |
+| `elias` | 2611 | verified-live | ? | ? | yes | Private `/api/v1/systemcheck/elias` and friends; 16 read-only `elias_*` tools. README: "built into Scout Board 2611". Verified live on Scout 26.11.0 (2026-11-24): `systemcheck/elias` reachable, `elias_container_list` (11 containers), `elias_rights` (all six rights true), over Bearer auth. The other 13 tools (incl. every container-scoped one that needs the per-container grant) are not yet exercised live. |
+| `ourights-preflight` | - | har-only | ? | ? | route | `GET /api/v1/ourights?ouId=` seen in the HAR. No source gives the release that introduced it. The probe omits `ouId`; the server answers 404 `OuId not found` (no 400 path), which counts as available, while a plain route-404 means unavailable. On 26.11.0 the probe reported the route as available (404 `OuId not found`, 2026-11-24); the rights map and a preflight refusal have not been exercised live. UX aid only; the preflight proceeds when the endpoint is missing or errors. |
+| `advanced-file-entries` | - | untested | ? | ? | route | Public `/config/advanced/*/fileEntries` are in `openapi.json`. On 26.11.0 the capability probe reported the route available (2026-11-24); `config_resolve` has not been run against it live. Only `config_resolve` consumes them. |
 | `ou-filter-and-or` | 2605 | verified-live | yes | ? | ? | README: AND/OR, bracket grouping and prefix matching "confirmed working against Scout 2605". Earlier releases not tested. |
 | `ccauth-login` | - | untested | ? | ? | ? | Citrix Cloud service-principal login; config-driven (`SCOUT_CC_*` variables), not probeable. Server-side support release unknown. |
-| `healthcheck` | - | untested | ? | ? | ? | Public `/api/v1/healthcheck`; present in the shipped OpenAPI spec. |
+| `healthcheck` | - | verified-live | ? | ? | yes | Public `/api/v1/healthcheck`; present in the shipped OpenAPI spec. `health_check` ran on 26.11.0 (2026-11-24): `healthState: ok`, database layer available. |
 
-Legend: `yes` = verified on that release, `expected` = implied by the minimum release but not
-verified, `?` = no evidence either way.
+Legend: `yes` = verified on that release, `route` = only the endpoint's existence was verified (probe),
+`expected` = implied by the minimum release but not verified, `?` = no evidence either way.
+
+## Verified live (log)
+
+| Date | Scout release | What was exercised | Result |
+|------|---------------|--------------------|--------|
+| 2026-11-24 | 26.11.0 | `health_check`: version detection and capability probes | Version `26.11.0`, confidence `medium`, `healthState: ok`; probes: `elias`, `advanced-file-entries`, `healthcheck`, `ourights-preflight` available; ELIAS `reachable`; database layer available. `ou-filter-and-or` and `ccauth-login` are not probeable. |
+| 2026-11-24 | 26.11.0 | `elias_container_list`, `elias_rights` (Bearer auth, read-only mode) | 11 containers (`uc-elux7-2507` ... `uc-elux7-2612`, `uc-rp6-x64`); all six ELIAS rights allowed |
+| 2026-11-24 | 26.11.0 | `ourights` probe | Before the 404-message fix it reported unavailable; after, available (the 404 `OuId not found` means the route exists) |
+
+Not yet exercised live: the container-scoped ELIAS tools (need the per-container grant), `elias_my_roles`, `config_resolve` with advanced file entries, every write tool.
 
 ## Added in (sourced facts only)
 
 - **2605**: user-defined OU filter syntax with AND/OR, bracket grouping and built-in prefix matching confirmed working (README).
 - **2609**: no Scout Board facts are sourced. (Devices in the HAR report eLux client OS `7.2609.x`; that is the client OS, not the Scout Board release.)
-- **2611**: ELIAS built into Scout Board (README). The ELIAS OpenAPI (Scout 26.11, DBLayer 15.2611+) is consistent with this.
+- **2611**: ELIAS built into Scout Board (README); confirmed reachable on a live 26.11.0 server (see the log above). The ELIAS OpenAPI (Scout 26.11, DBLayer 15.2611+) is consistent with this.
 
 Scout releases are versioned `YY.MM.patch` (e.g. `26.11.0` = `2611`). The public `openapi.json` `info.version` `25.11.0` is the release that spec was taken from (2511), not the version of any server under test; `src/compat/detect.ts` parses `YY.MM`.
 
@@ -59,5 +69,5 @@ when `SCOUT_ENABLE_PRIVATE_ENDPOINTS=true`. Results are cached per client for 5 
 
 ## Open questions
 
-- Which field (if any) of `/api/v1/ui/instances` or `/api/v1/healthcheck` carries the Scout Board version on a real server.
-- Release that introduced `ourights`; whether a call without `ouId` returns 400 (assumed "available") or something else.
+- Which documented source supplied `26.11.0` on the live server: `health_check` reported it at `medium` confidence, but the `versionSource` value was not recorded here. Record it, then promote that source in the table above.
+- Release that introduced `ourights`. (A call without `ouId` returns 404 `OuId not found` on 26.11.0, not 400.)

@@ -72,7 +72,7 @@ export const CAPABILITIES: readonly Capability[] = [
     minScoutVersion: '2611',
     probe: { method: 'GET', path: '/api/v1/systemcheck/elias', kind: 'private' },
     dependentTools: ELIAS_TOOLS,
-    status: 'har-only',
+    status: 'verified-live',
   },
   {
     id: 'ourights-preflight',
@@ -112,7 +112,7 @@ export const CAPABILITIES: readonly Capability[] = [
     minScoutVersion: null,
     probe: { method: 'GET', path: '/api/v1/healthcheck', kind: 'public' },
     dependentTools: ['health_check'],
-    status: 'untested',
+    status: 'verified-live',
   },
 ];
 
