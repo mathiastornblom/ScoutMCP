@@ -3,6 +3,8 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
+import { gateOuWrite, gateOuSubtree, sanitizeOuBody } from '../safety/ou_gate.js';
+import { assertOuPathUnchanged, type OuMatch } from '../resolver.js';
 
 const notificationManageSchema = z.object({
   action: z.enum(['set', 'delete']).describe('set=enable notification; delete=cancel notification'),
@@ -39,13 +41,29 @@ async function notificationManageExecute(raw: unknown): Promise<McpToolResult> {
   let qs = '';
   if (input.target === 'device') {
     qs = buildQuery({ name: input.name, mac: input.mac, id: input.id, clientid: input.clientid });
-  } else if (input.target === 'ou') {
-    qs = buildQuery({ path: input.ouPath, ouid: input.ouId });
   }
 
   try {
     // Both set and delete mutate notification state for the target — gate both.
-    const modeCheck = checkMutationAllowed(`notification_manage(${input.action})`);
+    const opName = `notification_manage(${input.action})`;
+    const modeCheck = checkMutationAllowed(opName);
+
+    // target=ou: the OU is the write scope. Resolve ouPath/ouId from a fresh tree (they must
+    // agree), gate the RESOLVED path (and every sub-OU when body.includeSubOus is true), and send
+    // ONLY the resolved id. devicelist/ddg/device targets cannot be tied to an OU from the input.
+    let ou: OuMatch | undefined;
+    let body = input.body;
+    if (input.target === 'ou') {
+      const sb = sanitizeOuBody(input.body, { generic: true });
+      ou = await gateOuWrite(opName, [input.ouPath, input.ouId, ...sb.ouRefs], 'target OU', {
+        requiredMessage: 'target=ou requires ouPath or ouId; refusing rather than leaving the OU to the server.',
+      });
+      if (!ou) throw new Error('target OU unresolved');
+      if (sb.subOusRequested) await gateOuSubtree(opName, ou);
+      body = { ...sb.body, ...(sb.hasSubOusKey ? { includeSubOus: sb.subOusRequested } : {}) };
+      qs = buildQuery({ id: ou.ouid });
+    }
+
     if (!modeCheck.proceed) {
       return ok({
         status: 'dry_run',
@@ -55,9 +73,10 @@ async function notificationManageExecute(raw: unknown): Promise<McpToolResult> {
         message: modeCheck.dryRunNotice,
       });
     }
-    const data = await client.request<unknown>(method, `${path}${qs}`, input.body, {
+    if (ou) await assertOuPathUnchanged(ou.ouid, ou.path);
+    const data = await client.request<unknown>(method, `${path}${qs}`, body, {
       mutating: true,
-      opName: `notification_manage(${input.action})`,
+      opName,
     });
     if (isDryRunSkip(data)) {
       return ok({ status: 'dry_run', action: input.action, message: data.notice });

@@ -58,6 +58,17 @@ function text(r: { content: Array<{ text: string }> }): string {
 
 // ─── fake server ──────────────────────────────────────────────────────────────
 
+function ouNode(id: number, name: string, parent: number, children: unknown[] = []): Record<string, unknown> {
+  return { OUID: id, Name: name, count: 0, DeviceCount: 0, ParentID: parent, UseParent: 1, children };
+}
+const OU_TREE = {
+  code: 200,
+  message: 'OK',
+  response: {
+    status: { result: 0, msg: { treeStructure: [ouNode(1, 'Root', -1, [ouNode(3, 'A', 1), ouNode(4, 'B', 1)])] } },
+  },
+};
+
 interface Rec {
   method: string;
   path: string;
@@ -102,6 +113,12 @@ function startServer(): Promise<{ server: Server; baseUrl: string }> {
           if (u.pathname === '/rest/auth/v1/login') {
             logins += 1;
             res.end(JSON.stringify({ token: fakeJwt() }));
+            return;
+          }
+          // The OU write gate resolves OUs from a fresh tree; serve it without recording it, so the
+          // tests below still see exactly the mutating/driven calls.
+          if (u.pathname === '/rest/api/v1/ou/structure' && rec.method === 'GET') {
+            res.end(JSON.stringify(OU_TREE));
             return;
           }
           recorded.push(rec);
