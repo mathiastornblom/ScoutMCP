@@ -227,5 +227,37 @@ await test('enrich(): device-search rows get _GroupIDName/_GroupIDPath; non-devi
   assert(!('_GroupIDName' in other), 'non-device object untouched');
 });
 
+// ── strict search parse on gate paths + device_manage rename/delete ───────────
+console.log('\nstrict parse for bulk_command; device_manage rename/delete gated');
+await test('bulk_command: unparseable / unknown-shape search response -> refused (audited), also without lists', async () => {
+  for (const bad of [listEnvelope('boom'), listEnvelope({ Devices: liveRows() }), { nope: 1 }, null]) {
+    reset(); process.env.SCOUT_PROTECTED_OUS = '/NorthCreek/AD'; searchBody = bad;
+    await refused(`protected list, ${JSON.stringify(bad)}`, () => bulkCommandTool.execute(bc), /parse/);
+    reset(); process.env.SCOUT_ENV = 'test'; process.env.SCOUT_TEST_OU_PATH = '/NorthCreek'; searchBody = bad;
+    await refused(`test env, ${JSON.stringify(bad)}`, () => bulkCommandTool.execute(bc), /parse/);
+  }
+});
+await test('device_manage rename/delete: device in a protected OU -> refused, no write', async () => {
+  reset(); process.env.SCOUT_PROTECTED_OUS = '/NorthCreek/AD'; process.env.SCOUT_ENV = 'production';
+  await refused('rename protected', () => deviceManageTool.execute({ action: 'rename', name: 'synth-ad-01', newname: 'zzz' }));
+  await refused('delete protected', () => deviceManageTool.execute({ action: 'delete', name: 'synth-ad-01' }));
+});
+await test('device_manage rename/delete: device in an unprotected OU -> sent; unresolvable -> refused', async () => {
+  reset(); process.env.SCOUT_PROTECTED_OUS = '/NorthCreek/AD'; singleDevice = { Name: 'x', GroupID: 5 };
+  let r = await deviceManageTool.execute({ action: 'rename', name: 'x', newname: 'y' });
+  assert(!r.isError && writes.length === 1 && /^PUT /.test(writes[0]!), `rename: ${writes.join('|')} ${text(r)}`);
+  r = await deviceManageTool.execute({ action: 'delete', name: 'x' });
+  assert(!r.isError && writes.length === 2 && /^DELETE /.test(writes[1]!), `delete: ${writes.join('|')} ${text(r)}`);
+  for (const rec of [{}, { GroupID: 999 }, { GroupID: '5' }, { OUID: 5, GroupID: 6 }]) {
+    reset(); process.env.SCOUT_PROTECTED_OUS = '/NorthCreek/AD'; singleDevice = { Name: 'x', ...rec };
+    await refused(`rename ${JSON.stringify(rec)}`, () => deviceManageTool.execute({ action: 'rename', name: 'x', newname: 'y' }), /source OU/);
+    await refused(`delete ${JSON.stringify(rec)}`, () => deviceManageTool.execute({ action: 'delete', name: 'x' }), /source OU/);
+  }
+});
+await test('device_manage rename under SCOUT_ENV=test: device outside SCOUT_TEST_OU_PATH -> refused', async () => {
+  reset(); process.env.SCOUT_ENV = 'test'; process.env.SCOUT_TEST_OU_PATH = '/NorthCreek/Imprivata'; singleDevice = { Name: 'x', GroupID: 10 };
+  await refused('rename outside test scope', () => deviceManageTool.execute({ action: 'rename', name: 'x', newname: 'y' }), /outside SCOUT_TEST_OU_PATH/);
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed (${passed + failed} total)`);
 process.exit(failed > 0 ? 1 : 0);

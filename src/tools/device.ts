@@ -319,6 +319,15 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
       );
       resolvedDestId = destMatch?.ouid;
     }
+    if ((input.action === 'rename' || input.action === 'delete') && sourceOuChecksActive()) {
+      // The device's own OU must pass the protected/allowed lists and test scope; unresolvable refuses.
+      await gateSingleDeviceSource(client, `device_manage(${input.action})`, {
+        name: input.name,
+        mac: input.mac,
+        id: input.id,
+        clientid: input.clientid,
+      });
+    }
     if (input.action === 'move') {
       // Source OU from the device record (OUID and/or GroupID, validated and confirmed against a
       // FRESH OU tree); every failure refuses (audited), then protected/allowed + test scope.

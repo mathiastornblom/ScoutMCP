@@ -29,7 +29,7 @@ import {
   GuardrailError,
   auditLog,
 } from '../safety/guardrails.js';
-import { parseSearchDevices, extractSearchDevices, deviceName, type DeviceRecord } from '../devices.js';
+import { parseSearchDevices, deviceName, type DeviceRecord } from '../devices.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -42,11 +42,11 @@ const MAX_BULK = 500;
  * devices matched" would mean a safety gate downstream silently runs against an empty set
  * instead of refusing — see resolveDistinctSourceOuPathsOrThrow below for why that matters.
  */
-function extractDevicesOrThrow(raw: unknown): DeviceRecord[] {
+function extractDevicesOrThrow(raw: unknown, opName = 'move_devices_by_filter'): DeviceRecord[] {
   const parsed = parseSearchDevices(raw);
   if (!parsed.ok) {
     auditLog({
-      opName: 'move_devices_by_filter',
+      opName,
       target: 'unknown',
       result: 'refused',
       gate: 'unresolvable-source-ou',
@@ -530,11 +530,9 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
       limit: input.limit ?? 100,
     });
     const searchResp = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
-    // bulk_command has no per-device source-OU check (it sends device commands, not OU
-    // moves), so an unparseable response degrading to "no devices matched" is acceptable
-    // here — unlike move_devices_by_filter, nothing downstream silently skips a safety gate
-    // because of it.
-    const devices = extractSearchDevices(searchResp);
+    // Strict parse: an unparseable / unknown-shape response must REFUSE (audited), never read as
+    // "no devices matched" (the per-device source gate below depends on this list).
+    const devices = extractDevicesOrThrow(searchResp, `bulk_command(${input.command})`);
 
     if (devices.length === 0) {
       return ok({ status: 'ok', matched: 0, commanded: 0, message: 'No devices matched.' });
