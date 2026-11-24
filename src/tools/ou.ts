@@ -14,6 +14,7 @@ import {
   isDryRunSkip,
   GuardrailError,
 } from '../safety/guardrails.js';
+import { checkOuRightPreflight, OU_MANAGE_RIGHTS } from '../safety/preflight.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -308,6 +309,28 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
         action: input.action,
         target: resolvedPath ?? resolvedId ?? lookupQuery,
         message: modeCheck.dryRunNotice,
+      });
+    }
+
+    // ourights preflight (UX aid only; explicit-false refuses, anything else proceeds).
+    // Runs after every gate above and after the dry-run short-circuit, before the write.
+    const neededRight = OU_MANAGE_RIGHTS[input.action];
+    if (isMutatingAction && neededRight !== undefined) {
+      let preflightOuId: number | undefined =
+        input.action === 'add' ? resolvedDestId : input.action === 'structure_import' ? input.ouId : resolvedId;
+      const preflightPath = input.action === 'add' ? resolvedDestPath : resolvedPath;
+      if (preflightOuId === undefined && preflightPath) {
+        try {
+          preflightOuId = (await resolveOuRef(preflightPath)).ouid;
+        } catch {
+          preflightOuId = undefined; // unresolvable -> preflight skipped; server still enforces
+        }
+      }
+      await checkOuRightPreflight({
+        opName: `ou_manage(${input.action})`,
+        target: `ou:${preflightPath ?? preflightOuId ?? 'unknown'}`,
+        ouId: preflightOuId,
+        requiredRight: neededRight,
       });
     }
 

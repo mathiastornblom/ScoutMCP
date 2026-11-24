@@ -6,6 +6,7 @@ import { resolveOuRef } from '../resolver.js';
 import { getProgressReporter } from '../progress.js';
 import { confirmDestructiveAction } from '../elicitation.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
+import { checkOuRightPreflight, DEVICE_COMMAND_RIGHTS } from '../safety/preflight.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -85,9 +86,15 @@ async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<Mc
     let body = input.body;
 
     // Resolve ouRef and inject into body for target=ou
+    let preflightOuId: number | undefined;
+    let preflightOuLabel = 'ou';
     if (input.target === 'ou' && input.ouRef !== undefined) {
       const match = await resolveOuRef(input.ouRef);
       body = { ouId: match.ouid, ...body };
+      preflightOuId = match.ouid;
+      preflightOuLabel = match.path;
+    } else if (input.target === 'ou' && typeof body?.['ouId'] === 'number') {
+      preflightOuId = body['ouId'];
     }
 
     // Gate 1: mode tiers — every device_command invocation sends a command that
@@ -102,6 +109,18 @@ async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<Mc
       });
     }
 
+    // ourights preflight (UX aid only; explicit-false refuses, anything else proceeds).
+    // Only target=ou has a known OU id; other scopes are skipped. Runs after all gates above.
+    const neededRight = DEVICE_COMMAND_RIGHTS[input.command];
+    if (neededRight !== undefined) {
+      await checkOuRightPreflight({
+        opName: `device_command(${input.command})`,
+        target: `ou:${preflightOuLabel}`,
+        ouId: preflightOuId,
+        requiredRight: neededRight,
+      });
+    }
+
     const data = await client.request<unknown>('POST', `${path}${qs}`, body, {
       mutating: true,
       opName: `device_command(${input.command})`,
@@ -111,7 +130,10 @@ async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<Mc
     }
     return ok(data);
   } catch (err) {
-    if (err instanceof GuardrailError) return fail(`device_command blocked: ${err.message}`);
+    if (err instanceof GuardrailError) {
+      // Preflight audit-logs its own refusal.
+      return fail(`device_command blocked: ${err.message}`);
+    }
     return fail(`device_command failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

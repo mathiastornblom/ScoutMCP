@@ -67,7 +67,8 @@ export class GuardrailError extends Error {
       | 'circuit-breaker'
       | 'kill-switch'
       | 'private-write-production'
-      | 'unresolvable-source-ou',
+      | 'unresolvable-source-ou'
+      | 'preflight',
   ) {
     super(message);
     this.name = 'GuardrailError';

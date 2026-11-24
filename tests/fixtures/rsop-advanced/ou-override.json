@@ -1,0 +1,37 @@
+{
+  "description": "Base value overridden by a parent OU, then by a child OU; device adds an untouched key",
+  "layers": [
+    {
+      "level": "base",
+      "response": { "message": "OK", "status": { "result": 0 }, "response": [
+        { "EntryId": 1, "File": "/setup/terminal.ini", "Section": "Browser", "Key": "SuppressPrompts", "Value": "false" }
+      ] }
+    },
+    {
+      "level": "/Enterprise",
+      "response": { "message": "OK", "status": { "result": 0 }, "response": [
+        { "EntryId": 6, "File": "/setup/terminal.ini", "Section": "Browser", "Key": "SuppressPrompts", "Value": "true" }
+      ] }
+    },
+    {
+      "level": "/Enterprise/Boot-to-VDI",
+      "response": { "message": "OK", "status": { "result": 0 }, "response": [
+        { "EntryId": 9, "File": "/setup/terminal.ini", "Section": "Browser", "Key": "SuppressPrompts", "Value": "false" }
+      ] }
+    },
+    {
+      "level": "device",
+      "response": { "message": "OK", "status": { "result": 0 }, "response": [
+        { "EntryId": 12, "File": "/setup/terminal.ini", "Section": "Security", "Key": "SsoBrowserEnabled", "Value": "true" }
+      ] }
+    }
+  ],
+  "expected": {
+    "entries": [
+      { "file": "/setup/terminal.ini", "section": "Browser", "key": "SuppressPrompts", "effectiveValue": "false", "setAt": "/Enterprise/Boot-to-VDI", "isOverride": true, "overridesValue": "true", "entryId": 9 },
+      { "file": "/setup/terminal.ini", "section": "Security", "key": "SsoBrowserEnabled", "effectiveValue": "true", "setAt": "device", "isOverride": false, "entryId": 12 }
+    ],
+    "warnings": [],
+    "complete": true
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "description": "Entries defined on an OU only (field shapes per openapi.json and the 2611 HAR sample)",
+  "layers": [
+    { "level": "base", "response": { "message": "OK", "status": { "result": 0 }, "response": [] } },
+    {
+      "level": "/Enterprise",
+      "response": {
+        "message": "OK",
+        "status": { "result": 0 },
+        "response": [
+          { "EntryId": 6, "File": "/setup/terminal.ini", "Section": "Browser", "Key": "SuppressPrompts", "Value": "true", "Source": "/Enterprise" },
+          { "EntryId": 3, "File": "/setup/ica/wfclient.ini", "Section": "WFClient", "Key": "UsePrintcap", "Value": "True", "Source": "/Enterprise" }
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "entries": [
+      { "file": "/setup/ica/wfclient.ini", "section": "WFClient", "key": "UsePrintcap", "effectiveValue": "True", "setAt": "/Enterprise", "isOverride": false, "entryId": 3, "source": "/Enterprise" },
+      { "file": "/setup/terminal.ini", "section": "Browser", "key": "SuppressPrompts", "effectiveValue": "true", "setAt": "/Enterprise", "isOverride": false, "entryId": 6, "source": "/Enterprise" }
+    ],
+    "warnings": [],
+    "complete": true
+  }
+}

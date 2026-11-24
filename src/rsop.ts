@@ -200,3 +200,125 @@ export function resolveAgainstSchema(
   const scoped = opts.section ? all.filter((e) => e.section === opts.section) : all;
   return foldConfigLayers(scoped, layers);
 }
+
+// ── Layer 5: advanced file entries ───────────────────────────────────────────────
+//
+// Source: PUBLIC API GET /api/v1/config/advanced/{base|ou|device}/fileEntries. Per
+// openapi.json the 200 body is { message, status:{result}, response:[{EntryId, File,
+// Section, Key, Value, Source?}] } (Source only on the ou/device variants). Entry field
+// names also match the sample in the 2611 HAR (iniEntries.entries[]).
+//
+// These are INI-file entries (file + section + key), a different namespace from the
+// schema-section keys folded above, so they are resolved by their own fold and returned
+// separately. Parsing FAILS CLOSED: an unexpected envelope or entry is dropped from the
+// result AND reported in `warnings` with `complete: false` — never silently skipped.
+
+export interface AdvancedEntry {
+  entryId?: number;
+  file: string;
+  section: string;
+  key: string;
+  value: string;
+  /** Server-reported origin (ou/device variants), passed through verbatim for provenance. */
+  source?: string;
+}
+
+export interface AdvancedLayerRef {
+  level: string;
+  entries: AdvancedEntry[];
+}
+
+export interface ResolvedAdvancedEntry {
+  file: string;
+  section: string;
+  key: string;
+  effectiveValue: string;
+  /** Level that last set the entry: "base", an OU path, or "device". */
+  setAt: string;
+  /** True if a less-specific layer also defined this file/section/key. */
+  isOverride: boolean;
+  overridesValue?: string;
+  entryId?: number;
+  source?: string;
+}
+
+export interface ResolvedAdvancedResult {
+  entries: ResolvedAdvancedEntry[];
+  warnings: string[];
+  /** False when any layer or entry was malformed/unavailable — the result may be incomplete. */
+  complete: boolean;
+}
+
+const ZERO_WIDTH = /[​-‍⁠﻿]/g;
+
+/** Validates one fileEntries response. Never throws; problems become warnings. */
+export function parseAdvancedFileEntries(
+  level: string,
+  raw: unknown,
+): { layer: AdvancedLayerRef; warnings: string[] } {
+  const warnings: string[] = [];
+  const layer: AdvancedLayerRef = { level, entries: [] };
+  const rows =
+    raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)['response']
+      : undefined;
+  if (!Array.isArray(rows)) {
+    warnings.push(`advanced file entries for "${level}": unexpected response shape (no "response" array); layer ignored`);
+    return { layer, warnings };
+  }
+  rows.forEach((row, i) => {
+    const r = row !== null && typeof row === 'object' && !Array.isArray(row) ? (row as Record<string, unknown>) : null;
+    if (
+      !r ||
+      typeof r['File'] !== 'string' ||
+      typeof r['Section'] !== 'string' ||
+      typeof r['Key'] !== 'string' ||
+      typeof r['Value'] !== 'string' ||
+      (r['EntryId'] !== undefined && typeof r['EntryId'] !== 'number') ||
+      (r['Source'] !== undefined && typeof r['Source'] !== 'string')
+    ) {
+      warnings.push(`advanced file entries for "${level}": entry #${i} malformed (needs string File/Section/Key/Value); skipped`);
+      return;
+    }
+    const rawKey = r['Key'] as string;
+    const key = rawKey.replace(ZERO_WIDTH, '');
+    if (key !== rawKey) {
+      warnings.push(`advanced file entries for "${level}": key "${key}" contained zero-width characters (stripped)`);
+    }
+    layer.entries.push({
+      ...(typeof r['EntryId'] === 'number' ? { entryId: r['EntryId'] } : {}),
+      file: r['File'] as string,
+      section: r['Section'] as string,
+      key,
+      value: r['Value'] as string,
+      ...(typeof r['Source'] === 'string' ? { source: r['Source'] } : {}),
+    });
+  });
+  return { layer, warnings };
+}
+
+/** Folds advanced layers (least specific first) with the same later-wins rule as foldConfigLayers. */
+export function foldAdvancedLayers(layers: AdvancedLayerRef[], warnings: string[] = []): ResolvedAdvancedResult {
+  const state = new Map<string, ResolvedAdvancedEntry>();
+  for (const layer of layers) {
+    for (const e of layer.entries) {
+      const id = JSON.stringify([e.file, e.section, e.key]);
+      const prev = state.get(id);
+      state.set(id, {
+        file: e.file,
+        section: e.section,
+        key: e.key,
+        effectiveValue: e.value,
+        setAt: layer.level,
+        isOverride: prev !== undefined,
+        ...(prev !== undefined ? { overridesValue: prev.effectiveValue } : {}),
+        ...(e.entryId !== undefined ? { entryId: e.entryId } : {}),
+        ...(e.source !== undefined ? { source: e.source } : {}),
+      });
+    }
+  }
+  const entries = [...state.values()].sort((a, b) =>
+    (a.file + '\0' + a.section + '\0' + a.key).localeCompare(b.file + '\0' + b.section + '\0' + b.key),
+  );
+  return { entries, warnings: [...warnings], complete: warnings.length === 0 };
+}

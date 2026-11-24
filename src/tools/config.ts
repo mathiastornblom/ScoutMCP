@@ -13,6 +13,7 @@ import {
   isDryRunSkip,
   GuardrailError,
 } from '../safety/guardrails.js';
+import { checkOuRightPreflight, CONFIG_UPDATE_RIGHT } from '../safety/preflight.js';
 import { validateConfigWrite, formatViolations, formatWarnings } from '../validation.js';
 import { resolveTargetRef, resolveEffectiveConfig } from './config_resolve.js';
 import { foldConfigLayers, type ResolvedConfigKey } from '../rsop.js';
@@ -181,6 +182,15 @@ async function configUpdateExecute(raw: unknown, ctx?: ToolContext): Promise<Mcp
       resolvedOuPath = resolved.path;
       resolvedOuId = resolved.ouid;
       checkOuWriteAllowed({ targetPath: resolvedOuPath });
+      // ourights preflight (UX aid only; explicit-false refuses, anything else proceeds).
+      // Placed after validation + OU resolution and before the confirm prompt so the user
+      // is never asked to confirm something the server already says is forbidden (Security B2).
+      await checkOuRightPreflight({
+        opName: 'config_update',
+        target: `ou:${resolvedOuPath}`,
+        ouId: resolvedOuId,
+        requiredRight: CONFIG_UPDATE_RIGHT,
+      });
     }
 
     // Gate 3 (closing the previously documented gap): target=ou writes inherit to every
@@ -343,7 +353,8 @@ async function configUpdateExecute(raw: unknown, ctx?: ToolContext): Promise<Mcp
     return ok({ result: data, warnings: warningLines });
   } catch (err) {
     if (err instanceof GuardrailError) {
-      auditLog({
+      // The preflight audit-logs its own refusal; avoid a duplicate entry.
+      if (err.gate !== 'preflight') auditLog({
         opName: 'config_update',
         target: input.target === 'ou' ? (input.ouPath ?? String(input.ouId ?? 'unknown')) : input.target,
         result: 'refused',
