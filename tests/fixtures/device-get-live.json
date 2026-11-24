@@ -1,0 +1,18 @@
+{
+  "code": 200,
+  "message": "OK",
+  "response": {
+    "status": {
+      "result": 0,
+      "msg": {
+        "visibleDevices": [
+          { "ClientIdentifier": "00000000-0000-4000-8000-0000000000a1", "DeviceID": 2001, "GroupID": 10, "IP_Address": "192.0.2.21", "Mac_Address": "02:00:00:00:00:21", "Name": "synth-single-01" }
+        ],
+        "hiddenDevices": 0,
+        "pendingDevices": 0,
+        "deniedDevices": 0,
+        "lastDeviceId": 2001
+      }
+    }
+  }
+}

@@ -16,7 +16,7 @@
  */
 
 import { resolveWriteTarget, collectOuSubtree, resolveOuIdsFresh, type OuMatch } from '../resolver.js';
-import { readDeviceOuId, readDeviceOuIds, type DeviceRecord } from '../devices.js';
+import { readDeviceOuId, readDeviceOuIds, parseSingleDevice, type DeviceRecord } from '../devices.js';
 import { buildQuery } from '../types.js';
 import { canonicalizeOuPath, OuPathError } from '../ou_path.js';
 import {
@@ -308,8 +308,16 @@ export async function gateSingleDeviceSource(
       'unresolvable-source-ou',
     );
   }
-  const rec = data && typeof data === 'object' && !Array.isArray(data) ? (data as DeviceRecord) : {};
-  const [ou] = await resolveDeviceSourceOus(opName, target, [rec]);
+  const single = parseSingleDevice(data);
+  if (!single.ok) {
+    auditLog({ opName, target, result: 'refused', gate: 'unresolvable-source-ou', detail: `device lookup response: ${single.reason}` });
+    throw new GuardrailError(
+      `Could not determine the source OU of the device (${single.reason}). ` +
+        'Refusing: the protected-OU check cannot run against an unknown source OU.',
+      'unresolvable-source-ou',
+    );
+  }
+  const [ou] = await resolveDeviceSourceOus(opName, target, [single.row]);
   gateSourceOus(opName, [ou]);
   return ou;
 }

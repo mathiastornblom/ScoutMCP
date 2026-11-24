@@ -19,7 +19,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { confirmDestructiveAction, supportsElicitation } from '../elicitation.js';
-import { resolveOuRef, invalidateOuCache, assertOuPathUnchanged } from '../resolver.js';
+import { resolveOuRef, invalidateOuCache, assertOuPathUnchanged, collectOuSubtree } from '../resolver.js';
 import { gateOuWrite, gateOuSubtree, subOusRequested, sanitizeOuBody, resolveDeviceSourceOus, gateSourceOus, sourceOuChecksActive } from '../safety/ou_gate.js';
 import {
   checkMutationAllowed,
@@ -59,6 +59,20 @@ function extractDevicesOrThrow(raw: unknown, opName = 'move_devices_by_filter'):
       'unresolvable-source-ou',
     );
   }
+  if (parsed.unlisted > 0) {
+    auditLog({
+      opName,
+      target: 'unknown',
+      result: 'refused',
+      gate: 'unresolvable-source-ou',
+      detail: `${parsed.unlisted} hidden/pending/denied device(s) matched but are not listed`,
+    });
+    throw new GuardrailError(
+      `${parsed.unlisted} matched device(s) are hidden/pending/denied and not listed, so their source OU cannot be checked. ` +
+        'Refusing: an unlisted device would skip the protected-OU gate.',
+      'unresolvable-source-ou',
+    );
+  }
   return parsed.devices;
 }
 
@@ -89,6 +103,54 @@ async function resolveDistinctSourceOuPathsOrThrow(devices: DeviceRecord[]): Pro
   const sources = await resolveDeviceSourceOus('move_devices_by_filter', 'unknown', devices);
   return Array.from(new Set(sources.map((m) => m.path)));
 }
+
+/**
+ * Device search shared by move_devices_by_filter and bulk_command. Scout 26.11.0 REQUIRES `searchFields`
+ * (capitalised column, e.g. `Name`), uses SQL LIKE wildcards (`%`, so a caller's `*` is translated) and
+ * does NOT recurse on includeSubOus (the flag is therefore never sent). With includeSubOus requested the
+ * subtree is enumerated from a FRESH parsed OU tree and searched OU by OU (ouPath each); results are
+ * de-duplicated by DeviceID. Every response goes through the strict parser (unparseable or unlisted
+ * hidden/pending/denied devices refuse) and a merged total above MAX_BULK refuses rather than truncating.
+ * Callers gate the subtree BEFORE calling this (bulk_command) or gate each matched device's own OU after.
+ */
+async function searchDevicesAcrossOus(
+  client: ReturnType<typeof getClient>,
+  opName: string,
+  srcRoot: { ouid: number; path: string },
+  input: { searchTerm: string; searchFields?: string; includeSubOus?: unknown; limit?: number },
+): Promise<DeviceRecord[]> {
+  const searchTerm = input.searchTerm.replace(/\*/g, '%');
+  const searchFields = input.searchFields ?? 'Name';
+  const paths = subOusRequested(input.includeSubOus)
+    ? (await collectOuSubtree(srcRoot.ouid)).map((o) => o.path)
+    : [srcRoot.path];
+  const merged: DeviceRecord[] = [];
+  const seen = new Set<string>();
+  for (const ouPath of paths) {
+    const qs = buildQuery({ ouPath, searchTerm, searchFields, limit: input.limit ?? 100 });
+    const resp = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
+    for (const d of extractDevicesOrThrow(resp, opName)) {
+      const key = String(d['DeviceID'] ?? d['ClientIdentifier'] ?? JSON.stringify(d));
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(d);
+      if (merged.length > MAX_BULK) {
+        auditLog({ opName, target: srcRoot.path, result: 'refused', gate: 'blast-radius', detail: `more than ${MAX_BULK} devices matched across ${paths.length} OU(s)` });
+        throw new GuardrailError(
+          `More than ${MAX_BULK} devices matched across ${paths.length} OU(s). Refusing rather than truncating: narrow the search term or the source OU.`,
+          'blast-radius',
+        );
+      }
+    }
+  }
+  return merged;
+}
+
+const searchFieldsSchema = z
+  .string()
+  .regex(/^[A-Za-z_][A-Za-z0-9_,]*$/, 'searchFields must be comma-separated capitalised column names, e.g. "Name"')
+  .optional()
+  .describe('Device column(s) the search term is matched against (Scout requires one; default "Name")');
 
 // ── onboard_branch ────────────────────────────────────────────────────────────
 
@@ -227,9 +289,11 @@ const moveDevicesByFilterSchema = z.object({
   sourceOuPath: z.string().optional().describe('OU path to search for devices'),
   sourceOuId: z.string().optional().describe('OU ID to search for devices'),
   searchTerm: z.string().describe(
-    'Device search term — use "*" to match all devices, or a name fragment like "ThinClient"',
+    'Device search term, matched against searchFields. "*" is translated to the server wildcard "%" ' +
+      '(so "*" matches all, "Thin*" matches a prefix); or a name fragment like "ThinClient"',
   ),
-  includeSubOus: z.boolean().optional().describe('Include sub-OU devices in the search (default false)'),
+  searchFields: searchFieldsSchema,
+  includeSubOus: z.boolean().optional().describe('Include sub-OU devices (default false). The server flag does not recurse, so each OU of the subtree is searched separately'),
 
   destOuPath: z.string().optional().describe('Destination OU path to move matched devices to'),
   destOuId: z.number().int().optional().describe('Destination OU numeric ID'),
@@ -300,22 +364,23 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
     );
     if (!srcRoot) throw new Error('sourceOuPath or sourceOuId is required');
 
-    // Search for devices (read; by the canonical resolved path)
-    const qs = buildQuery({
-      ouPath: srcRoot.path,
-      searchTerm: input.searchTerm,
-      includeSubOus: input.includeSubOus,
-      limit: input.limit ?? 100,
-    });
-    const searchResp = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
-    // Throws (rather than silently treating an unparseable response as "no matches") because
-    // this tool's protected-OU gate (below) depends on resolving every matched device's
-    // source OU — see extractDevicesOrThrow / resolveDistinctSourceOuPathsOrThrow.
-    const devices = extractDevicesOrThrow(searchResp);
+    // Search for devices (read; canonical resolved path, per-OU fan-out for includeSubOus). Strict parse:
+    // an unparseable response must refuse, because the per-device source gate below depends on this list.
+    const devices = await searchDevicesAcrossOus(client, 'move_devices_by_filter', srcRoot, input);
 
     if (devices.length === 0) {
       return ok({ status: 'ok', matched: 0, moved: 0, message: 'No devices matched the search criteria.' });
     }
+
+    // Gate 6 (sources) - runs right after the strict search parse and BEFORE the dry-run preview, the
+    // confirm/elicitation prompt and the blast-radius step, so a device in a protected/disallowed OU is
+    // never previewed as wouldMove and never prompted: a bulk move can touch many distinct source OUs at once (recursively if
+    // includeSubOus=true) — every one of those is checked, not just the search root, because the
+    // search root the caller passed in is not necessarily the OU any individual matched device
+    // actually lives in. Fail closed: resolveDistinctSourceOuPathsOrThrow throws (rather than
+    // returning []) if any matched device's source OU can't be determined — see its doc comment.
+    // The id comes from the row's GroupID (live: the device's direct OU) and/or OUID, validated.
+    gateSourceOus('move_devices_by_filter', await resolveDeviceSourceOus('move_devices_by_filter', srcRoot.path, devices));
 
     if (isDryRun) {
       return ok({
@@ -343,17 +408,6 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
 
     // Gate 3: blast-radius cap, now that the device count is resolved.
     checkBlastRadius({ affectedCount: devices.length, overrideBlastRadius: input.overrideBlastRadius });
-
-    // Gate 6 (sources): a bulk move can touch many distinct source OUs at once (recursively if
-    // includeSubOus=true) — every one of those is checked, not just the search root, because the
-    // search root the caller passed in is not necessarily the OU any individual matched device
-    // actually lives in. Fail closed: resolveDistinctSourceOuPathsOrThrow throws (rather than
-    // returning []) if any matched device's source OU can't be determined — see its doc comment.
-    // The id comes from the row's GroupID (live: the device's direct OU) and/or OUID, validated.
-    const sourcePaths = await resolveDistinctSourceOuPathsOrThrow(devices);
-    for (const sourcePath of sourcePaths) {
-      checkOuWriteAllowed({ targetPath: sourcePath });
-    }
 
     if (!modeCheck.proceed) {
       return ok({
@@ -452,9 +506,11 @@ const bulkCommandSchema = z.object({
   sourceOuPath: z.string().optional().describe('OU path to search for target devices'),
   sourceOuId: z.string().optional().describe('OU ID to search for target devices'),
   searchTerm: z.string().describe(
-    'Device search term — "*" matches all, or a name fragment like "Thin"',
+    'Device search term, matched against searchFields. "*" is translated to the server wildcard "%" ' +
+      '(so "*" matches all); or a name fragment like "Thin"',
   ),
-  includeSubOus: z.boolean().optional().describe('Include sub-OU devices in search (default false)'),
+  searchFields: searchFieldsSchema,
+  includeSubOus: z.boolean().optional().describe('Include sub-OU devices (default false). The server flag does not recurse, so each OU of the subtree is searched separately'),
 
   command: z
     .enum(['restart', 'halt', 'start', 'factoryreset', 'update', 'updateuefi', 'custom', 'predefined', 'delivery', 'message'])
@@ -522,20 +578,20 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
     if (!srcRoot) throw new Error('sourceOuPath or sourceOuId is required');
     if (subOusRequested(input.includeSubOus)) await gateOuSubtree(`bulk_command(${input.command})`, srcRoot);
 
-    // Search for devices
-    const qs = buildQuery({
-      ouPath: srcRoot.path,
-      searchTerm: input.searchTerm,
-      includeSubOus: input.includeSubOus,
-      limit: input.limit ?? 100,
-    });
-    const searchResp = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
-    // Strict parse: an unparseable / unknown-shape response must REFUSE (audited), never read as
-    // "no devices matched" (the per-device source gate below depends on this list).
-    const devices = extractDevicesOrThrow(searchResp, `bulk_command(${input.command})`);
+    // Search (subtree already gated above; strict parse, per-OU fan-out).
+    const devices = await searchDevicesAcrossOus(client, `bulk_command(${input.command})`, srcRoot, input);
 
     if (devices.length === 0) {
       return ok({ status: 'ok', matched: 0, commanded: 0, message: 'No devices matched.' });
+    }
+
+    // Per-device source check, BEFORE the dry-run preview and the confirm prompt (defence in depth beyond the gated root/subtree): when a list or
+    // SCOUT_ENV=test is active, every matched device's own OU must resolve and pass the gates.
+    if (sourceOuChecksActive()) {
+      gateSourceOus(
+        `bulk_command(${input.command})`,
+        await resolveDeviceSourceOus(`bulk_command(${input.command})`, srcRoot.path, devices),
+      );
     }
 
     if (isDryRun) {
@@ -565,15 +621,6 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
 
     // Gate 3: blast-radius cap, now that the device count is resolved.
     checkBlastRadius({ affectedCount: devices.length, overrideBlastRadius: input.overrideBlastRadius });
-
-    // Per-device source check (defence in depth beyond the gated root/subtree): when a list or
-    // SCOUT_ENV=test is active, every matched device's own OU must resolve and pass the gates.
-    if (sourceOuChecksActive()) {
-      gateSourceOus(
-        `bulk_command(${input.command})`,
-        await resolveDeviceSourceOus(`bulk_command(${input.command})`, srcRoot.path, devices),
-      );
-    }
 
     const modeCheck = baseModeCheck;
     if (!modeCheck.proceed) {
