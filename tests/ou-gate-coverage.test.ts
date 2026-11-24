@@ -23,6 +23,7 @@ import { notificationManageTool } from '../src/tools/notification.js';
 import { ouFilterManageTool, newDeviceOptionsTool } from '../src/tools/ou_filtering.js';
 import { adminManageTool } from '../src/tools/admins.js';
 import { onboardBranchTool, bulkCommandTool, moveDevicesByFilterTool } from '../src/tools/workflow.js';
+import { configUpdateTool } from '../src/tools/config.js';
 import { contextTool } from '../src/tools/context.js';
 
 setSessionConfig({ baseUrl: 'https://fake-scout-board.invalid:22160', username: 'u', password: 'p' });
@@ -111,17 +112,17 @@ await test('create/delete/set_inheritance on a protected OU (path variants, id, 
     await refused(`set_inheritance ${JSON.stringify(r)}`, () => appManageTool.execute({ action: 'set_inheritance', body: { useParentApps: true }, ...r }));
   }
 });
-await test('unprotected OU: path/id/both-consistent send ONLY ouId=<resolved>', async () => {
+await test('unprotected OU: path/id/both-consistent send ONLY id=<resolved>', async () => {
   for (const r of [{ ouPath: '/northcreek/imprivata' }, { ouId: 5 }, { ouId: 5, ouPath: '/NorthCreek/Imprivata' }]) {
     reset(); writeMode(); setProt();
     let res = await appManageTool.execute({ action: 'create', scope: 'ou', applicationType: 'citrix', body: { a: 1 }, ...r });
-    assert(!res.isError && sent() === 'POST /api/v1/applications/ou/citrix?ouId=5', `create: ${sent()} ${text(res)}`);
+    assert(!res.isError && sent() === 'POST /api/v1/applications/ou/citrix?id=5', `create: ${sent()} ${text(res)}`);
     reset(); writeMode(); setProt();
     res = await appManageTool.execute({ action: 'delete', scope: 'ou', appId: 3, ...r });
-    assert(!res.isError && sent() === 'DELETE /api/v1/applications/ou?appId=3&ouId=5', `delete: ${sent()}`);
+    assert(!res.isError && sent() === 'DELETE /api/v1/applications/ou?appId=3&id=5', `delete: ${sent()}`);
     reset(); writeMode(); setProt();
     res = await appManageTool.execute({ action: 'set_inheritance', body: { useParentApps: false, evil: 1 }, ...r });
-    assert(!res.isError && sent() === 'POST /api/v1/applications/inheritance?ouId=5', `set_inheritance: ${sent()}`);
+    assert(!res.isError && sent() === 'POST /api/v1/applications/inheritance?id=5', `set_inheritance: ${sent()}`);
     assert(JSON.stringify(writes[0]!.body) === '{"useParentApps":false}', `body validated down: ${JSON.stringify(writes[0]!.body)}`);
   }
 });
@@ -161,7 +162,7 @@ await test('protected OU via ouRef / body.ouId / body.ouPath / disagreeing refs 
   ];
   for (const x of cases) await refused(JSON.stringify(x), () => deviceCommandTool.execute({ target: 'ou', command: 'restart', ...x }));
 });
-await test('unprotected OU: body carries ONLY ouId=<resolved> (body.ouPath dropped)', async () => {
+await test('unprotected OU: body carries ONLY id=<resolved> (body.ouPath dropped)', async () => {
   for (const x of [{ ouRef: '5' }, { body: { ouId: 5 } }, { body: { ouPath: '/northcreek/imprivata' } }, { ouRef: '/NorthCreek/Imprivata', body: { ouId: 5, ouPath: '/NorthCreek/Imprivata', informUser: { enabled: true } } }]) {
     reset(); writeMode(); setProt();
     const r = await deviceCommandTool.execute({ target: 'ou', command: 'restart', ...x });
@@ -410,6 +411,71 @@ await test('set_ou: unknown id / disagreeing refs / unreadable tree -> error and
   tree = () => ({ nope: true });
   const r = await contextTool.execute({ action: 'set_ou', id: 5 });
   assert(r.isError === true && getWorkingOu() === null, text(r));
+});
+
+// ── Security round: F1 ancestors, F2 includeSubOus, F3/F4 test scope ───────────
+console.log('\nSEC F1: ancestor of a protected OU is protected for subtree-affecting actions');
+const CL = '/NorthCreek/Customers/CLALIT'; // OU 9, child of Customers (8), grandchild of NorthCreek (2)
+const setCl = (): void => { process.env.SCOUT_PROTECTED_OUS = CL; };
+await test('exact repro: protected=CLALIT; delete/rename/converttobase/move of PARENT id 8 and grandparent -> refused', async () => {
+  reset(); writeMode(); setCl(); process.env.SCOUT_ALLOW_BASE_WRITES = 'true';
+  await refused('delete 8', () => ouManageTool.execute({ action: 'delete', id: 8 }), /protected/);
+  await refused('rename 8', () => ouManageTool.execute({ action: 'rename', id: 8, newname: 'x' }), /protected/);
+  await refused('converttobase 8', () => ouManageTool.execute({ action: 'converttobase', id: 8 }), /protected/);
+  await refused('move the ancestor 8', () => ouManageTool.execute({ action: 'move', id: 8, destouid: 5 }), /protected/);
+  await refused('delete grandparent 2 by path', () => ouManageTool.execute({ action: 'delete', path: '/northcreek' }), /protected/);
+  await refused('structure_import under ancestor 8', () => ouManageTool.execute({ action: 'structure_import', ouId: 8, importPayload: { data: {} } }), /protected/);
+});
+await test('non-protected sibling / unrelated OU still allowed; allow-list: ancestor of an allowed entry refused', async () => {
+  reset(); writeMode(); setCl();
+  let r = await ouManageTool.execute({ action: 'delete', id: 17 }); // DNIe, sibling of CLALIT
+  assert(!r.isError && sent() === 'DELETE /api/v1/ou?id=17', `${sent()} ${text(r)}`);
+  reset(); writeMode(); setCl();
+  r = await ouManageTool.execute({ action: 'rename', id: 5, newname: 'x' });
+  assert(!r.isError && writes.length === 1, text(r));
+  reset(); writeMode(); process.env.SCOUT_ALLOWED_OUS = '/NorthCreek/Customers/CLALIT';
+  await refused('delete ancestor of the allowed OU', () => ouManageTool.execute({ action: 'delete', id: 8 }));
+});
+await test('subtree-affecting fan-out: device_command/notification/bulk over an ancestor of a protected OU refused', async () => {
+  reset(); writeMode(); setCl();
+  await refused('device_command', () => deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '8', body: { includeSubOus: true } }));
+  await refused('notification', () => notificationManageTool.execute({ action: 'set', target: 'ou', type: 'delivery', ouId: 8, body: { includeSubOus: true } }));
+  await refused('bulk', () => bulkCommandTool.execute({ sourceOuId: '8', searchTerm: '*', command: 'restart', confirm: true, includeSubOus: true }));
+});
+
+console.log('\nSEC F2: includeSubOus normalised strictly');
+await test('every non-false variant triggers the subtree gate; the server gets a boolean', async () => {
+  for (const v of [true, 1, '1', 'true', 'TRUE', 'yes', 'false', 0 as unknown, [], {}, ['x']]) {
+    reset(); writeMode(); setCl();
+    await refused(`device_command ${JSON.stringify(v)}`, () => deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '8', body: { includeSubOus: v } }));
+    await refused(`notification ${JSON.stringify(v)}`, () => notificationManageTool.execute({ action: 'set', target: 'ou', type: 'delivery', ouId: 8, body: { includeSubOus: v } }));
+  }
+  reset(); writeMode(); setCl();
+  let r = await deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '17', body: { includeSubOus: 'yes' } });
+  assert(!r.isError && (writes[0]!.body as Record<string, unknown>)['includeSubOus'] === true, JSON.stringify(writes[0]?.body));
+  reset(); writeMode(); setCl();
+  r = await notificationManageTool.execute({ action: 'set', target: 'ou', type: 'delivery', ouId: 17, body: { includeSubOus: 1 } });
+  assert(!r.isError && (writes[0]!.body as Record<string, unknown>)['includeSubOus'] === true, JSON.stringify(writes[0]?.body));
+  // explicit false / absent: no subtree gate
+  reset(); writeMode(); setCl();
+  r = await deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '8', body: { includeSubOus: false } });
+  assert(!r.isError && (writes[0]!.body as Record<string, unknown>)['includeSubOus'] === false && /id=8/.test(writes[0]!.path), `${sent()} ${JSON.stringify(writes[0]?.body)}`);
+  reset(); writeMode(); setCl();
+  r = await bulkCommandTool.execute({ sourceOuId: '8', searchTerm: '*', command: 'restart', confirm: true });
+  assert(!r.isError, text(r));
+});
+
+console.log('\nSEC F3/F4: config_update and device move source honour SCOUT_ENV=test');
+await test('config_update target=ou outside SCOUT_TEST_OU_PATH refused (repro /MCP-Test vs /NorthCreek/Customers)', async () => {
+  process.env.SCOUT_ENV = 'test'; process.env.SCOUT_TEST_OU_PATH = '/MCP-Test';
+  reset(); writeMode();
+  await refused('by path', () => configUpdateTool.execute({ target: 'ou', section: 'network', body: {}, confirm: true, skipValidation: true, ouPath: '/NorthCreek/Customers' }), /outside SCOUT_TEST_OU_PATH/);
+  await refused('by id', () => configUpdateTool.execute({ target: 'ou', section: 'network', body: {}, confirm: true, skipValidation: true, ouId: 8 }), /outside SCOUT_TEST_OU_PATH/);
+});
+await test('device_manage move: SOURCE OU outside the test scope refused', async () => {
+  process.env.SCOUT_ENV = 'test'; process.env.SCOUT_TEST_OU_PATH = '/NorthCreek/Imprivata';
+  reset(); writeMode(); // device thin01 lives in OU 10 (/NorthCreek/AD); destination in scope
+  await refused('move', () => deviceManageTool.execute({ action: 'move', name: 'thin01', destouid: 5 }), /Source OU/);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

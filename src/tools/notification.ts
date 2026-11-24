@@ -3,7 +3,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
-import { gateOuWrite, gateOuSubtree } from '../safety/ou_gate.js';
+import { gateOuWrite, gateOuSubtree, subOusRequested } from '../safety/ou_gate.js';
 import { assertOuPathUnchanged, type OuMatch } from '../resolver.js';
 
 const notificationManageSchema = z.object({
@@ -52,12 +52,15 @@ async function notificationManageExecute(raw: unknown): Promise<McpToolResult> {
     // agree), gate the RESOLVED path (and every sub-OU when body.includeSubOus is true), and send
     // ONLY the resolved id. devicelist/ddg/device targets cannot be tied to an OU from the input.
     let ou: OuMatch | undefined;
+    let body = input.body;
     if (input.target === 'ou') {
       ou = await gateOuWrite(opName, [input.ouPath, input.ouId], 'target OU', {
         requiredMessage: 'target=ou requires ouPath or ouId; refusing rather than leaving the OU to the server.',
       });
       if (!ou) throw new Error('target OU unresolved');
-      if (input.body?.['includeSubOus'] === true) await gateOuSubtree(opName, ou);
+      const subOus = subOusRequested(input.body?.['includeSubOus']);
+      if (subOus) await gateOuSubtree(opName, ou);
+      if (input.body?.['includeSubOus'] !== undefined) body = { ...input.body, includeSubOus: subOus };
       qs = buildQuery({ id: ou.ouid });
     }
 
@@ -71,7 +74,7 @@ async function notificationManageExecute(raw: unknown): Promise<McpToolResult> {
       });
     }
     if (ou) await assertOuPathUnchanged(ou.ouid, ou.path);
-    const data = await client.request<unknown>(method, `${path}${qs}`, input.body, {
+    const data = await client.request<unknown>(method, `${path}${qs}`, body, {
       mutating: true,
       opName,
     });

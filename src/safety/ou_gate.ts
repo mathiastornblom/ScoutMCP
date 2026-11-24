@@ -146,3 +146,12 @@ export async function gateOuSubtree(opName: string, root: OuMatch): Promise<void
 function capitalize(s: string): string {
   return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1);
 }
+
+/**
+ * Strict includeSubOus normalisation for gating: ONLY an absent value or an explicit boolean false
+ * means "no sub-OUs"; every other value (true, 1, "1", "true", "yes", arrays, objects, ...) is
+ * treated as true. Callers must send the returned boolean, never the raw value.
+ */
+export function subOusRequested(v: unknown): boolean {
+  return !(v === undefined || v === false);
+}

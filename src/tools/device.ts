@@ -3,7 +3,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { resolveOuRef, invalidateOuCache, resolveOuForWriteGate, assertOuPathUnchanged, type OuMatch } from '../resolver.js';
-import { gateOuWrite } from '../safety/ou_gate.js';
+import { gateOuWrite, testScopeViolation, refuseOuWrite } from '../safety/ou_gate.js';
 import { enrich } from '../enricher.js';
 import { isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
@@ -380,6 +380,8 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
         clientid: input.clientid,
       });
       checkOuWriteAllowed({ targetPath: sourcePath });
+      const srcScope = testScopeViolation(sourcePath, 'Source OU');
+      if (srcScope) refuseOuWrite('device_manage(move)', sourcePath, srcScope, 'test-scope');
     }
 
     if (!modeCheck.proceed) {

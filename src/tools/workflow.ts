@@ -20,7 +20,7 @@ import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { confirmDestructiveAction, supportsElicitation } from '../elicitation.js';
 import { resolveOuRef, invalidateOuCache, assertOuPathUnchanged } from '../resolver.js';
-import { gateOuWrite, gateOuSubtree } from '../safety/ou_gate.js';
+import { gateOuWrite, gateOuSubtree, subOusRequested } from '../safety/ou_gate.js';
 import {
   checkMutationAllowed,
   checkBlastRadius,
@@ -558,7 +558,7 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
       { requiredMessage: 'sourceOuPath or sourceOuId is required' },
     );
     if (!srcRoot) throw new Error('sourceOuPath or sourceOuId is required');
-    if (input.includeSubOus) await gateOuSubtree(`bulk_command(${input.command})`, srcRoot);
+    if (subOusRequested(input.includeSubOus)) await gateOuSubtree(`bulk_command(${input.command})`, srcRoot);
 
     // Search for devices
     const qs = buildQuery({

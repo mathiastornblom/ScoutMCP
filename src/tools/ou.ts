@@ -7,7 +7,7 @@ import { enrich, invalidateEnrichmentCache } from '../enricher.js';
 import { suggestOus, formatOuSuggestions, isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
 import { checkMutationAllowed, checkBaseWriteAllowed, isDryRunSkip, GuardrailError, auditLog } from '../safety/guardrails.js';
-import { gateOuWrite, refuseOuWrite } from '../safety/ou_gate.js';
+import { gateOuWrite, gateOuSubtree, refuseOuWrite } from '../safety/ou_gate.js';
 import { checkOuRightPreflight, OU_MANAGE_RIGHTS } from '../safety/preflight.js';
 
 // ── ou_get ────────────────────────────────────────────────────────────────────
@@ -275,7 +275,14 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
           'target OU',
           { topLevelNeedsBase: true, requiredMessage: `${input.action} requires a target OU (ouRef, path or id).` },
         );
-        if (tgt) { resolvedId = tgt.ouid; resolvedPath = tgt.path; }
+        if (tgt) {
+          resolvedId = tgt.ouid;
+          resolvedPath = tgt.path;
+          // rename/delete/move/converttobase remove, rename, relocate or re-base the WHOLE subtree:
+          // refuse if any descendant is protected (so an ANCESTOR of a protected OU cannot be touched)
+          // or falls outside SCOUT_ALLOWED_OUS.
+          await gateOuSubtree(opName, tgt);
+        }
       }
       if (input.action === 'move' || input.action === 'add') {
         dst = await gateOuWrite(
@@ -306,6 +313,7 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
           },
         );
         if (!importParent) throw new Error('structure_import: parent OU unresolved');
+        await gateOuSubtree(opName, importParent);
         // The export payload format is not documented, so the OUs an import would create or
         // overwrite cannot be enumerated and gated one by one. Fail closed: such an import needs
         // the explicit base-write arming flag, in addition to the parent OU gates above.

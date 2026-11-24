@@ -75,7 +75,7 @@ async function appManageExecute(raw: unknown): Promise<McpToolResult> {
         const ou = input.scope === 'ou' ? await gateApplicationOu(opName, input, 'target OU') : undefined;
         if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         if (ou) await assertOuPathUnchanged(ou.ouid, ou.path);
-        const qs = ou ? buildQuery({ ouId: ou.ouid }) : '';
+        const qs = ou ? buildQuery({ id: ou.ouid }) : '';
         const data = await client.request<unknown>(
           'POST',
           `/api/v1/applications/${input.scope}/${input.applicationType}${qs}`,
@@ -94,7 +94,7 @@ async function appManageExecute(raw: unknown): Promise<McpToolResult> {
         const ou = input.scope === 'ou' ? await gateApplicationOu(opName, input, 'target OU') : undefined;
         if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, appId: input.appId, message: modeCheck.dryRunNotice });
         if (ou) await assertOuPathUnchanged(ou.ouid, ou.path);
-        const qs = buildQuery({ appId: input.appId, ouId: ou?.ouid });
+        const qs = buildQuery({ appId: input.appId, id: ou?.ouid });
         const data = await client.request<unknown>('DELETE', `/api/v1/applications/${input.scope}${qs}`, undefined, {
           mutating: true,
           opName,
@@ -143,7 +143,7 @@ async function appManageExecute(raw: unknown): Promise<McpToolResult> {
         const ou = await gateApplicationOu(opName, input, 'target OU');
         if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         await assertOuPathUnchanged(ou.ouid, ou.path);
-        const qs = buildQuery({ ouId: ou.ouid });
+        const qs = buildQuery({ id: ou.ouid });
         const data = await client.request<unknown>('POST', `/api/v1/applications/inheritance${qs}`, { useParentApps: useParent }, {
           mutating: true,
           opName,

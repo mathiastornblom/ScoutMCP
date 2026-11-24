@@ -3,7 +3,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { assertOuPathUnchanged, type OuMatch } from '../resolver.js';
-import { gateOuWrite, gateOuSubtree } from '../safety/ou_gate.js';
+import { gateOuWrite, gateOuSubtree, subOusRequested } from '../safety/ou_gate.js';
 import { getProgressReporter } from '../progress.js';
 import { confirmDestructiveAction } from '../elicitation.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -58,7 +58,7 @@ async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<Mc
   const path = `/api/v1/command/${input.target}/${input.command}`;
 
   // device target: identity goes in query params
-  const qs =
+  let qs =
     input.target === 'device'
       ? buildQuery({ name: input.name, mac: input.mac, id: input.id, clientid: input.clientid })
       : '';
@@ -90,11 +90,14 @@ async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<Mc
         { requiredMessage: 'target=ou requires ouRef (or body.ouId / body.ouPath); refusing rather than leaving the OU to the server.' },
       );
       if (!ou) throw new Error('target OU unresolved');
-      if (input.body?.['includeSubOus'] === true) await gateOuSubtree(opName, ou);
-      const { ouId: _ouId, ouPath: _ouPath, ...rest } = input.body ?? {};
+      const subOus = subOusRequested(input.body?.['includeSubOus']);
+      if (subOus) await gateOuSubtree(opName, ou);
+      const { ouId: _ouId, ouPath: _ouPath, includeSubOus: _inc, ...rest } = input.body ?? {};
+      void _inc;
       void _ouId;
       void _ouPath;
-      body = { ...rest, ouId: ou.ouid };
+      body = { ...rest, ouId: ou.ouid, ...(input.body?.['includeSubOus'] !== undefined ? { includeSubOus: subOus } : {}) };
+      qs = buildQuery({ id: ou.ouid });
     }
 
     if (!modeCheck.proceed) {

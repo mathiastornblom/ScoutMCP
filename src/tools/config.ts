@@ -18,6 +18,7 @@ import { validateConfigWrite, formatViolations, formatWarnings } from '../valida
 import { resolveTargetRef, resolveEffectiveConfig } from './config_resolve.js';
 import { foldConfigLayers, type ResolvedConfigKey } from '../rsop.js';
 import { loadEluxConfigSchema } from '../schema/eluxConfig.js';
+import { gateOuWrite } from '../safety/ou_gate.js';
 import { getOuChain, resolveOuRef, countDevicesUnderOu, invalidateOuCache, assertOuPathUnchanged, resolveWriteTarget } from '../resolver.js';
 
 // Section examples (not exhaustive — API accepts any valid section string):
@@ -179,7 +180,9 @@ async function configUpdateExecute(raw: unknown, ctx?: ToolContext): Promise<Mcp
       // Resolve BOTH references when both are given and refuse if they name different OUs; the
       // write below sends only the resolved id (never the raw caller ouPath), so the gated OU
       // and the written OU are the same by construction.
-      const resolved = await resolveWriteTarget([input.ouId, input.ouPath], 'ouId/ouPath');
+      const resolved = await gateOuWrite('config_update', [input.ouId, input.ouPath], 'ouId/ouPath', {
+        skipProtectedCheck: true, // checked right below, as before
+      });
       if (!resolved) return fail('config_update target=ou requires ouPath or ouId');
       resolvedOuPath = resolved.path;
       resolvedOuId = resolved.ouid;
