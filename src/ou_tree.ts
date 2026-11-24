@@ -75,6 +75,10 @@ export function parseOuTree(raw: unknown): OuTree {
   if (!isObj(status)) throw new OuTreeParseError('response.response.status was missing or not an object');
   const msg = status['msg'];
   if (!isObj(msg)) throw new OuTreeParseError('response.response.status.msg was missing or not an object');
+  const result = status['result'];
+  if (result !== undefined && result !== 0) {
+    throw new OuTreeParseError(`response.response.status.result was ${JSON.stringify(result)}, expected 0`);
+  }
   const forest = msg['treeStructure'];
   if (!Array.isArray(forest)) {
     throw new OuTreeParseError('response.response.status.msg.treeStructure was missing or not an array');
@@ -99,6 +103,12 @@ export function parseOuTree(raw: unknown): OuTree {
     const name = rawNode['Name'];
     if (typeof name !== 'string' || name.trim() === '') {
       throw new OuTreeParseError(`OU ${id} had a missing or empty Name`);
+    }
+    if (/[\u0000-\u001f\u007f]/.test(name)) {
+      throw new OuTreeParseError(`OU ${id} name contains control characters`);
+    }
+    if (name !== name.trim()) {
+      throw new OuTreeParseError(`OU ${id} name has leading or trailing whitespace`);
     }
     if (name.includes('/')) {
       throw new OuTreeParseError(`OU ${id} name contains "/", which would make derived paths ambiguous`);

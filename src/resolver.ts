@@ -11,6 +11,7 @@
  */
 
 import { getClient } from './client.js';
+import { canonicalizeOuPath } from './ou_path.js';
 import { parseOuTree, ouChain, ouSubtree, type OuTree, type OuTreeNode } from './ou_tree.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -69,8 +70,10 @@ async function loadCache(): Promise<OuMatch[]> {
  */
 export async function resolveOuRef(ref: string | number): Promise<OuMatch> {
   // 1. Numeric ID
-  const num = typeof ref === 'number' ? ref : (String(ref).trim() !== '' ? Number(ref) : NaN);
-  if (!isNaN(num) && String(ref).trim() !== '') {
+  // Digits only: Number() would also accept "0x10", "1e1", "010" and resolve them to other OUIDs.
+  const isNumeric = typeof ref === 'number' ? Number.isInteger(ref) : /^\d+$/.test(String(ref).trim());
+  const num = isNumeric ? Number(ref) : NaN;
+  if (isNumeric) {
     const all = await loadCache();
     const hit = all.find((o) => o.ouid === num);
     if (hit) return hit;
@@ -82,8 +85,9 @@ export async function resolveOuRef(ref: string | number): Promise<OuMatch> {
 
   // 2. Exact path
   if (s.startsWith('/')) {
-    const want = s.length > 1 && s.endsWith('/') ? s.slice(0, -1) : s;
-    const byPath = all.filter((o) => o.path.toLowerCase() === want.toLowerCase());
+    // Canonical compare (case, repeated/trailing slashes); '.'/'..' segments throw.
+    const want = canonicalizeOuPath(s);
+    const byPath = all.filter((o) => canonicalizeOuPath(o.path) === want);
     if (byPath.length === 1) return byPath[0];
     if (byPath.length > 1) return throwAmbiguous(s, byPath);
   }
@@ -160,6 +164,27 @@ export async function countDevicesUnderOu(ouRef: string | number): Promise<numbe
     );
   }
   return node.deviceCount;
+}
+
+/**
+ * Write-gate helper: resolves `ref` against a FRESH tree read (the cache is dropped first, so
+ * an out-of-band rename/move cannot let the gate judge a stale path) and returns the
+ * canonical server-derived path to gate on. Throws if the OU cannot be resolved.
+ */
+export async function resolveOuForWriteGate(ref: string | number): Promise<OuMatch> {
+  invalidateOuCache();
+  return resolveOuRef(ref);
+}
+
+/** Throws unless OU `ouid` currently has exactly the path that was gated (fresh tree read). */
+export async function assertOuPathUnchanged(ouid: number, gatedPath: string): Promise<void> {
+  const node = (await fetchOuTree()).byId.get(ouid);
+  if (!node || canonicalizeOuPath(node.path) !== canonicalizeOuPath(gatedPath)) {
+    throw new Error(
+      `OU ${ouid} no longer has the path "${gatedPath}" that was checked (now ${node ? `"${node.path}"` : 'absent'}). ` +
+        'The OU tree changed during the operation; refusing - retry.',
+    );
+  }
 }
 
 function throwAmbiguous(ref: string, candidates: OuMatch[]): never {

@@ -19,7 +19,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { confirmDestructiveAction, supportsElicitation } from '../elicitation.js';
-import { resolveOuRef } from '../resolver.js';
+import { resolveOuRef, invalidateOuCache, resolveOuForWriteGate } from '../resolver.js';
 import {
   checkMutationAllowed,
   checkBlastRadius,
@@ -370,10 +370,11 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
     // necessarily the OU any individual matched device actually lives in once sub-OUs are
     // included. The write is blocked if ANY resolved source OU or the destination is
     // protected (or, with an allow-list configured, not allowed).
-    const destPathForGate =
-      input.destOuPath ?? (input.destOuId !== undefined ? (await resolveOuRef(input.destOuId)).path : undefined);
-    if (destPathForGate) {
-      checkOuWriteAllowed({ targetPath: destPathForGate });
+    // Canonical path from a FRESH tree read, never the raw caller string.
+    invalidateOuCache();
+    const destRefs = [input.destOuPath, input.destOuId].filter((r): r is string | number => r !== undefined);
+    for (const ref of destRefs) {
+      checkOuWriteAllowed({ targetPath: (await resolveOuForWriteGate(ref)).path });
     }
     // Fail closed: resolveDistinctSourceOuPathsOrThrow throws (rather than returning []) if
     // any matched device's source OU can't be determined — see its doc comment. A thrown
@@ -432,6 +433,8 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
   } catch (err) {
     if (err instanceof GuardrailError) return fail(`move_devices_by_filter blocked: ${err.message}`);
     return fail(`move_devices_by_filter failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    invalidateOuCache();
   }
 }
 

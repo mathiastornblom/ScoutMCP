@@ -88,6 +88,13 @@ const bad: Array<[string, unknown]> = [
   ['duplicate OUID', wrap([{ OUID: 1, Name: 'a' }, { OUID: 1, Name: 'b' }])],
   ['name containing slash', wrap([{ OUID: 1, Name: 'a/b' }])],
   ['children not an array', wrap([{ OUID: 1, Name: 'a', children: 5 }])],
+  ['non-integer OUID (float)', wrap([{ OUID: 1.5, Name: 'a' }])],
+  ['string OUID', wrap([{ OUID: '1', Name: 'a' }])],
+  ['whitespace-only Name', wrap([{ OUID: 1, Name: '   ' }])],
+  ['non-string Name', wrap([{ OUID: 1, Name: 5 }])],
+  ['duplicate OUID across depth', wrap([{ OUID: 1, Name: 'a', children: [{ OUID: 1, Name: 'b' }] }])],
+  ['tree deeper than 64 levels', wrap([(() => { let n: any = { OUID: 9999, Name: 'leaf' }; for (let i = 0; i < 70; i++) n = { OUID: i, Name: `d${i}`, children: [n] }; return n; })()])],
+  ['more than 100000 OUs', wrap(Array.from({ length: 100001 }, (_, i) => ({ OUID: i, Name: `n${i}` })))],
 ];
 for (const [label, v] of bad) {
   await test(`throws OuTreeParseError: ${label}`, () => {

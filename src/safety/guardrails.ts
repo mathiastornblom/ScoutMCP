@@ -35,6 +35,7 @@
  * identity, resolved device count) needed to evaluate them.
  */
 
+import { canonicalizeOuPath } from '../ou_path.js';
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -430,9 +431,18 @@ function parseOuList(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
+/** Canonical comparison form (see src/ou_path.ts). An invalid path (".."/"." segment, control
+ *  chars) THROWS - fail closed: it is neither "protected" nor "allowed", the write is refused. */
 function normalizeOuPath(path: string): string {
-  if (path === '/') return '/';
-  return path.endsWith('/') ? path.slice(0, -1) : path;
+  try {
+    return canonicalizeOuPath(path);
+  } catch (err) {
+    throw new GuardrailError(
+      `Blocked: "${path}" is not a valid OU path (${err instanceof Error ? err.message : String(err)}). ` +
+        'Refusing to evaluate SCOUT_PROTECTED_OUS / SCOUT_ALLOWED_OUS against an ambiguous path.',
+      'protected-ou',
+    );
+  }
 }
 
 /** True if `candidate` is exactly `ancestorOrSelf`, or a descendant of it (path-prefix

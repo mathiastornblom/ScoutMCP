@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
-import { resolveOuRef, invalidateOuCache } from '../resolver.js';
+import { resolveOuRef, invalidateOuCache, resolveOuForWriteGate } from '../resolver.js';
 import { enrich, invalidateEnrichmentCache } from '../enricher.js';
 import { suggestOus, formatOuSuggestions, isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
@@ -283,23 +283,24 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
     // protected-relevant) OU, and the new OU's parent is the actual write target for add,
     // which is covered by the destination check below when present.
     if (isMutatingAction && (input.action === 'delete' || input.action === 'move')) {
-      let targetPathForGate = resolvedPath;
-      if (!targetPathForGate && resolvedId !== undefined) {
-        const match = await resolveOuRef(resolvedId);
-        targetPathForGate = match.path;
-      }
-      if (targetPathForGate) {
-        checkOuWriteAllowed({ targetPath: targetPathForGate });
+      // Gate on the canonical, server-derived path from a FRESH tree read, never the raw
+      // caller string (case/whitespace/slash variants must not dodge SCOUT_PROTECTED_OUS).
+      // Unresolvable refs throw -> refused.
+      const targetRefs: Array<string | number> =
+        input.ouRef !== undefined
+          ? [resolvedId as number]
+          : [input.path, input.id].filter((r): r is string | number => r !== undefined);
+      for (const ref of targetRefs) {
+        checkOuWriteAllowed({ targetPath: (await resolveOuForWriteGate(ref)).path });
       }
     }
     if (isMutatingAction && (input.action === 'move' || input.action === 'add')) {
-      let destPathForGate = resolvedDestPath;
-      if (!destPathForGate && resolvedDestId !== undefined) {
-        const match = await resolveOuRef(resolvedDestId);
-        destPathForGate = match.path;
-      }
-      if (destPathForGate) {
-        checkOuWriteAllowed({ targetPath: destPathForGate });
+      const destRefs: Array<string | number> =
+        input.destouRef !== undefined
+          ? [resolvedDestId as number]
+          : [input.destoupath, input.destouid].filter((r): r is string | number => r !== undefined);
+      for (const ref of destRefs) {
+        checkOuWriteAllowed({ targetPath: (await resolveOuForWriteGate(ref)).path });
       }
     }
 
@@ -437,6 +438,9 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
       return fail(baseMsg + formatOuSuggestions(suggestions));
     }
     return fail(baseMsg);
+  } finally {
+    // Never leave a tree cached across a (possibly failed) write: the next gate must re-read.
+    if (input.action !== 'structure_export') invalidateOuCache();
   }
 }
 
