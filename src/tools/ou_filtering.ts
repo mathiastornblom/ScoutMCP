@@ -29,6 +29,8 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
+import { gateOuWrite, ouListsConfigured, refuseOuWrite } from '../safety/ou_gate.js';
+import { assertOuPathUnchanged, type OuMatch } from '../resolver.js';
 
 // ── Logging helper ────────────────────────────────────────────────────────────
 
@@ -44,6 +46,75 @@ function logOk(tool: string): void {
 function logErr(tool: string, err: unknown): void {
   const msg = err instanceof Error ? err.message : String(err);
   process.stderr.write(`[scout-mcp/${tool}] error: ${msg}\n`);
+}
+
+
+// ── OU write gate for filter entries ──────────────────────────────────────────
+
+/** True when a filter entry's CURRENT OU must be looked up (modify/delete name only an entry_id). */
+function needsEntryOuLookup(): boolean {
+  return ouListsConfigured() || process.env.SCOUT_ENV === 'test';
+}
+
+/**
+ * Resolves the OU an existing filter entry belongs to, from GET /api/v1/oufilter (row fields
+ * EntryId / OUID). FAILS CLOSED (audited refusal): a list that is not an array, a missing entry, or
+ * a row without an integer OUID means the entry's OU is unknown, which is not "unprotected".
+ */
+async function currentEntryOuId(opName: string, entryId: number, rows: unknown): Promise<number> {
+  const row = Array.isArray(rows)
+    ? rows.find((r) => r !== null && typeof r === 'object' && (r as Record<string, unknown>)['EntryId'] === entryId)
+    : undefined;
+  const ouid = row ? (row as Record<string, unknown>)['OUID'] : undefined;
+  if (typeof ouid !== 'number' || !Number.isInteger(ouid)) {
+    return refuseOuWrite(
+      opName,
+      `entry:${entryId}`,
+      `Could not determine which OU filter entry ${entryId} belongs to (no row with an integer OUID in GET /api/v1/oufilter). ` +
+        'Refusing: the protected-OU check cannot run against an unknown OU.',
+      'unresolvable-source-ou',
+    );
+  }
+  return ouid;
+}
+
+/**
+ * Gates every OU a set of filter entries touches (the entry's new ou_id and, for modify/delete when
+ * protection is configured, its current OU). Returns the resolved OUs so the caller can re-assert
+ * their paths right before the write. Wire entries get the RESOLVED id.
+ */
+async function gateFilterEntries(
+  opName: string,
+  action: 'add' | 'modify' | 'delete',
+  entries: FilterEntryInput[],
+  wire: Array<Record<string, unknown>> | undefined,
+  client: ReturnType<typeof getClient>,
+): Promise<OuMatch[]> {
+  const gated = new Map<number, OuMatch>();
+  let rows: unknown;
+  let rowsLoaded = false;
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.ou_id !== undefined || action === 'add') {
+      const m = await gateOuWrite(opName, [e.ou_id], 'filter entry OU', {
+        requiredMessage: 'every add entry must name its OU via ou_id; refusing rather than leaving the OU to the server.',
+      });
+      if (m) {
+        gated.set(m.ouid, m);
+        if (wire && wire[i]) wire[i]['OUID'] = m.ouid;
+      }
+    }
+    if (action !== 'add' && needsEntryOuLookup()) {
+      if (!rowsLoaded) {
+        rows = await client.rawRequest<unknown>('GET', '/api/v1/oufilter');
+        rowsLoaded = true;
+      }
+      const cur = await currentEntryOuId(opName, e.entry_id as number, rows);
+      const m = await gateOuWrite(opName, [cur], 'current filter entry OU');
+      if (m) gated.set(m.ouid, m);
+    }
+  }
+  return [...gated.values()];
 }
 
 // ── ou_filter_manage ──────────────────────────────────────────────────────────
@@ -280,9 +351,11 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
           return fail(e instanceof Error ? e.message : String(e));
         }
         const modeCheck = checkMutationAllowed('ou_filter_manage(add)');
+        const gatedOus = await gateFilterEntries('ou_filter_manage(add)', 'add', input.entries, requestValues, client);
         if (!modeCheck.proceed) {
           return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         }
+        for (const m of gatedOus) await assertOuPathUnchanged(m.ouid, m.path);
         const body = { requestValues };
         log(tool, 'POST', '/api/v1/oufilter/add', body);
         const data = await client.rawRequest<unknown>('POST', '/api/v1/oufilter/add', body, {
@@ -306,9 +379,11 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
           return fail(e instanceof Error ? e.message : String(e));
         }
         const modeCheck = checkMutationAllowed('ou_filter_manage(modify)');
+        const gatedOus = await gateFilterEntries('ou_filter_manage(modify)', 'modify', input.entries, requestValues, client);
         if (!modeCheck.proceed) {
           return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         }
+        for (const m of gatedOus) await assertOuPathUnchanged(m.ouid, m.path);
         const body = { requestValues };
         log(tool, 'POST', '/api/v1/oufilter/modify', body);
         const data = await client.rawRequest<unknown>('POST', '/api/v1/oufilter/modify', body, {
@@ -326,9 +401,11 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
         const missingId = input.entries.find((e) => e.entry_id === undefined);
         if (missingId) return fail('Every entry in delete must include entry_id');
         const modeCheck = checkMutationAllowed('ou_filter_manage(delete)');
+        const gatedOus = await gateFilterEntries('ou_filter_manage(delete)', 'delete', input.entries, undefined, client);
         if (!modeCheck.proceed) {
           return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         }
+        for (const m of gatedOus) await assertOuPathUnchanged(m.ouid, m.path);
         const requestValues = input.entries.map((e) => ({ EntryId: e.entry_id }));
         const body = { requestValues };
         log(tool, 'POST', '/api/v1/oufilter/delete', body);
@@ -435,9 +512,16 @@ async function newDeviceOptionsExecute(raw: unknown): Promise<McpToolResult> {
             'set requires at least one of: accept_only_known_devices, default_ou, deactivate_new_devices, allow_dynamic_ou_change',
           );
         const modeCheck = checkMutationAllowed('new_device_options(set)');
+        // default_ou names the OU newly enrolling devices land in: gate the RESOLVED OU, send only its id.
+        let defaultOu: OuMatch | undefined;
+        if (input.default_ou !== undefined) {
+          defaultOu = await gateOuWrite('new_device_options(set)', [input.default_ou], 'default OU');
+          if (defaultOu) body['DefaultOU'] = defaultOu.ouid;
+        }
         if (!modeCheck.proceed) {
           return ok({ status: 'dry_run', action: input.action, wouldSet: body, message: modeCheck.dryRunNotice });
         }
+        if (defaultOu) await assertOuPathUnchanged(defaultOu.ouid, defaultOu.path);
         log(tool, 'POST', '/api/v1/NewDeviceOptions/set', body);
         const data = await client.rawRequest<unknown>('POST', '/api/v1/NewDeviceOptions/set', body, {
           mutating: true,

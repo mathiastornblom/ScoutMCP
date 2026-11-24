@@ -21,6 +21,9 @@ export interface OuMatch {
   ouid: number;
   name: string;
   path: string;
+  /** True when the OU has no parent in the parsed tree (a forest root, ParentID -1). Derived from
+   *  the same tree read as the match, so no separate /ou/root call is needed. */
+  topLevel: boolean;
 }
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
@@ -43,7 +46,7 @@ async function fetchOuTree(): Promise<OuTree> {
 }
 
 function toMatch(n: OuTreeNode): OuMatch {
-  return { ouid: n.ouid, name: n.name, path: n.path };
+  return { ouid: n.ouid, name: n.name, path: n.path, topLevel: n.parentId === undefined };
 }
 
 async function loadCache(): Promise<OuMatch[]> {

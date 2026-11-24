@@ -65,6 +65,7 @@ export class GuardrailError extends Error {
       | 'base-write'
       | 'blast-radius'
       | 'protected-ou'
+      | 'test-scope'
       | 'circuit-breaker'
       | 'kill-switch'
       | 'private-write-production'

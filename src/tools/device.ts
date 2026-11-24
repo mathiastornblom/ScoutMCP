@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
-import { resolveOuRef, invalidateOuCache, resolveOuForWriteGate, resolveWriteTarget, assertOuPathUnchanged, type OuMatch } from '../resolver.js';
+import { resolveOuRef, invalidateOuCache, resolveOuForWriteGate, assertOuPathUnchanged, type OuMatch } from '../resolver.js';
+import { gateOuWrite, testScopeViolation, refuseOuWrite } from '../safety/ou_gate.js';
 import { enrich } from '../enricher.js';
 import { isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
@@ -11,16 +12,6 @@ import { assessDeviceWriteResult } from '../device_result.js';
 import { extractSearchDevices } from '../devices.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
-
-function assertTestScope(ouPath: string): string | null {
-  if (process.env.SCOUT_ENV !== 'test') return null;
-  const testRoot = process.env.SCOUT_TEST_OU_PATH;
-  if (!testRoot) return 'SCOUT_TEST_OU_PATH must be set when SCOUT_ENV=test';
-  if (!ouPath.startsWith(testRoot)) {
-    return `Target OU "${ouPath}" is outside SCOUT_TEST_OU_PATH "${testRoot}". Blocked in test mode.`;
-  }
-  return null;
-}
 
 /**
  * Resolves the OU path a device currently sits in, by fetching the single-device record and
@@ -351,53 +342,35 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
     // Gate 1: mode tiers — all device_manage actions are mutating.
     const modeCheck = checkMutationAllowed(`device_manage(${input.action})`);
 
-    // Resolve destination OU: destouRef wins; otherwise explicit args with working OU fallback
-    let resolvedDestPath: string | undefined;
-    let resolvedDestId: number | undefined = input.destouid;
-
-    if (input.destouRef !== undefined) {
-      const match = await resolveOuRef(input.destouRef);
-      resolvedDestId = match.ouid;
-      resolvedDestPath = match.path;
-    } else {
-      resolvedDestPath =
-        input.destoupath ?? ((input.action === 'add' || input.action === 'move') ? getWorkingOu()?.path : undefined);
-    }
-
-    // Scope guard for add/move
-    if (input.action === 'add' || input.action === 'move') {
-      const checkPath = resolvedDestPath ?? (resolvedDestId !== undefined ? String(resolvedDestId) : undefined);
-      if (checkPath) {
-        const err = assertTestScope(checkPath);
-        if (err) return fail(err);
-      }
-    }
-
-    // Gate 6: protected/allowed OU lists. action=move changes which config an existing
-    // device inherits on BOTH ends of the move — moving a device out of a protected OU
-    // changes its effective config just as much as moving one in — so both the resolved
-    // destination and the device's current (source) OU are checked. Destination is
-    // checked unconditionally for add/move (a device's resolved destination matters even
-    // if the device doesn't exist yet, for add); the source is resolved by looking up the
-    // device's current OUID before the move executes.
+    // Gate 6 (+ test scope): protected/allowed OU lists and SCOUT_ENV=test scope. action=move
+    // changes which config an existing device inherits on BOTH ends of the move - moving a device
+    // out of a protected OU changes its effective config just as much as moving one in - so both
+    // the resolved destination and the device's current (source) OU are checked. The destination
+    // is resolved from a FRESH tree: every supplied reference (destouRef / destoupath / destouid)
+    // must name the same OU, the gates run on the RESOLVED canonical path, and the request below
+    // carries ONLY the resolved id, so the gated OU and the written OU are identical by
+    // construction. The working OU is a fallback only when no explicit destination was given.
+    // add/move with no destination at all is refused here (audited), not left to the server.
     let destMatch: OuMatch | undefined;
+    let resolvedDestId: number | undefined;
     if (input.action === 'move' || input.action === 'add') {
-      // Gate on the canonical path from a FRESH tree read, never the raw caller string.
-      // Every supplied destination reference must name the same OU; gate on it and send ONLY
-      // its id, so the gated OU and the written OU are the same by construction.
-      destMatch = await resolveWriteTarget(
+      const noExplicitDest =
+        input.destouRef === undefined && input.destoupath === undefined && input.destouid === undefined;
+      destMatch = await gateOuWrite(
+        `device_manage(${input.action})`,
         input.destouRef !== undefined
           ? [input.destouRef]
-          : input.destoupath === undefined && input.destouid === undefined
-            ? [resolvedDestPath] // working-OU fallback, only when no explicit destination was given
+          : noExplicitDest
+            ? [getWorkingOu()?.path]
             : [input.destoupath, input.destouid],
         'destination OU',
+        {
+          requiredMessage:
+            `device_manage(${input.action}) requires a destination OU (destouRef, destoupath or destouid, ` +
+            'or a working OU set with scout_context); refusing rather than leaving the destination to the server.',
+        },
       );
-      if (destMatch) {
-        checkOuWriteAllowed({ targetPath: destMatch.path });
-        resolvedDestId = destMatch.ouid;
-        resolvedDestPath = destMatch.path;
-      }
+      resolvedDestId = destMatch?.ouid;
     }
     if (input.action === 'move') {
       const sourcePath = await resolveCurrentDeviceOuPath(client, {
@@ -407,6 +380,8 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
         clientid: input.clientid,
       });
       checkOuWriteAllowed({ targetPath: sourcePath });
+      const srcScope = testScopeViolation(sourcePath, 'Source OU');
+      if (srcScope) refuseOuWrite('device_manage(move)', sourcePath, srcScope, 'test-scope');
     }
 
     if (!modeCheck.proceed) {

@@ -18,6 +18,9 @@ import { GuardrailError } from '../src/safety/guardrails.js';
 import { checkOuRightPreflight, resetPreflightCache } from '../src/safety/preflight.js';
 import { deviceCommandTool } from '../src/tools/command.js';
 import { fetchEliasSystemcheck } from '../src/tools/health.js';
+import { readFileSync as readFixture } from 'node:fs';
+
+const OU_LIVE = JSON.parse(readFixture(new URL('./fixtures/ou-structure-live.json', import.meta.url), 'utf8'));
 
 setSessionConfig({ baseUrl: 'https://fake-scout-board.invalid:22160', username: 'u', password: 'p' });
 const auditPath = join(mkdtempSync(join(tmpdir(), 'scout-preflight-')), 'audit.log');
@@ -162,8 +165,10 @@ function patchClient(rawImpl: () => Promise<unknown>): Patched {
   const c = getClient();
   const p: Patched = { posts: 0, rawPaths: [] };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test-only instance patching
-  (c as any).request = async (method: string) => {
+  (c as any).request = async (method: string, path?: string) => {
     if (method === 'POST') p.posts++;
+    // The OU gate resolves the target OU from a fresh tree (OU 5 = /NorthCreek/Imprivata).
+    if (method === 'GET' && typeof path === 'string' && path.startsWith('/api/v1/ou/structure')) return OU_LIVE;
     return { ok: true };
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test-only instance patching

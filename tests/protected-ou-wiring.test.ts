@@ -182,7 +182,13 @@ function startFakeScoutServer(): Promise<{ server: Server; baseUrl: string; clea
             res.end(JSON.stringify({ unexpected: 'shape', devices: ['not', 'what', 'you', 'expect'] }));
             return;
           }
-          const ouId = url.searchParams.get('ouId');
+          // The tools now search by the RESOLVED canonical OU path (never the raw caller string); the
+          // legacy ouId filter is still honoured so the fixture serves both.
+          const PATH_TO_OUID: Record<string, string> = {
+            '/Enterprise': '1', '/Enterprise/Production': '2', '/Enterprise/Sandbox': '3', '/Enterprise/Production/Floor3': '4',
+          };
+          const ouPathParam = url.searchParams.get('ouPath');
+          const ouId = url.searchParams.get('ouId') ?? (ouPathParam !== null ? PATH_TO_OUID[ouPathParam] ?? '-1' : null);
           const matched = Object.values(DEVICES).filter((d) => ouId === null || String(d.OUID) === ouId);
           // Single source of truth for the response envelope: matches the documented
           // /api/v1/device/search schema in openapi.json exactly —
