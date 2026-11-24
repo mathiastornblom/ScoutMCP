@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { resolveConfig } from '../session.js';
+import { detectCapabilities } from '../compat/detect.js';
 import { ok, fail, buildQuery, type McpToolResult, type HealthCheckResponse } from '../types.js';
 
 const inputSchema = z.object({
@@ -13,6 +14,10 @@ const inputSchema = z.object({
   scoutServer: z.boolean().optional().describe('Include Scout server info in healthcheck response'),
   scoutKeepAlive: z.boolean().optional().describe('Include keep-alive server info in healthcheck response'),
   scoutDatabase: z.boolean().optional().describe('Include database info in healthcheck response'),
+  capabilities: z
+    .boolean()
+    .optional()
+    .describe('Include detected Scout version and per-feature capability availability (default true)'),
 });
 
 type Input = z.infer<typeof inputSchema>;
@@ -41,10 +46,21 @@ async function execute(raw: unknown): Promise<McpToolResult> {
 
   try {
     const data = await client.request<HealthCheckResponse>('GET', `/api/v1/healthcheck${qs}`);
+    const out: Record<string, unknown> = { ...data };
     if (process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS === 'true') {
-      return ok({ ...data, systemcheckElias: await fetchEliasSystemcheck() });
+      out.systemcheckElias = await fetchEliasSystemcheck();
     }
-    return ok(data);
+    if (input.capabilities !== false) {
+      // Never throws; version/capability detection is advisory and cannot fail the health check.
+      const report = await detectCapabilities(client);
+      out.scoutVersion = report.scoutVersion;
+      out.versionSource = report.versionSource;
+      out.versionConfidence = report.versionConfidence;
+      out.specVersion = report.specVersion;
+      out.capabilities = report.capabilities;
+      if (report.disagreements.length > 0) out.capabilityDisagreements = report.disagreements;
+    }
+    return ok(out);
   } catch (err) {
     return fail(`Health check failed: ${err instanceof Error ? err.message : String(err)}`);
   }

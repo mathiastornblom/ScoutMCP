@@ -20,7 +20,7 @@
  *    effort; verify on a live server before trusting a refusal message.
  */
 
-import { getClient } from '../client.js';
+import { getClient, ScoutError } from '../client.js';
 import { auditLog, GuardrailError } from './guardrails.js';
 
 // ── Tool operation → right name tables (keys of the ourights response) ───────────
@@ -115,7 +115,10 @@ export async function checkOuRightPreflight(p: PreflightParams): Promise<Preflig
     try {
       raw = await (p.fetchRights ?? defaultFetchRights)(p.ouId);
     } catch (err) {
-      return softFail(p, `ourights unavailable (${err instanceof Error ? err.message : String(err)})`);
+      // 404 = endpoint absent on this Scout release (see src/compat/registry.ts 'ourights-preflight').
+      // Still proceed-on-unknown (Security B2): this only improves the log message.
+      const hint = err instanceof ScoutError && err.statusCode === 404 ? ' - endpoint not available on this Scout release' : '';
+      return softFail(p, `ourights unavailable (${err instanceof Error ? err.message : String(err)})${hint}`);
     }
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
       return softFail(p, 'ourights returned an unparseable/unexpected body');

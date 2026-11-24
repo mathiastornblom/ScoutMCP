@@ -314,6 +314,10 @@ Safeguards: container/certificate/upload ids must be GUIDs and package names mat
 
 Not implemented (later, Security-gated phase): container import/delete, image delete/save, upload init/complete, solver solve/generateRules, lock set/release. `POST /images/{id}/{name}.idf/idf` (IDF text export) is also left out: the HAR shows a POST with body `{}` returning text/plain but cannot prove it has no side effects, and `rawRequest()` parses JSON only.
 
+## Scout version compatibility
+
+`health_check` (mode `healthcheck`) reports `scoutVersion`, `versionSource` and a per-feature `capabilities` map (`available` / `unavailable` / `unknown`, plus a `verified-live` / `har-only` / `untested` status). Version detection is best-effort and low-confidence (no verified version field exists in the captures); read-only capability probes are the source of truth. The `elias_*` tools return "requires Scout >=2611 (detected X)" instead of a raw 404 on older servers. See [docs/compatibility.md](docs/compatibility.md) for the release matrix; the registry lives in `src/compat/registry.ts`.
+
 ## Response enrichment
 
 Tool responses that contain numeric OUID fields (e.g. `device_get`, `device_manage`) are automatically annotated with human-readable `_OUIDName` and `_OUIDPath` siblings, so the AI has full context without a follow-up `ou_get` call:

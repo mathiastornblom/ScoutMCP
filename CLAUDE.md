@@ -133,3 +133,4 @@ Projektet är klart när:
 - [ ] QA har skrivit "QA: ALL TESTS PASS"
 - [ ] README.md är skriven och beskriver installation + konfiguration
 - [ ] Ingen hårdkodad URL, credential eller any i koden utan kommentar
+- [ ] Varje ny Scout-versionsberoende funktion lägger till/uppdaterar sin post i `src/compat/registry.ts` och sin rad i `docs/compatibility.md` i samma PR

@@ -6,7 +6,8 @@
  * Run with: npx tsx tests/elias.test.ts
  */
 
-import { ScoutClient, ScoutError } from '../src/client.js';
+import { ScoutClient, ScoutError, getClient } from '../src/client.js';
+import { resetCompatCache } from '../src/compat/detect.js';
 import { clearSessionConfig } from '../src/session.js';
 import {
   eliasTools,
@@ -226,7 +227,7 @@ async function main(): Promise<void> {
     const cases: Array<[number, string]> = [
       [401, 'authentication failed'],
       [403, 'forbidden'],
-      [404, 'not found'],
+      [404, 'requires Scout >=2611'], // every path 404s (incl. the capability probe): pre-2611 server
       [500, 'boom'],
     ];
     for (const [code, frag] of cases) {
@@ -236,6 +237,16 @@ async function main(): Promise<void> {
       const r = await run(eliasContainerListTool, {});
       assert(r.isError === true && text(r).includes(frag), `${code}: ${text(r)}`);
     }
+  });
+
+  await test('404 on a bad id while ELIAS is present -> plain not found (no version message)', async () => {
+    resetCompatCache(getClient()); // capability results are cached per client
+    responder = (path: string) => {
+      if (path.includes('systemcheck')) return { state: 'reachable' };
+      throw new ScoutError('nope', 404);
+    };
+    const r = await run(eliasContainerListTool, {});
+    assert(r.isError === true && text(r).includes('not found') && !text(r).includes('detected'), text(r));
   });
 
   const evil = [

@@ -20,6 +20,7 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient, ScoutError } from '../client.js';
+import { requireCapability } from '../compat/detect.js';
 import { ok, fail, type McpTool, type McpToolResult } from '../types.js';
 
 // ── Validation primitives ─────────────────────────────────────────────────────
@@ -131,6 +132,12 @@ function wrap(tool: string, run: (input: unknown) => Promise<unknown>) {
       // Responses are untrusted data: redact secrets, then cap size.
       return ok(capOutput(redactSecrets(await run(raw))));
     } catch (err) {
+      // On HTTP 404, check the capability probe so the user sees 'requires Scout >=2611'
+      // instead of a raw 404. Costs no extra request on the happy path.
+      if (err instanceof ScoutError && err.statusCode === 404) {
+        const msg = await requireCapability('elias', getClient());
+        if (msg) return fail(`${tool} failed: ${msg}`);
+      }
       process.stderr.write(`[scout-mcp/${tool}] error: ${describeError(err)}\n`);
       return fail(`${tool} failed: ${describeError(err)}`);
     }
