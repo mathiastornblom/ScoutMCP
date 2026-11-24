@@ -1,0 +1,152 @@
+{
+  "code": 200,
+  "message": "OK",
+  "response": {
+    "status": {
+      "result": 0,
+      "msg": {
+        "treeStructure": [
+          {
+            "OUID": 2,
+            "Name": "NorthCreek",
+            "count": 10,
+            "UseParent": 1,
+            "DeviceCount": 10,
+            "ParentID": -1,
+            "children": [
+              {
+                "OUID": 10,
+                "Name": "AD",
+                "count": 1,
+                "UseParent": 0,
+                "DeviceCount": 1,
+                "ParentID": 2,
+                "children": []
+              },
+              {
+                "OUID": 11,
+                "Name": "Boot2VDI",
+                "count": 1,
+                "UseParent": 0,
+                "DeviceCount": 1,
+                "ParentID": 2,
+                "children": []
+              },
+              {
+                "OUID": 13,
+                "Name": "Browser",
+                "count": 1,
+                "UseParent": 0,
+                "DeviceCount": 1,
+                "ParentID": 2,
+                "children": [
+                  {
+                    "OUID": 16,
+                    "Name": "Google-CEP",
+                    "count": 1,
+                    "UseParent": 0,
+                    "DeviceCount": 1,
+                    "ParentID": 13,
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "OUID": 8,
+                "Name": "Customers",
+                "count": 2,
+                "UseParent": 1,
+                "DeviceCount": 2,
+                "ParentID": 2,
+                "children": [
+                  {
+                    "OUID": 9,
+                    "Name": "CLALIT",
+                    "count": 1,
+                    "UseParent": 0,
+                    "DeviceCount": 1,
+                    "ParentID": 8,
+                    "children": []
+                  },
+                  {
+                    "OUID": 17,
+                    "Name": "DNIe",
+                    "count": 1,
+                    "UseParent": 0,
+                    "DeviceCount": 1,
+                    "ParentID": 8,
+                    "children": []
+                  },
+                  {
+                    "OUID": 12,
+                    "Name": "Epiroc",
+                    "count": 0,
+                    "UseParent": 0,
+                    "DeviceCount": 0,
+                    "ParentID": 8,
+                    "children": []
+                  },
+                  {
+                    "OUID": 15,
+                    "Name": "mnjustitsia",
+                    "count": 0,
+                    "UseParent": 0,
+                    "DeviceCount": 0,
+                    "ParentID": 8,
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "OUID": 5,
+                "Name": "Imprivata",
+                "count": 1,
+                "UseParent": 0,
+                "DeviceCount": 1,
+                "ParentID": 2,
+                "children": []
+              },
+              {
+                "OUID": 6,
+                "Name": "SmartCard",
+                "count": 2,
+                "UseParent": 0,
+                "DeviceCount": 2,
+                "ParentID": 2,
+                "children": [
+                  {
+                    "OUID": 14,
+                    "Name": "fmnt",
+                    "count": 1,
+                    "UseParent": 0,
+                    "DeviceCount": 1,
+                    "ParentID": 6,
+                    "children": []
+                  },
+                  {
+                    "OUID": 7,
+                    "Name": "Mpollux",
+                    "count": 1,
+                    "UseParent": 0,
+                    "DeviceCount": 1,
+                    "ParentID": 6,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "OUID": 4,
+            "Name": "SKY",
+            "count": 0,
+            "UseParent": 1,
+            "DeviceCount": 0,
+            "ParentID": -1,
+            "children": []
+          }
+        ]
+      }
+    }
+  }
+}

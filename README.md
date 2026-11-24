@@ -142,6 +142,16 @@ The container uses stdio. HTTP mode (`SCOUT_TRANSPORT=http`) additionally requir
 | `SCOUT_OIDC_ISSUER_URL` | http transport only | OIDC issuer URL (e.g. your Entra ID or Okta tenant). **Required** when `SCOUT_TRANSPORT=http` — the server refuses to start without it, since HTTP is a network-reachable surface. |
 | `SCOUT_OIDC_AUDIENCE` | http transport only | Expected `aud` claim on incoming bearer tokens. **Required** when `SCOUT_TRANSPORT=http`. |
 
+**OU path format.** Wherever an OU path appears (`SCOUT_PROTECTED_OUS`/`SCOUT_ALLOWED_OUS`, `ouPath`, `ou_manage` `path`/`parent_path`, resolver output) it is `/` followed by the OU names from the top-level OU down, joined by `/`, with no trailing slash: `/NorthCreek/Browser/Google-CEP`. Scout's `/ou/structure` returns no path field, so the server derives it from the tree (`src/ou_tree.ts`). There is no synthetic `/` root (top-level OUs are siblings) and OU names containing `/` are refused. If the tree cannot be parsed, every check that needs it refuses (fails closed).
+
+Path comparison for the protected/allowed lists is canonical: surrounding whitespace is trimmed, repeated and trailing `/` are collapsed, case is folded, and `.`/`..` segments or control characters make the write refuse. Write gates resolve the target through the OU tree (fresh read) and gate on the server-derived path, not on the string the caller typed. `device_manage` `move` refuses if the device's source OU cannot be determined (it requires a numeric `OUID` on the single-device record; `GroupID` is not assumed to be the OU id).
+
+**Known gaps (protected/allowed-OU gate coverage, pre-existing).** `SCOUT_PROTECTED_OUS` / `SCOUT_ALLOWED_OUS` are NOT enforced for `application_manage` OU-scope writes, `ou_filtering`, notification/schedule writes, or `command.ts` (`src/tools/application.ts` ~86-126 and the others). Do not rely on the lists to protect an OU against those tools; use `SCOUT_MODE=read-only` or the server-side OU rights instead.
+
+When a write names the OU by more than one reference (for example `ouId` plus `ouPath`), all references must resolve to the same OU or the write is refused, and the request sent to Scout carries only the resolved id.
+
+**Known residual risks (blast radius).** `config_update target=ou` counts devices from the OU tree's `DeviceCount`. That field is cumulative on the one live capture checked (Scout 26.11.0), but it is unverified whether it includes hidden or pending devices, so the count can undercount against the cap; the parser also falls back to the undocumented `count` field when `DeviceCount` is absent. The count and the write are two separate calls (not atomic), so devices moved in between are not reflected; the gated path is re-checked against a fresh tree after counting, but that does not close the gap. Validate against a manual device search on your server before relying on `SCOUT_MAX_BLAST_RADIUS` for OU-scope writes.
+
 > **Note:** You can also configure credentials at runtime using the `scout_configure` tool — no `.env` file needed.
 
 > **Warning:** `SCOUT_IGNORE_TLS=true` disables certificate verification. Use only with self-signed certificates in controlled environments.

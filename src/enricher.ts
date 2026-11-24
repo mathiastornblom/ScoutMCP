@@ -18,11 +18,11 @@
  */
 
 import { getClient } from './client.js';
+import { parseOuTree } from './ou_tree.js';
 
 // ── OU map cache ──────────────────────────────────────────────────────────────
 
 interface OuEntry { name: string; path: string }
-interface OuNode  { OUID?: number; OUName?: string; OUPath?: string; SubOUs?: OuNode[] }
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -39,16 +39,10 @@ async function loadOuMap(): Promise<Map<number, OuEntry>> {
   if (ouMap && Date.now() - ouMapLoadedAt < CACHE_TTL_MS) return ouMap;
 
   const client = getClient();
-  const tree = await client.request<OuNode>('GET', '/api/v1/ou/structure');
+  const tree = parseOuTree(await client.request<unknown>('GET', '/api/v1/ou/structure'));
 
   const map = new Map<number, OuEntry>();
-  function flatten(node: OuNode): void {
-    if (typeof node.OUID === 'number' && node.OUName && node.OUPath) {
-      map.set(node.OUID, { name: node.OUName, path: node.OUPath });
-    }
-    if (Array.isArray(node.SubOUs)) node.SubOUs.forEach(flatten);
-  }
-  flatten(tree);
+  for (const n of tree.nodes) map.set(n.ouid, { name: n.name, path: n.path });
 
   ouMap = map;
   ouMapLoadedAt = Date.now();

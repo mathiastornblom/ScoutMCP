@@ -76,21 +76,32 @@ function assert(condition: boolean, message: string): asserts condition {
  *   "thin02" lives in OUID 3 (/Enterprise/Sandbox)
  *   "thin03" lives in OUID 4 (/Enterprise/Production/Floor3)
  */
+// Real /ou/structure envelope (see tests/fixtures/ou-structure-live.json): no path field is
+// served - paths are derived by src/ou_tree.ts. DeviceCount is cumulative.
 const OU_STRUCTURE = {
-  OUID: 1,
-  OUName: 'Enterprise',
-  OUPath: '/Enterprise',
-  SubOUs: [
-    {
-      OUID: 2,
-      OUName: 'Production',
-      OUPath: '/Enterprise/Production',
-      SubOUs: [
-        { OUID: 4, OUName: 'Floor3', OUPath: '/Enterprise/Production/Floor3', SubOUs: [] },
-      ],
+  code: 200,
+  message: 'OK',
+  response: {
+    status: {
+      result: 0,
+      msg: {
+        treeStructure: [
+          {
+            OUID: 1, Name: 'Enterprise', count: 3, DeviceCount: 3, ParentID: -1, UseParent: 1,
+            children: [
+              {
+                OUID: 2, Name: 'Production', count: 2, DeviceCount: 2, ParentID: 1, UseParent: 0,
+                children: [
+                  { OUID: 4, Name: 'Floor3', count: 1, DeviceCount: 1, ParentID: 2, UseParent: 0, children: [] },
+                ],
+              },
+              { OUID: 3, Name: 'Sandbox', count: 1, DeviceCount: 1, ParentID: 1, UseParent: 0, children: [] },
+            ],
+          },
+        ],
+      },
     },
-    { OUID: 3, OUName: 'Sandbox', OUPath: '/Enterprise/Sandbox', SubOUs: [] },
-  ],
+  },
 };
 
 const DEVICES: Record<string, { OUID: number; Name: string; id: number }> = {
