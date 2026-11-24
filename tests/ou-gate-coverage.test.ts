@@ -478,5 +478,48 @@ await test('device_manage move: SOURCE OU outside the test scope refused', async
   await refused('move', () => deviceManageTool.execute({ action: 'move', name: 'thin01', destouid: 5 }), /Source OU/);
 });
 
+console.log('\nSEC F6: OU-ish body keys stripped case/separator-insensitively; F7: config_update subtree gate');
+await test('F6 repro: IncludeSubOus / includesubous / INCLUDESUBOUS with ouRef=8 -> subtree gate applies (refused)', async () => {
+  for (const k of ['IncludeSubOus', 'includesubous', 'INCLUDESUBOUS', 'include_sub_ous', 'Include-Sub-Ous']) {
+    reset(); writeMode(); setCl();
+    await refused(`device_command ${k}`, () => deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '8', body: { [k]: true } }));
+    await refused(`notification ${k}`, () => notificationManageTool.execute({ action: 'set', target: 'ou', type: 'delivery', ouId: 8, body: { [k]: 'yes' } }));
+  }
+});
+await test('F6 repro: body {OUID:9} / ouid / ouPATH with ouRef=17 -> refused (disagree); other OU-ish keys dropped, only canonical ouId sent', async () => {
+  for (const extra of [{ OUID: 9 }, { ouid: 9 }, { ouPATH: CL }, { Dest_OU_Id: 9, destOuId: 9, TargetOu: 9, GroupID: 9, Path: CL, id: 9, OU: 9 }]) {
+    reset(); writeMode(); setCl();
+    const r = await deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '17', body: { keep: 1, ...extra } });
+    const b = writes[0]?.body as Record<string, unknown> | undefined;
+    if ('OUID' in extra || 'ouid' in extra || 'ouPATH' in extra) {
+      assert(r.isError === true && writes.length === 0, `${JSON.stringify(extra)} disagreeing ref refused: ${text(r)}`);
+    } else {
+      assert(!r.isError && JSON.stringify(b) === '{"keep":1,"ouId":17}', `${JSON.stringify(extra)}: ${JSON.stringify(b)}`);
+    }
+    reset(); writeMode(); setCl();
+    const n = await notificationManageTool.execute({ action: 'set', target: 'ou', type: 'delivery', ouId: 17, body: { keep: 1, ...extra } });
+    assert(!n.isError && JSON.stringify(writes[0]?.body) === '{"keep":1}', `notification ${JSON.stringify(extra)}: ${JSON.stringify(writes[0]?.body)}`);
+  }
+});
+await test('F6: bulk_command strips OU-ish keys from the forwarded commandBody', async () => {
+  reset(); writeMode(); setCl();
+  const r = await bulkCommandTool.execute({ sourceOuPath: '/NorthCreek/Imprivata', searchTerm: '*', command: 'restart', confirm: true, commandBody: { keep: 1, OUID: 9, IncludeSubOus: true, ou_path: CL } });
+  assert(!r.isError && JSON.stringify(writes[0]?.body) === '{"keep":1}', JSON.stringify(writes[0]?.body));
+});
+await test('F7: config_update on an ANCESTOR of a protected OU refused (id 8, grandparent by path); sibling allowed; allow-list ancestor refused', async () => {
+  const cfg2 = (extra: Record<string, unknown>) => ({ target: 'ou', section: 'network', body: {}, confirm: true, skipValidation: true, ...extra });
+  reset(); writeMode(); setCl();
+  await refused('ancestor id 8', () => configUpdateTool.execute(cfg2({ ouId: 8 })), /protected/);
+  await refused('grandparent by path', () => configUpdateTool.execute(cfg2({ ouPath: '/northcreek' })), /protected/);
+  reset(); writeMode(); setCl();
+  let r = await configUpdateTool.execute(cfg2({ ouId: 17 })); // sibling DNIe
+  assert(!r.isError && writes.length === 1, text(r));
+  reset(); writeMode(); setCl();
+  r = await configUpdateTool.execute(cfg2({ ouId: 5 }));
+  assert(!r.isError && writes.length === 1, text(r));
+  reset(); writeMode(); process.env.SCOUT_ALLOWED_OUS = CL;
+  await refused('ancestor of the allowed OU', () => configUpdateTool.execute(cfg2({ ouId: 8 })));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

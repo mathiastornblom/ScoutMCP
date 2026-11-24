@@ -155,3 +155,26 @@ function capitalize(s: string): string {
 export function subOusRequested(v: unknown): boolean {
   return !(v === undefined || v === false);
 }
+
+const OU_BODY_KEYS = new Set([
+  'ouid', 'oupath', 'ou', 'id', 'path', 'includesubous', 'targetou', 'destouid', 'destoupath', 'groupid',
+]);
+const normKey = (k: string): string => k.toLowerCase().replace(/[-_ ]/g, '');
+
+/** Values of every body key whose normalised form equals `norm` (case/separator variants). */
+export function bodyValuesFor(body: Record<string, unknown> | undefined, norm: string): unknown[] {
+  return Object.entries(body ?? {}).filter(([k]) => normKey(k) === norm).map(([, v]) => v);
+}
+
+/** True when ANY case/separator variant of includeSubOus is present with a non-false value. */
+export function bodySubOusRequested(body: Record<string, unknown> | undefined): boolean {
+  return bodyValuesFor(body, 'includesubous').some(subOusRequested);
+}
+
+/**
+ * Copy of a caller body with EVERY OU-ish key removed (matched case/separator-insensitively), so
+ * nothing but the canonical fields the caller adds afterwards can name an OU in the request.
+ */
+export function stripOuBodyKeys(body: Record<string, unknown> | undefined): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(body ?? {}).filter(([k]) => !OU_BODY_KEYS.has(normKey(k))));
+}

@@ -3,7 +3,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { assertOuPathUnchanged, type OuMatch } from '../resolver.js';
-import { gateOuWrite, gateOuSubtree, subOusRequested } from '../safety/ou_gate.js';
+import { gateOuWrite, gateOuSubtree, bodyValuesFor, bodySubOusRequested, stripOuBodyKeys } from '../safety/ou_gate.js';
 import { getProgressReporter } from '../progress.js';
 import { confirmDestructiveAction } from '../elicitation.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -79,8 +79,8 @@ async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<Mc
     // target=device|devicelist|ddg cannot be tied to an OU from the input alone (see README).
     let ou: OuMatch | undefined;
     if (input.target === 'ou') {
-      const bodyOuId = input.body?.['ouId'];
-      const bodyOuPath = input.body?.['ouPath'];
+      const bodyOuId = bodyValuesFor(input.body, 'ouid').find((v) => typeof v === 'number');
+      const bodyOuPath = bodyValuesFor(input.body, 'oupath').find((v) => typeof v === 'string');
       ou = await gateOuWrite(
         opName,
         input.ouRef !== undefined
@@ -90,13 +90,12 @@ async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<Mc
         { requiredMessage: 'target=ou requires ouRef (or body.ouId / body.ouPath); refusing rather than leaving the OU to the server.' },
       );
       if (!ou) throw new Error('target OU unresolved');
-      const subOus = subOusRequested(input.body?.['includeSubOus']);
+      const hasSubOusKey = bodyValuesFor(input.body, 'includesubous').length > 0;
+      const subOus = bodySubOusRequested(input.body);
       if (subOus) await gateOuSubtree(opName, ou);
-      const { ouId: _ouId, ouPath: _ouPath, includeSubOus: _inc, ...rest } = input.body ?? {};
-      void _inc;
-      void _ouId;
-      void _ouPath;
-      body = { ...rest, ouId: ou.ouid, ...(input.body?.['includeSubOus'] !== undefined ? { includeSubOus: subOus } : {}) };
+      // Every OU-ish body key (any case/separator variant) is dropped; only the canonical resolved
+      // ouId and a normalised boolean includeSubOus are sent.
+      body = { ...stripOuBodyKeys(input.body), ouId: ou.ouid, ...(hasSubOusKey ? { includeSubOus: subOus } : {}) };
       qs = buildQuery({ id: ou.ouid });
     }
 

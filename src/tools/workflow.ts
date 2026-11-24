@@ -20,7 +20,7 @@ import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { confirmDestructiveAction, supportsElicitation } from '../elicitation.js';
 import { resolveOuRef, invalidateOuCache, assertOuPathUnchanged } from '../resolver.js';
-import { gateOuWrite, gateOuSubtree, subOusRequested } from '../safety/ou_gate.js';
+import { gateOuWrite, gateOuSubtree, subOusRequested, stripOuBodyKeys } from '../safety/ou_gate.js';
 import {
   checkMutationAllowed,
   checkBlastRadius,
@@ -660,7 +660,7 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
         const result = await client.request<unknown>(
           'POST',
           `/api/v1/command/device/${input.command}${cmdQs}`,
-          input.commandBody,
+          input.commandBody === undefined ? undefined : stripOuBodyKeys(input.commandBody),
           { mutating: true, opName: `bulk_command(${input.command})` },
         );
         if (isDryRunSkip(result)) continue;
