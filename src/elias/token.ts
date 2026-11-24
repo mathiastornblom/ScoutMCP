@@ -10,6 +10,7 @@
  */
 
 import { GuardrailError, checkKillSwitch, getScoutMode, type MutationCheckResult } from '../safety/guardrails.js';
+import { sha256Hex } from './sanitize.js';
 
 export interface TokenBinding {
   opId: string;
@@ -17,21 +18,33 @@ export interface TokenBinding {
   method: string;
   /** Op-table template, e.g. `/api/v1/containers/import`. */
   pathTemplate: string;
+  /** Concrete NORMALISED path (lower-cased, see normalizeWritePath) the request will be sent to (F4). */
+  concretePath: string;
+  /** sha256 of the request body as sent (see bodyHashOf) (F4). */
+  bodySha256: string;
+}
+
+/** Hash of a request body exactly as client.ts serialises it ('' when there is no body). */
+export function bodyHashOf(body: unknown): string {
+  return sha256Hex(body === undefined ? '' : JSON.stringify(body));
 }
 
 /** Minted tokens only: a structurally identical forged object is rejected. */
 const MINTED = new WeakSet<object>();
+/** Only mintMutationToken knows this key; the class itself is not exported. */
+const MINT_KEY = Symbol('mint-mutation-token');
 
-/** Default lifetime of a token (single request ops). Upload-style ops would pass their own bound later. */
+/** Default lifetime of a token (single request ops). */
 const DEFAULT_TTL_MS = 120_000;
 
-export class MutationToken {
+class MutationToken {
   readonly binding: Readonly<TokenBinding>;
   readonly expiresAt: number;
   #used = false;
 
-  /** @internal use mintMutationToken(). */
-  constructor(binding: TokenBinding, ttlMs: number) {
+  constructor(key: symbol, binding: TokenBinding, ttlMs: number) {
+    // `new token.constructor(...)` from outside cannot supply the module-private key.
+    if (key !== MINT_KEY) throw new GuardrailError('MutationToken cannot be constructed directly.', 'mutation-token');
     this.binding = Object.freeze({ ...binding });
     this.expiresAt = Date.now() + ttlMs;
     MINTED.add(this);
@@ -43,16 +56,22 @@ export class MutationToken {
 
   /**
    * Called by client.ts for each request. Marks the token used (whatever the outcome), then checks
-   * binding, expiry, kill switch and mode. Throws GuardrailError(gate 'mutation-token' | 'kill-switch').
+   * binding (method, template, concrete path, body hash), expiry, kill switch and mode.
    */
-  consume(method: string, pathTemplate: string): void {
+  consume(method: string, pathTemplate: string, concretePath: string, bodySha256: string): void {
+    if (!MINTED.has(this)) throw new GuardrailError('Invalid mutation token.', 'mutation-token');
     if (this.#used) {
       throw new GuardrailError('Mutation token was already used (single-use).', 'mutation-token');
     }
     this.#used = true;
-    if (method.toUpperCase() !== this.binding.method.toUpperCase() || pathTemplate !== this.binding.pathTemplate) {
+    if (
+      method.toUpperCase() !== this.binding.method.toUpperCase() ||
+      pathTemplate !== this.binding.pathTemplate ||
+      concretePath !== this.binding.concretePath ||
+      bodySha256 !== this.binding.bodySha256
+    ) {
       throw new GuardrailError(
-        'Mutation token is bound to a different request (method/path template mismatch).',
+        'Mutation token is bound to a different request (method/path/body mismatch).',
         'mutation-token',
       );
     }
@@ -70,6 +89,8 @@ export class MutationToken {
   }
 }
 
+export type { MutationToken };
+
 export function isMutationToken(x: unknown): x is MutationToken {
   return typeof x === 'object' && x !== null && MINTED.has(x);
 }
@@ -79,5 +100,5 @@ export function mintMutationToken(check: MutationCheckResult, binding: TokenBind
   if (!check || check.proceed !== true) {
     throw new GuardrailError('Cannot mint a mutation token without a proceeding mutation check.', 'mutation-token');
   }
-  return new MutationToken(binding, ttlMs);
+  return new MutationToken(MINT_KEY, binding, ttlMs);
 }

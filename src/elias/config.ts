@@ -15,6 +15,8 @@
 export type EliasWriteTier = 'off' | 'a' | 'b';
 
 export const MIN_PREFIX_LENGTH = 4;
+/** PROTECTED may use shorter prefixes (e.g. `uc-*`): a broad protected entry only shrinks the writable set. */
+export const PROTECTED_MIN_PREFIX_LENGTH = 2;
 export const CEILING_DELETE_DEPENDENTS = 5;
 export const CEILING_EDIT_DEPENDENTS = 5;
 export const CEILING_DELETES_PER_HOUR = 20;
@@ -37,7 +39,7 @@ export interface ParsedScope {
 }
 
 /** Parses a comma list or a JSON array of strings. Invalid entries are reported, never silently kept. */
-export function parseScopeList(raw: string | undefined, label: string): ParsedScope {
+export function parseScopeList(raw: string | undefined, label: string, minPrefix: number = MIN_PREFIX_LENGTH): ParsedScope {
   const entries: ScopeEntry[] = [];
   const errors: string[] = [];
   if (raw === undefined || raw.trim() === '') return { entries, errors };
@@ -77,8 +79,8 @@ export function parseScopeList(raw: string | undefined, label: string): ParsedSc
       const prefix = e.slice(0, -1);
       if (prefix.includes('*') || !NAME_CHARS_RE.test(prefix)) {
         errors.push(`${label}: invalid prefix entry rejected`);
-      } else if (prefix.length < MIN_PREFIX_LENGTH) {
-        errors.push(`${label}: prefix entries need at least ${MIN_PREFIX_LENGTH} characters before "*"`);
+      } else if (prefix.length < minPrefix) {
+        errors.push(`${label}: prefix entries need at least ${minPrefix} characters before "*"`);
       } else {
         entries.push({ kind: 'prefix', value: prefix.toLowerCase() });
       }
@@ -171,7 +173,7 @@ export function loadEliasWriteConfig(env: Env = process.env): EliasWriteConfig {
   }
 
   const allowed = parseScopeList(env.SCOUT_ELIAS_ALLOWED_CONTAINERS, 'SCOUT_ELIAS_ALLOWED_CONTAINERS');
-  const prot = parseScopeList(env.SCOUT_ELIAS_PROTECTED_CONTAINERS, 'SCOUT_ELIAS_PROTECTED_CONTAINERS');
+  const prot = parseScopeList(env.SCOUT_ELIAS_PROTECTED_CONTAINERS, 'SCOUT_ELIAS_PROTECTED_CONTAINERS', PROTECTED_MIN_PREFIX_LENGTH);
   const deletable = parseScopeList(env.SCOUT_ELIAS_DELETABLE_CONTAINERS, 'SCOUT_ELIAS_DELETABLE_CONTAINERS');
   const scopeErrors = [...allowed.errors, ...prot.errors, ...deletable.errors];
 

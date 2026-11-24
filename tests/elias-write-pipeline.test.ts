@@ -272,7 +272,7 @@ async function main(): Promise<void> {
     const bad = new MockClient();
     bad.containers = [{ id: 1 as unknown as string, name: NAME }];
     const r = await run(bad);
-    assert(r.status === 'refused' && r.gate === 'validation' && bad.posts.length === 0, 'malformed list fails closed');
+    assert(r.status === 'refused' && r.gate === 'read-failed' && bad.posts.length === 0, 'malformed list fails closed (distinct gate)');
   });
 
   console.log('G11-G13: rights, confirmation, mutation gate, dry-run');

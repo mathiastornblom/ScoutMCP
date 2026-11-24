@@ -12,7 +12,9 @@ import type { ContainerRef } from './scope.js';
 /** Conservative container name (design 2.0; real server limits are Open Question Q7). */
 export const ContainerName = z
   .string()
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/, 'must be 1-63 chars: letters, digits, . _ - (first char alphanumeric)');
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/, 'must be 1-63 chars: letters, digits, . _ - (first char alphanumeric)')
+  .refine((v) => !v.endsWith('.'), { message: 'must not end with a dot' })
+  .refine((v) => !/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)/i.test(v), { message: 'must not be a reserved device name (CON, NUL, COM1, ...)' });
 
 export const containerCreateInput = z
   .object({

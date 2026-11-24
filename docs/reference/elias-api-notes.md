@@ -56,8 +56,8 @@ closed read-class POST list (`my-container-roles`, `treefilter`).
 
 **Switches** (all optional, all off by default; booleans accept only the literal `true`; invalid values fall to the
 safe side and are listed by `elias_write_status`): `SCOUT_ELIAS_WRITES` (`off`|`a`|`b`),
-`SCOUT_ELIAS_ALLOWED_CONTAINERS`, `SCOUT_ELIAS_PROTECTED_CONTAINERS` (entries: GUID, exact name, or `prefix*` with at
-least 4 characters; bare `*` rejected; an allowed entry overlapping a protected one is rejected and invalidates the
+`SCOUT_ELIAS_ALLOWED_CONTAINERS`, `SCOUT_ELIAS_PROTECTED_CONTAINERS` (entries: GUID, exact name, or `prefix*`; the prefix needs at least 4
+characters in ALLOWED/DELETABLE and at least 2 in PROTECTED (so `uc-*` works; Security ruling on C4); bare `*` rejected; an allowed entry overlapping a protected one is rejected and invalidates the
 whole scope), `SCOUT_ENV=test` with `SCOUT_TEST_CONTAINER_PREFIX` (default `MCPTEST-`),
 `SCOUT_ELIAS_ALLOW_UNVERIFIED_WRITES` (test env only). Parsed but not yet active: `..._ALLOW_DELETE`,
 `..._DELETABLE_CONTAINERS`, `..._ALLOW_UPLOAD`, `..._ALLOW_SOLVER`, `..._ALLOW_ACCEPT`, `..._MAX_DELETE_DEPENDENTS`
@@ -67,6 +67,16 @@ is intentionally not read.
 **Audit**: a write-ahead intent row is appended and fsynced before the mutating call and blocks the mutation if it
 cannot be written; an intent without a result is reported as `recovered-unknown` at startup. The audit file is 0600.
 Snapshots are NOT implemented yet: no tool or document may claim that a change can be reverted automatically.
+
+**Path policy**: every non-GET path is normalised before classification (percent-decoding once, double encoding,
+`//`, `.`/`..`, `;`, backslash, encoded separators and control characters rejected, case-folded). Tier C detection is a broad
+match on the decoded path. An unknown non-GET is refused even with `mutating:true` unless its exact normalised path is on the
+legacy private-write allow-list (`LEGACY_MUTATING` in `src/elias/optable.ts`). `client.request()` applies the same
+traversal/Tier C backstop. Mutation tokens are bound to method, template, concrete normalised path and body hash.
+
+**Confirm path**: `planDigest` is optional in this slice (Tier A, one empty container). It becomes REQUIRED (plan, then
+confirm) on the `confirm:true` path before any edit or Tier B op. The `SCOUT_ENV=test` host pin for the unverified escape
+hatch comes with the live-test PR (C23/C24).
 
 ## Not implemented yet
 Locks and sessions, snapshots, delete, upload, solver, accept, import/generate, and the A0 read-class POST tools

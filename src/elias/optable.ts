@@ -29,10 +29,12 @@ export interface OpDef {
   enabled: boolean;
   /** Body keys the builder may emit (documentation + test oracle). */
   bodyKeys?: readonly string[];
+  /** True when the endpoint takes a query string (never the case for an enabled op today). */
+  allowQuery?: boolean;
 }
 
 const S = '[^/?#]+';
-const re = (tail: string): RegExp => new RegExp(`^/api/v1${tail}$`);
+const re = (tail: string): RegExp => new RegExp(`^/api/v1${tail}$`, 'i');
 
 export const OPS: readonly OpDef[] = [
   // ── Tier A: additive / metadata ────────────────────────────────────────────
@@ -51,7 +53,7 @@ export const OPS: readonly OpDef[] = [
   { key: 'containers.delete', method: 'DELETE', template: '/api/v1/containers/{id}', pattern: re(`/containers/${S}`), tier: 'B', kind: 'write', tool: 'elias_container_delete', enabled: false },
   { key: 'containers.files.images', method: 'POST', template: '/api/v1/containers/{id}/files/images', pattern: re(`/containers/${S}/files/images`), tier: 'B', kind: 'write', tool: 'elias_container_upload_images', enabled: false },
   { key: 'containers.packageChanges.accept', method: 'POST', template: '/api/v1/containers/{id}/package-changes/accept', pattern: re(`/containers/${S}/package-changes/accept`), tier: 'B', kind: 'write', tool: 'elias_package_changes_accept', enabled: false },
-  { key: 'images.generate', method: 'POST', template: '/api/v1/images/generate', pattern: /^\/api\/v1\/images\/generate(\?containerName=[^/#]*)?$/, tier: 'B', kind: 'write', tool: 'elias_image_generate', enabled: false },
+  { key: 'images.generate', method: 'POST', template: '/api/v1/images/generate', pattern: re('/images/generate'), tier: 'B', kind: 'write', tool: 'elias_image_generate', enabled: false, allowQuery: true },
   { key: 'files.import', method: 'POST', template: '/api/v1/files/import/{c}', pattern: re(`/files/import/${S}`), tier: 'B', kind: 'write', tool: 'elias_container_import_archive', enabled: false },
   { key: 'files.upload.init', method: 'POST', template: '/api/v1/files/upload/init', pattern: re('/files/upload/init'), tier: 'B', kind: 'write', tool: 'elias_upload_file', enabled: false },
   { key: 'files.upload.chunk', method: 'PUT', template: '/api/v1/files/upload/{id}/chunk', pattern: re(`/files/upload/${S}/chunk`), tier: 'B', kind: 'write', tool: 'elias_upload_file', enabled: false },
@@ -81,51 +83,101 @@ export const OPS: readonly OpDef[] = [
   { key: 'ui.unregister', method: 'POST', template: '/api/v1/ui/unregister', pattern: re('/ui/unregister'), tier: 'internal', kind: 'internal', tool: null, enabled: false },
 ];
 
+// ── Path normalisation (Security F1) ─────────────────────────────────────────────
+
+export type NormalizedPath = { ok: true; path: string; query: string } | { ok: false; reason: string };
+
+// eslint-disable-next-line no-control-regex
+const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/;
+
+/**
+ * Normalises a request path BEFORE any classification: query split off, percent-decoding applied
+ * exactly once (double encoding rejected), '//' collapsed, '.'/'..' segments, ';', '#', backslash,
+ * encoded '/' ('%2F') and '\' ('%5C'), NUL and control characters rejected, lower-cased.
+ */
+export function normalizeWritePath(path: string): NormalizedPath {
+  if (typeof path !== 'string' || path === '') return { ok: false, reason: 'empty path' };
+  const qi = path.indexOf('?');
+  const rawPath = qi === -1 ? path : path.slice(0, qi);
+  const query = qi === -1 ? '' : path.slice(qi + 1);
+  if (CONTROL_RE.test(path) || /[\\#\s]/.test(rawPath)) return { ok: false, reason: 'control character, backslash, fragment or whitespace in path' };
+  if (rawPath.includes(';')) return { ok: false, reason: 'path parameter separator ";" in path' };
+  if (/%2f|%5c|%00/i.test(rawPath)) return { ok: false, reason: 'encoded separator or NUL in path' };
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(rawPath);
+  } catch {
+    return { ok: false, reason: 'undecodable percent-encoding' };
+  }
+  if (/%[0-9a-f]{2}/i.test(decoded)) return { ok: false, reason: 'double percent-encoding' };
+  if (CONTROL_RE.test(decoded) || /[\\;#\s]/.test(decoded) || decoded.includes('\u0000')) return { ok: false, reason: 'unsafe character after decoding' };
+  const segs = decoded.split('/').filter((x) => x !== '');
+  if (segs.some((x) => x === '.' || x === '..')) return { ok: false, reason: '"." or ".." segment in path' };
+  return { ok: true, path: `/${segs.join('/').toLowerCase()}`, query };
+}
+
 // ── Tier C: permanently excluded ─────────────────────────────────────────────────
 
 /**
  * Tier C = signing, signing material, sign, trust-certificate import/restore, certificate delete.
  * Fleet-wide trust and attestation; never reachable from this MCP (design section 1, Security R4).
- * Detection is STRUCTURAL and conservative: any non-GET request whose path has a `certificates`
- * segment, or a segment that is exactly one of the signing/trust words, is Tier C. (Exact segments,
- * not substrings: legacy paths such as `.../assignDevices` must not be caught.)
+ * Detection is broad and applies to EVERY non-GET, on the raw path (decoded repeatedly, so double
+ * encoding cannot hide it) and on the normalised path: the long words (signing, signature,
+ * certificate, trust, pfx, pkcs) match as substrings; the short word `sign` matches as a word or as a
+ * segment prefix (so `sign;x`, `signing-keys`, `trustCertificates` are caught while `assignDevices` is not).
  */
-const TIER_C_EXACT_SEGMENTS = new Set(['certificates', 'certificate', 'sign', 'signing', 'signing-upload-key', 'trust', 'defaults']);
+const TIER_C_SUBSTRINGS = /signing|signature|certificate|trust|pfx|pkcs/i;
 
-function pathSegments(path: string): string[] | null {
-  const bare = path.split(/[?#]/, 1)[0] ?? '';
-  const out: string[] = [];
-  for (const raw of bare.split('/')) {
-    if (raw === '') continue;
-    let dec: string;
-    try {
-      dec = decodeURIComponent(raw);
-    } catch {
-      return null; // undecodable: caller treats as Tier C (fail closed)
-    }
-    out.push(dec.toLowerCase());
+function words(segment: string): string[] {
+  return segment
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((w) => w.toLowerCase());
+}
+
+function tierCText(text: string): boolean {
+  if (TIER_C_SUBSTRINGS.test(text)) return true;
+  for (const seg of text.split('/')) {
+    if (seg.toLowerCase().startsWith('sign')) return true;
+    const w = words(seg);
+    if (w.includes('sign') || w.includes('cert') || w.includes('defaults')) return true;
   }
-  return out;
+  return false;
 }
 
 export function isTierCPath(method: string, path: string): boolean {
   const m = method.toUpperCase();
   if (m === 'GET' || m === 'HEAD') return false;
-  const segs = pathSegments(path);
-  if (segs === null) return true;
-  return segs.some((s) => TIER_C_EXACT_SEGMENTS.has(s));
+  const bare = path.split('?', 1)[0] ?? '';
+  // Raw text, decoded up to three times (failures ignored): hides nothing behind encoding.
+  let cur = bare;
+  for (let i = 0; i < 4; i++) {
+    if (tierCText(cur)) return true;
+    try {
+      const next = decodeURIComponent(cur);
+      if (next === cur) break;
+      cur = next;
+    } catch {
+      break;
+    }
+  }
+  const n = normalizeWritePath(path);
+  return n.ok && tierCText(n.path);
 }
 
 export class NotInOpTable extends Error {
   constructor(
     public readonly method: string,
     path: string,
-    public readonly reason: 'tier-c' | 'unknown',
+    public readonly reason: 'tier-c' | 'unknown' | 'rejected',
   ) {
     super(
       reason === 'tier-c'
         ? `${method} ${path.split(/[?#]/, 1)[0]} is Tier C (signing/trust/certificates) and is permanently excluded from this MCP`
-        : `${method} ${path.split(/[?#]/, 1)[0]} is not in the closed ELIAS op table`,
+        : reason === 'rejected'
+          ? `${method} ${path.split(/[?#]/, 1)[0]} was rejected by path normalisation`
+          : `${method} ${path.split(/[?#]/, 1)[0]} is not in the closed ELIAS op table`,
     );
     this.name = 'NotInOpTable';
   }
@@ -134,27 +186,66 @@ export class NotInOpTable extends Error {
 export type Classification =
   | { kind: 'read' }
   | { kind: 'tier-c' }
-  | { kind: 'op'; op: OpDef }
-  | { kind: 'unknown' };
+  | { kind: 'rejected'; reason: string }
+  | { kind: 'op'; op: OpDef; path: string }
+  | { kind: 'unknown'; path: string; query: string };
 
-/** Classifies a concrete request. Tier C wins over everything. */
+/** Classifies a concrete request: normalise first, Tier C wins over everything. */
 export function classifyRequest(method: string, path: string): Classification {
   const m = method.toUpperCase();
   if (m === 'GET' || m === 'HEAD') return { kind: 'read' };
   if (isTierCPath(m, path)) return { kind: 'tier-c' };
-  // Path traversal / encoded separators never match a template.
-  if (/(^|\/)\.\.?(\/|$)|%2e|%2f|%5c|\\|\/\//i.test(path.split(/[?#]/, 1)[0] ?? '')) return { kind: 'unknown' };
+  const n = normalizeWritePath(path);
+  if (!n.ok) return { kind: 'rejected', reason: n.reason };
   for (const op of OPS) {
-    if (op.method === m && op.pattern.test(path)) return { kind: 'op', op };
+    if (op.method === m && op.pattern.test(n.path) && (n.query === '' || op.allowQuery)) return { kind: 'op', op, path: n.path };
   }
-  return { kind: 'unknown' };
+  return { kind: 'unknown', path: n.path, query: n.query };
 }
 
-/** Op-table lookup for a write request. Throws NotInOpTable for Tier C and for unknown requests. */
+/**
+ * Legacy private-write endpoints (non-ELIAS) that pass `mutating:true`. EXACT normalised paths only;
+ * built from the existing rawRequest write callers. Anything else that is a non-GET and not in the op
+ * table is refused even with `mutating:true`.
+ */
+export const LEGACY_MUTATING: ReadonlyArray<{ path: string; allowQuery?: boolean }> = [
+  '/api/v1/license/reconfigure',
+  '/api/v1/ui/instances',
+  '/api/v1/predefinedcommands/add',
+  '/api/v1/predefinedcommands/modify',
+  '/api/v1/predefinedcommands/delete',
+  '/api/v1/predefinedcommands/auth',
+  '/api/v1/predefinedcommands/modifytemplates',
+  '/api/v1/predefinedpaths/add',
+  '/api/v1/predefinedpaths/delete',
+  '/api/v1/loggingoptions/set',
+  '/api/v1/discoveroptions/set',
+  '/api/v1/retainlocalconfig/set',
+  '/api/v1/devicenameoptions/set',
+  '/api/v1/recoverysettings',
+  '/api/v1/devicepassword/set',
+  '/api/v1/admins/add',
+  '/api/v1/admins/modify',
+  '/api/v1/oufilter/setsettings',
+  '/api/v1/oufilter/add',
+  '/api/v1/oufilter/modify',
+  '/api/v1/oufilter/delete',
+  '/api/v1/newdeviceoptions/set',
+].map((path) => ({ path }))
+  .concat([
+    { path: '/api/v1/admins', allowQuery: true }, // DELETE /admins?adminName=
+    { path: '/api/v1/dbcleanup', allowQuery: true }, // POST/DELETE with ?filter=
+  ] as Array<{ path: string; allowQuery?: boolean }>);
+
+export function isLegacyMutating(normPath: string, query: string): boolean {
+  return LEGACY_MUTATING.some((e) => e.path === normPath && (query === '' || e.allowQuery === true));
+}
+
+/** Throws NotInOpTable for Tier C, rejected and unknown requests; returns the op otherwise. */
 export function lookupOp(method: string, path: string): OpDef {
   const c = classifyRequest(method, path);
   if (c.kind === 'op') return c.op;
-  throw new NotInOpTable(method.toUpperCase(), path, c.kind === 'tier-c' ? 'tier-c' : 'unknown');
+  throw new NotInOpTable(method.toUpperCase(), path, c.kind === 'tier-c' ? 'tier-c' : c.kind === 'rejected' ? 'rejected' : 'unknown');
 }
 
 export function getOp(key: string): OpDef {
@@ -165,8 +256,23 @@ export function getOp(key: string): OpDef {
 
 // ── Body deny-list (C14) ─────────────────────────────────────────────────────────
 
-/** Keys that must never appear in any body this MCP builds. */
-export const BODY_KEY_DENY = /sign|cert|pem|trust|signature|password|secret/i;
+/**
+ * Keys that must never appear in any body this MCP builds. Long words match as substrings
+ * (signature, signing, certificate, password, secret, trust, pkcs); short words match only as whole
+ * words after camelCase/separator splitting (sign, cert, pem, pfx, p12), so `design` and `assignedTo`
+ * are not caught. Exposed with a RegExp-like `test` for callers and tests.
+ */
+export const BODY_KEY_DENY = {
+  test(key: string): boolean {
+    if (/signature|signing|certificate|password|passwd|secret|trust|pkcs/i.test(key)) return true;
+    const w = key
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .split(/[^A-Za-z0-9]+/)
+      .filter(Boolean)
+      .map((x) => x.toLowerCase());
+    return w.some((x) => ['sign', 'signed', 'cert', 'certs', 'pem', 'pfx', 'p12'].includes(x));
+  },
+};
 
 export class BodyDenied extends Error {
   constructor(key: string) {

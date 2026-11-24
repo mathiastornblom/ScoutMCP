@@ -6,8 +6,8 @@ import {
   type MutationCheckResult,
   DRY_RUN_SKIP_MARKER,
 } from './safety/guardrails.js';
-import { classifyRequest, assertBodyAllowed, isSendableWrite } from './elias/optable.js';
-import { isMutationToken, type MutationToken } from './elias/token.js';
+import { classifyRequest, assertBodyAllowed, isSendableWrite, isLegacyMutating, normalizeWritePath } from './elias/optable.js';
+import { isMutationToken, bodyHashOf, type MutationToken } from './elias/token.js';
 
 function makeDryRunSkip<T>(notice?: string): T {
   return {
@@ -305,6 +305,7 @@ export class ScoutClient {
     body?: unknown,
     opts?: { mutating?: boolean; opName?: string },
   ): Promise<T> {
+    this.enforceRestWritePolicy(method, path);
     if (opts?.mutating) {
       const check = this.checkMode(opts.opName ?? `${method} ${path}`);
       if (!check.proceed) return makeDryRunSkip<T>(check.dryRunNotice);
@@ -345,13 +346,16 @@ export class ScoutClient {
   private enforceRawWritePolicy(method: string, path: string, body: unknown, opts?: RawRequestOpts): void {
     const m = method.toUpperCase();
     if (m === 'GET' || m === 'HEAD') return;
-    const label = path.split(/[?#]/, 1)[0];
+    const label = path.split(/[?#]/, 1)[0].replace(/[^\x20-\x7e]/g, '?').slice(0, 120);
     const cls = classifyRequest(m, path);
     if (cls.kind === 'tier-c') {
       throw new GuardrailError(
         `Refused: ${m} ${label} is Tier C (signing/trust/certificates) and is permanently excluded from this MCP.`,
         'tier-c',
       );
+    }
+    if (cls.kind === 'rejected') {
+      throw new GuardrailError(`Refused: ${m} ${label}: path rejected (${cls.reason}).`, 'mutation-token');
     }
     const token = opts?.mutationToken;
     if (token !== undefined && !isMutationToken(token)) {
@@ -383,18 +387,51 @@ export class ScoutClient {
         throw new GuardrailError(`Refused: ${op.template} is classified but not enabled in this build.`, 'mutation-token');
       }
       assertBodyAllowed(body); // C14: throws BodyDenied
-      token.consume(m, op.template);
+      token.consume(m, op.template, cls.path, bodyHashOf(body));
       return;
     }
-    // Unknown to the op table.
+    if (cls.kind === 'read') return;
+    // Unknown to the op table: only the explicit legacy allow-list, and only with mutating:true.
     if (token !== undefined) {
       throw new GuardrailError(`Refused: ${m} ${label} is not in the closed ELIAS op table; a token cannot be used for it.`, 'mutation-token');
     }
-    if (opts?.mutating) return; // legacy (non-ELIAS) private endpoint, gated by checkMutationAllowed below
+    if (opts?.mutating && isLegacyMutating(cls.path, cls.query)) return; // gated by checkMutationAllowed below
     throw new GuardrailError(
-      `Refused: ${m} ${label} is a non-GET without mutating:true and is not a known read-class POST.`,
+      `Refused: ${m} ${label} is a non-GET that is neither in the ELIAS op table nor on the legacy private-write allow-list.`,
       'mutation-token',
     );
+  }
+
+  /**
+   * Write-policy backstop for the /rest path (Security F3): a non-GET may not use traversal or
+   * encoded separators, may not be Tier C, and may not resolve to an ELIAS/internal op path.
+   */
+  private enforceRestWritePolicy(method: string, path: string): void {
+    const m = method.toUpperCase();
+    if (m === 'GET' || m === 'HEAD') return;
+    const label = path.split(/[?#]/, 1)[0].replace(/[^\x20-\x7e]/g, '?').slice(0, 120);
+    const n = normalizeWritePath(path);
+    if (!n.ok) throw new GuardrailError(`Refused: ${m} ${label}: path rejected (${n.reason}).`, 'mutation-token');
+    const cls = classifyRequest(m, path);
+    if (cls.kind === 'tier-c') {
+      throw new GuardrailError(`Refused: ${m} ${label} is Tier C (signing/trust/certificates) and is permanently excluded from this MCP.`, 'tier-c');
+    }
+    if (cls.kind === 'op' && cls.op.kind !== 'read-post') {
+      throw new GuardrailError(`Refused: ${m} ${label} resolves to an ELIAS/internal op path; not allowed through /rest.`, 'mutation-token');
+    }
+    let resolved: string;
+    try {
+      resolved = new URL(`${this.baseUrl}/rest${path}`).pathname;
+    } catch {
+      throw new GuardrailError(`Refused: ${m} ${label}: unresolvable path.`, 'mutation-token');
+    }
+    if (!resolved.startsWith('/rest/')) {
+      throw new GuardrailError(`Refused: ${m} ${label} resolves outside /rest.`, 'mutation-token');
+    }
+    const r = classifyRequest(m, resolved.slice('/rest'.length));
+    if (r.kind === 'tier-c') {
+      throw new GuardrailError(`Refused: ${m} ${label} is Tier C (signing/trust/certificates) and is permanently excluded from this MCP.`, 'tier-c');
+    }
   }
 
   private checkMode(opName: string): MutationCheckResult {

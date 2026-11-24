@@ -79,6 +79,7 @@ export class GuardrailError extends Error {
       | 'unregistered'
       | 'conflict'
       | 'audit-write'
+      | 'read-failed'
       | 'mutation-token'
       | 'tier-c',
   ) {

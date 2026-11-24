@@ -139,8 +139,8 @@ async function main(): Promise<void> {
     const t = toPathTemplate(`https://${FAKE_HOST}/api/v1/files/upload/${GUID}/chunk?x-chunk-index=3`);
     assert(t.pathTemplate === '/api/v1/files/upload/{guid}/chunk' && JSON.stringify(t.queryKeys) === '["x-chunk-index"]', JSON.stringify(t));
     assert(toPathTemplate('/api/v1/lock/set').pathTemplate === '/api/v1/lock/set', 'static path unchanged');
-    assert(toPathTemplate('/api/v1/a/12345').pathTemplate === '/api/v1/a/{int}', 'integer');
-    assert(toPathTemplate(`/api/v1/x/${FAKE_MAIL}`).pathTemplate === '/api/v1/x/{x}', 'e-mail segment');
+    assert(toPathTemplate('/api/v1/images/12345').pathTemplate === '/api/v1/images/{int}', 'integer');
+    assert(toPathTemplate(`/api/v1/images/${FAKE_MAIL}`).pathTemplate === '/api/v1/images/{x}', 'e-mail segment');
   });
   await test('CLI: scripts/scrub-fixture.ts writes only the scrubbed contract', () => {
     const dir = mkdtempSync(join(tmpdir(), 'scrub-cli-'));

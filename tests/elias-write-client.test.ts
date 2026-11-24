@@ -15,7 +15,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { ScoutClient, resolveCallTimeout, readResponseBody, MAX_CALL_TIMEOUT_MS } from '../src/client.js';
 import { GuardrailError, resetCircuitBreaker, isCircuitBreakerTripped } from '../src/safety/guardrails.js';
-import { mintMutationToken, MutationToken, isMutationToken } from '../src/elias/token.js';
+import { mintMutationToken, isMutationToken, bodyHashOf, type MutationToken } from '../src/elias/token.js';
 import { BodyDenied } from '../src/elias/optable.js';
 
 let passed = 0;
@@ -103,14 +103,16 @@ const isGate = (e: unknown, gateName: string): boolean => e instanceof Guardrail
 
 const IMPORT = '/api/v1/containers/import';
 const CID = '11111111-2222-3333-4444-555555555555';
-const binding = (over: Partial<{ opId: string; opName: string; method: string; pathTemplate: string }> = {}) => ({
+const binding = (over: Partial<{ opId: string; opName: string; method: string; pathTemplate: string; concretePath: string; bodySha256: string }> = {}, body: unknown = { name: 'x' }) => ({
   opId: 'op-1',
   opName: 'elias_container_create',
   method: 'POST',
   pathTemplate: IMPORT,
+  concretePath: over.pathTemplate ?? IMPORT,
+  bodySha256: bodyHashOf(body),
   ...over,
 });
-const mint = (over = {}, ttl?: number): MutationToken => mintMutationToken({ proceed: true }, binding(over), ttl);
+const mint = (over = {}, ttl?: number, body: unknown = { name: 'x' }): MutationToken => mintMutationToken({ proceed: true }, binding(over, body), ttl);
 
 async function main(): Promise<void> {
   const { server, baseUrl } = await startServer();
@@ -227,7 +229,7 @@ async function main(): Promise<void> {
     setMode('write');
     reply = () => ({ status: 201, body: `{"id":"${CID}"}` });
     const c = client();
-    const t = mint();
+    const t = mint({}, undefined, { name: 'MCPTEST-20261124-abcdef01' });
     let status = 0;
     const out = await c.rawRequest<{ id: string }>('POST', IMPORT, { name: 'MCPTEST-20261124-abcdef01' }, { mutationToken: t, expect: 'any', onResponse: (m) => (status = m.status) });
     assert(out.id === CID && status === 201, 'sent, status reported');

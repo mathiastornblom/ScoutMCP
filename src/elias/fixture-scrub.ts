@@ -12,7 +12,7 @@
  */
 
 import { canonicalJson, sha256Hex } from './sanitize.js';
-import { isTierCPath } from './optable.js';
+import { OPS, isTierCPath } from './optable.js';
 
 export interface CapturedExchange {
   method: string;
@@ -69,7 +69,13 @@ export function scanForSecrets(text: string, opts: { strict?: boolean } = {}): s
 // ── Shape extraction ──────────────────────────────────────────────────────────
 
 /** Key names that look like credential material are omitted from shapes (never even listed). */
-const OMIT_KEY = /pass|secret|token|cookie|auth|cred|key|cert|pem|sign|pfx|p12|session|jwt/i;
+const OMIT_KEY = /passw|passphrase|secret|token|cookie|credential|apikey|privatekey|keystore|authoriz|bearer|cert|pem|pfx|p12|signature|signing|session|jwt/i;
+/** camelCase / separator word match for short credential words (`key`, `sign`, `auth`) so `author` or `design` survive. */
+function omitKey(k: string): boolean {
+  if (OMIT_KEY.test(k)) return true;
+  const w = k.replace(/([a-z0-9])([A-Z])/g, '$1 $2').split(/[^A-Za-z0-9]+/).filter(Boolean).map((x) => x.toLowerCase());
+  return w.some((x) => ['key', 'keys', 'sign', 'signed', 'auth', 'pwd', 'pw'].includes(x));
+}
 
 function shapeOf(v: unknown, counter: { omitted: number }, depth = 0): unknown {
   if (depth > 8) return 'object';
@@ -85,7 +91,7 @@ function shapeOf(v: unknown, counter: { omitted: number }, depth = 0): unknown {
     case 'object': {
       const out: Record<string, unknown> = {};
       for (const k of Object.keys(v as Record<string, unknown>).sort()) {
-        if (OMIT_KEY.test(k) || k.length > 64) {
+        if (omitKey(k) || k.length > 64) {
           counter.omitted += 1;
           continue;
         }
@@ -97,6 +103,12 @@ function shapeOf(v: unknown, counter: { omitted: number }, depth = 0): unknown {
       return 'unknown';
   }
 }
+
+const EXTRA_WORDS = ['api', 'v1', 'getAll', 'capabilities', 'rules', 'packages', 'versions', 'dependencies', 'rights', 'status', 'files', 'containers', 'images', 'epms'];
+/** lower-case word -> canonical spelling, from the static segments of every op template. */
+const PATH_VOCABULARY: Map<string, string> = new Map(
+  [...OPS.flatMap((o) => o.template.split('/').filter((x) => x && !x.startsWith('{'))), ...EXTRA_WORDS].map((w) => [w.toLowerCase(), w] as [string, string]),
+);
 
 const GUID_SEG = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/;
 
@@ -120,10 +132,10 @@ export function toPathTemplate(url: string): { pathTemplate: string; queryKeys: 
       }
       if (GUID_SEG.test(d)) return '{guid}';
       if (/^\d+$/.test(d)) return '{int}';
-      if (/^v\d{1,2}$/.test(d) || /^[a-z][A-Za-z]{0,40}$/.test(d) || /^[a-z]+(?:-[a-z]+){1,4}$/.test(d)) return d;
-      return '{x}';
+      // Only words from the op-table vocabulary survive: real container/image/file names never do.
+      return PATH_VOCABULARY.get(d.toLowerCase()) ?? '{x}';
     });
-  return { pathTemplate: `/${segs.join('/')}`, queryKeys: [...new Set([...u.searchParams.keys()])].filter((k) => !OMIT_KEY.test(k)).sort() };
+  return { pathTemplate: `/${segs.join('/')}`, queryKeys: [...new Set([...u.searchParams.keys()])].filter((k) => !omitKey(k)).sort() };
 }
 
 function parseMaybeJson(v: unknown): unknown {
@@ -142,9 +154,9 @@ export function exchangesFromCapture(input: unknown): CapturedExchange[] {
   const entries = (input as { log?: { entries?: unknown[] } } | null)?.log?.entries;
   if (Array.isArray(entries)) {
     const out: CapturedExchange[] = [];
-    for (const e of entries as Array<Record<string, any>>) {
-      const req = e?.request;
-      const res = e?.response;
+    for (const e of entries as Array<Record<string, unknown>>) {
+      const req = e?.request as { method?: unknown; url?: unknown; postData?: { text?: unknown } } | undefined;
+      const res = e?.response as { status?: unknown; content?: { encoding?: unknown; text?: unknown } } | undefined;
       if (!req || !res || typeof req.method !== 'string' || typeof req.url !== 'string') continue;
       out.push({
         method: req.method,
@@ -173,7 +185,13 @@ export function scrubCapture(input: unknown): ScrubResult {
       continue;
     }
     const { pathTemplate, queryKeys } = toPathTemplate(ex.url);
-    if (AUTH_PATH.test(pathTemplate)) {
+    let rawPath = ex.url;
+    try {
+      rawPath = new URL(ex.url, 'https://placeholder.invalid').pathname;
+    } catch {
+      /* keep url */
+    }
+    if (AUTH_PATH.test(rawPath)) {
       skipped.auth += 1;
       continue;
     }

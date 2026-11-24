@@ -23,6 +23,8 @@ export interface EliasAuditRow {
   opName: string;
   opId: string;
   phase: AuditPhase;
+  /** Writer process id (set automatically); lets recovery leave another live process's in-flight intents alone. */
+  pid?: number;
   tier: 'A0' | 'A' | 'B';
   /** Container id or `new:<validated name>`; server names pass through safeDisplay first. */
   target: string;
@@ -82,6 +84,12 @@ export function __setAuditFsForTests(impl?: Partial<AuditFs>): void {
   fsImpl = impl ? { ...realFs, ...impl } : realFs;
 }
 
+/** Short error code (EACCES, ENOSPC, ...) or UNKNOWN; never the message (it contains local paths). */
+function fsErrorCode(err: unknown): string {
+  const c = (err as { code?: unknown } | null)?.code;
+  return typeof c === 'string' && /^[A-Z0-9_]{2,24}$/.test(c) ? c : 'UNKNOWN';
+}
+
 function actor(): string {
   return process.env.SCOUT_AUDIT_ACTOR || 'unknown';
 }
@@ -95,7 +103,8 @@ function appendRow(row: EliasAuditRow | Record<string, unknown>): void {
   const path = getAuditLogPath();
   const dir = dirname(path);
   if (dir && dir !== '.' && !fsImpl.existsSync(dir)) fsImpl.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const line = JSON.stringify({ timestamp: new Date().toISOString(), actor: actor(), ...row }) + '\n';
+  const line = JSON.stringify({ timestamp: new Date().toISOString(), actor: actor(), pid: process.pid, ...row }) + '\n';
+  const existed = fsImpl.existsSync(path);
   const fd = fsImpl.openSync(path, 'a', 0o600);
   try {
     try {
@@ -103,10 +112,37 @@ function appendRow(row: EliasAuditRow | Record<string, unknown>): void {
     } catch {
       /* best effort: some filesystems refuse chmod */
     }
-    fsImpl.writeSync(fd, line);
+    // writeSync may write fewer bytes than asked: loop until the whole row is out (F7).
+    const total = Buffer.byteLength(line);
+    let written = fsImpl.writeSync(fd, line);
+    if (typeof written !== 'number') written = total;
+    if (written < total) {
+      const rest = Buffer.from(line).subarray(written);
+      let off = 0;
+      while (off < rest.length) {
+        const n = fsImpl.writeSync(fd, rest, off, rest.length - off);
+        if (n <= 0) throw new Error('short write');
+        off += n;
+      }
+    }
     fsImpl.fsyncSync(fd);
   } finally {
     fsImpl.closeSync(fd);
+  }
+  if (!existed && dir) syncDirectory(dir);
+}
+
+/** Best effort: make the new directory entry durable after the file was created (F7). */
+function syncDirectory(dir: string): void {
+  try {
+    const dfd = fsImpl.openSync(dir, 'r');
+    try {
+      fsImpl.fsyncSync(dfd);
+    } finally {
+      fsImpl.closeSync(dfd);
+    }
+  } catch {
+    /* some platforms refuse fsync on a directory */
   }
 }
 
@@ -115,7 +151,8 @@ export function appendIntentRow(row: EliasAuditRow): void {
   try {
     appendRow(row);
   } catch (err) {
-    throw new EliasAuditError(`audit intent row could not be written (${err instanceof Error ? err.message.split('\n')[0].slice(0, 120) : 'error'}); the mutation is blocked`);
+    // Fixed text plus an error CODE only: fs messages carry absolute local paths (C7).
+    throw new EliasAuditError(`audit intent row could not be written (error code ${fsErrorCode(err)}); the mutation is blocked`);
   }
 }
 
@@ -125,7 +162,7 @@ export function appendAuditRow(row: EliasAuditRow): boolean {
     appendRow(row);
     return true;
   } catch (err) {
-    process.stderr.write(`[scout-mcp/elias-audit] failed to write audit row: ${err instanceof Error ? err.message.split('\n')[0] : 'error'}\n`);
+    process.stderr.write(`[scout-mcp/elias-audit] failed to write audit row (error code ${fsErrorCode(err)})\n`);
     return false;
   }
 }
@@ -155,14 +192,14 @@ export function readAuditRows(path = getAuditLogPath()): Array<Record<string, un
 }
 
 /** opIds with an intent row but no result / recovered row. */
-export function findUnresolvedIntents(rows: Array<Record<string, unknown>>): Array<{ opId: string; opName: string; timestamp: string }> {
-  const intents = new Map<string, { opId: string; opName: string; timestamp: string }>();
+export function findUnresolvedIntents(rows: Array<Record<string, unknown>>): Array<{ opId: string; opName: string; timestamp: string; pid?: number }> {
+  const intents = new Map<string, { opId: string; opName: string; timestamp: string; pid?: number }>();
   const resolved = new Set<string>();
   for (const r of rows) {
     const opId = typeof r.opId === 'string' ? r.opId : undefined;
     if (!opId) continue;
     if (r.phase === 'intent') {
-      intents.set(opId, { opId, opName: String(r.opName ?? ''), timestamp: String(r.timestamp ?? '') });
+      intents.set(opId, { opId, opName: String(r.opName ?? ''), timestamp: String(r.timestamp ?? ''), pid: typeof r.pid === 'number' ? r.pid : undefined });
     } else if (r.phase === 'result' || r.phase === 'recovered-unknown') {
       resolved.add(opId);
     }
@@ -170,11 +207,32 @@ export function findUnresolvedIntents(rows: Array<Record<string, unknown>>): Arr
   return [...intents.values()].filter((i) => !resolved.has(i.opId));
 }
 
+/** An intent is left alone when it belongs to ANOTHER live process and is recent (that op may still finish). */
+const RECENT_FOREIGN_MS = 15 * 60_000;
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as { code?: string } | null)?.code === 'EPERM';
+  }
+}
+
+export interface RecoverOptions {
+  now?: number;
+  isAlive?: (pid: number) => boolean;
+}
+
 /** Startup recovery: one `recovered-unknown` row per unresolved intent. Returns the opIds recovered. */
-export function recoverUnknownIntents(): string[] {
+export function recoverUnknownIntents(opts: RecoverOptions = {}): string[] {
+  const now = opts.now ?? Date.now();
+  const alive = opts.isAlive ?? processAlive;
   const unresolved = findUnresolvedIntents(readAuditRows());
   const done: string[] = [];
   for (const u of unresolved) {
+    const age = now - Date.parse(u.timestamp);
+    if (u.pid !== undefined && u.pid !== process.pid && Number.isFinite(age) && age < RECENT_FOREIGN_MS && alive(u.pid)) continue;
     const ok = appendAuditRow({
       opName: u.opName,
       opId: u.opId,
