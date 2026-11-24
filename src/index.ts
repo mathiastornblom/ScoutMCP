@@ -182,7 +182,7 @@ const tools: McpTool[] = [
 const toolMap = new Map(tools.map((t) => [t.name, t]));
 
 const server = new Server(
-  { name: 'scout-mcp-server', version: '1.5.2' },
+  { name: 'scout-mcp-server', version: '1.6.0' },
   { capabilities: { tools: {}, resources: {}, prompts: {} } },
 );
 
