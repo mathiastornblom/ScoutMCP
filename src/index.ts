@@ -18,6 +18,7 @@ import { setProgressReporter, clearProgressReporter, createProgressReporter } fr
 import type { ToolContext, McpTool } from './types.js';
 import { loadSavedConfig, setSessionConfig, clearSessionConfig, resolveConfig } from './session.js';
 import { getClient } from './client.js';
+import { eliasTools } from './tools/elias.js';
 import { configureTool } from './tools/configure.js';
 import { contextTool } from './tools/context.js';
 import { healthCheckTool } from './tools/health.js';
@@ -157,6 +158,7 @@ const tools: McpTool[] = [
         adminManageTool,
         serverInstancesTool,
         dbCleanupTool,
+        ...eliasTools, // read-only ELIAS (Scout 2611+)
       ]
     : []),
 ];
@@ -171,10 +173,11 @@ const server = new Server(
 registerPrompts(server);
 
 server.setRequestHandler(ListToolsRequestSchema, () => ({
-  tools: tools.map(({ name, description, inputSchema }) => ({
+  tools: tools.map(({ name, description, inputSchema, annotations }) => ({
     name,
     description,
     inputSchema,
+    ...(annotations ? { annotations } : {}),
   })),
 }));
 
