@@ -41,9 +41,33 @@ async function execute(raw: unknown): Promise<McpToolResult> {
 
   try {
     const data = await client.request<HealthCheckResponse>('GET', `/api/v1/healthcheck${qs}`);
+    if (process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS === 'true') {
+      return ok({ ...data, systemcheckElias: await fetchEliasSystemcheck() });
+    }
     return ok(data);
   } catch (err) {
     return fail(`Health check failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+export interface EliasSystemcheck {
+  state: string;
+  error?: string;
+}
+
+/**
+ * PRIVATE endpoint GET /api/v1/systemcheck/elias (not in openapi.json); caller gates on
+ * SCOUT_ENABLE_PRIVATE_ENDPOINTS=true. Never throws: any failure or unexpected shape is
+ * reported as state 'unknown' so it cannot fail the surrounding health_check.
+ */
+export async function fetchEliasSystemcheck(): Promise<EliasSystemcheck> {
+  try {
+    const res = await getClient().rawRequest<unknown>('GET', '/api/v1/systemcheck/elias');
+    const state = res !== null && typeof res === 'object' ? (res as Record<string, unknown>)['state'] : undefined;
+    if (typeof state !== 'string') return { state: 'unknown', error: 'unexpected response shape' };
+    return { state };
+  } catch (err) {
+    return { state: 'unknown', error: err instanceof Error ? err.message : String(err) };
   }
 }
 

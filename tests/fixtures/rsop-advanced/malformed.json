@@ -1,0 +1,28 @@
+{
+  "description": "Fail closed: wrong envelope, a bad entry, and a zero-width-char key all produce warnings and complete=false",
+  "layers": [
+    { "level": "base", "response": { "unexpected": "html error page" } },
+    {
+      "level": "/Enterprise",
+      "response": { "message": "OK", "status": { "result": 0 }, "response": [
+        { "EntryId": 1, "File": "/setup/terminal.ini", "Section": "Browser", "Key": "SuppressPrompts", "Value": "true" },
+        { "EntryId": "two", "File": "/setup/x.ini", "Section": "S", "Key": "K", "Value": "v" },
+        { "EntryId": 3, "File": "/setup/terminal.ini", "Section": "Browser", "Key": "Zero​Width", "Value": "1" }
+      ] }
+    },
+    { "level": "/Enterprise/Berlin", "response": null }
+  ],
+  "expected": {
+    "entries": [
+      { "file": "/setup/terminal.ini", "section": "Browser", "key": "SuppressPrompts", "effectiveValue": "true", "setAt": "/Enterprise", "isOverride": false, "entryId": 1 },
+      { "file": "/setup/terminal.ini", "section": "Browser", "key": "ZeroWidth", "effectiveValue": "1", "setAt": "/Enterprise", "isOverride": false, "entryId": 3 }
+    ],
+    "warnings": [
+      "advanced file entries for \"base\": unexpected response shape (no \"response\" array); layer ignored",
+      "advanced file entries for \"/Enterprise\": entry #1 malformed (needs string File/Section/Key/Value); skipped",
+      "advanced file entries for \"/Enterprise\": key \"ZeroWidth\" contained zero-width characters (stripped)",
+      "advanced file entries for \"/Enterprise/Berlin\": unexpected response shape (no \"response\" array); layer ignored"
+    ],
+    "complete": false
+  }
+}

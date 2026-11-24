@@ -19,6 +19,10 @@ import {
   type ConfigLayerRef,
   type ConfigLayerValues,
   type ResolvedConfigKey,
+  type AdvancedLayerRef,
+  type ResolvedAdvancedResult,
+  parseAdvancedFileEntries,
+  foldAdvancedLayers,
 } from '../rsop.js';
 
 /**
@@ -86,12 +90,9 @@ export interface ResolveTargetRef {
  * Builds the ordered ConfigLayerRef[] for one schema section against a resolved target,
  * per §2.1's precedence order: base → OU chain root→target → device override.
  *
- * Advanced file entries (step 5 of §2.1) and label/rule dynamic config (step 7, phase two)
- * are intentionally not fetched here — there is no generic Scout endpoint enumerating
- * "advanced file entries that apply to this section" independent of the section's own
- * config_get response, so step 5 is represented as a no-op fold (advanced entries that
- * surface through config_get are already captured by the OU/device layers above); this is
- * a known simplification, see the gaps list in the final report.
+ * Advanced file entries (step 5 of §2.1) are INI file/section/key entries in a separate
+ * namespace and are resolved by resolveAdvancedFileEntries() below, not here. Label/rule
+ * dynamic config (step 7, phase two) is not fetched.
  */
 export async function buildLayersForSection(
   apiSection: string,
@@ -114,6 +115,47 @@ export async function buildLayersForSection(
   }
 
   return layers;
+}
+
+/**
+ * Layer 5 of the RSoP chain: advanced file entries, from the PUBLIC
+ * GET /api/v1/config/advanced/{base|ou|device}/fileEntries endpoints, folded base → OU
+ * chain root→target → device. Fails closed: a layer whose request errors or whose body is
+ * malformed is reported in `warnings` (complete=false), never silently treated as empty.
+ */
+export async function resolveAdvancedFileEntries(resolved: ResolveTargetRef): Promise<ResolvedAdvancedResult> {
+  const client = getClient();
+  const warnings: string[] = [];
+  const layers: AdvancedLayerRef[] = [];
+
+  async function load(level: string, path: string): Promise<void> {
+    let raw: unknown;
+    try {
+      raw = await client.request<unknown>('GET', path);
+    } catch (err) {
+      warnings.push(
+        `advanced file entries for "${level}": request failed (${err instanceof Error ? err.message : String(err)}); layer unavailable`,
+      );
+      return;
+    }
+    const parsed = parseAdvancedFileEntries(level, raw);
+    warnings.push(...parsed.warnings);
+    layers.push(parsed.layer);
+  }
+
+  try {
+    await load('base', '/api/v1/config/advanced/base/fileEntries');
+    const chain = await getOuChain(resolved.ouId);
+    for (const ou of chain) {
+      await load(ou.path, `/api/v1/config/advanced/ou/fileEntries${buildQuery({ path: ou.path, id: ou.ouid })}`);
+    }
+    if (resolved.target === 'device' && resolved.device) {
+      await load('device', `/api/v1/config/advanced/device/fileEntries${buildQuery({ ...resolved.device })}`);
+    }
+  } catch (err) {
+    warnings.push(`advanced file entries: could not enumerate layers (${err instanceof Error ? err.message : String(err)})`);
+  }
+  return foldAdvancedLayers(layers, warnings);
 }
 
 /** Resolves effective config for every API-mappable section in the schema (or one section). */
@@ -199,6 +241,7 @@ async function configResolveExecute(raw: unknown): Promise<McpToolResult> {
   try {
     const resolved = await resolveTargetRef(input.target, input.ref);
     const rows = await resolveEffectiveConfig(resolved, input.section);
+    const advanced = await resolveAdvancedFileEntries(resolved);
 
     if (input.render === 'table') {
       return ok({
@@ -206,6 +249,7 @@ async function configResolveExecute(raw: unknown): Promise<McpToolResult> {
         ref: input.ref,
         resolvedOuPath: resolved.ouPath,
         table: renderResolvedTable(rows),
+        advancedFileEntries: advanced,
       });
     }
 
@@ -216,6 +260,7 @@ async function configResolveExecute(raw: unknown): Promise<McpToolResult> {
       section: input.section ?? 'all',
       keyCount: rows.length,
       keys: rows,
+      advancedFileEntries: advanced,
     });
   } catch (err) {
     return fail(`config_resolve failed: ${err instanceof Error ? err.message : String(err)}`);
