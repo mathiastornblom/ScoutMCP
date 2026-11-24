@@ -15,8 +15,8 @@ a minimum release. Status values:
 
 | Capability id | Min Scout | Status | 2605 | 2609 | 2611 | Notes |
 |---------------|-----------|--------|------|------|------|-------|
-| `elias` | 2611 | har-only | ? | ? | expected | Private `/api/v1/systemcheck/elias` and friends; 15 read-only `elias_*` tools. README: "built into Scout Board 2611". The HAR host exposes it, but its own Scout version was not captured. |
-| `ourights-preflight` | - | har-only | ? | ? | ? | `GET /api/v1/ourights?ouId=` seen in the HAR. No source gives the release that introduced it. UX aid only; the preflight proceeds when the endpoint is missing or errors. |
+| `elias` | 2611 | har-only | ? | ? | expected | Private `/api/v1/systemcheck/elias` and friends; 16 read-only `elias_*` tools. README: "built into Scout Board 2611". The HAR host exposes it, but its own Scout version was not captured. |
+| `ourights-preflight` | - | har-only | ? | ? | ? | `GET /api/v1/ourights?ouId=` seen in the HAR. No source gives the release that introduced it. The probe omits `ouId`; the server answers 404 `OuId not found` (no 400 path), which counts as available, while a plain route-404 means unavailable. UX aid only; the preflight proceeds when the endpoint is missing or errors. |
 | `advanced-file-entries` | - | untested | ? | ? | ? | Public `/config/advanced/*/fileEntries` are in `openapi.json`; never exercised live. Only `config_resolve` consumes them. |
 | `ou-filter-and-or` | 2605 | verified-live | yes | ? | ? | README: AND/OR, bracket grouping and prefix matching "confirmed working against Scout 2605". Earlier releases not tested. |
 | `ccauth-login` | - | untested | ? | ? | ? | Citrix Cloud service-principal login; config-driven (`SCOUT_CC_*` variables), not probeable. Server-side support release unknown. |
@@ -43,7 +43,10 @@ and a `capabilities` map. Sources, in order, all best-effort:
 
 | Source | Used as server version? | Confidence |
 |--------|-------------------------|------------|
-| `GET /api/v1/ui/instances` (private) - `version`/`scoutVersion` on the body, `response`, or each array item (also under `scoutServer`) | yes, if present | low (shape not verified in any capture) |
+| `GET /api/v1/ui/instances` (private) - `Version` on rows with `InstanceType` 1 (Server), 6 (DBLayer) or 8 (Scout Board) | yes | medium (documented in the Scout Board source review; not yet seen live) |
+| `GET /rest/api/v1/healthcheck?scoutServer` - `response.scoutServer.scoutServer[].Version`, e.g. `15.2611` | yes | medium (documented; public healthcheck returns HTTP 200 even on errors, which are in the body) |
+| `GET /rest/api/v1/healthcheck?scoutDatabase` - `response.scoutDatabase.version` | yes | medium (documented; format unverified, `26.11.0` plausible) |
+| Generic `version`/`scoutVersion` scan of the same bodies (fallback) | yes, if present | low |
 | `GET /api/v1/healthcheck?scoutServer=true` - `scoutServer.version`/`scoutVersion` (optionally under `response`) | yes, if present | low (OpenAPI example shows none) |
 | Capability inference: working ELIAS probe | as lower bound `>=2611` | low |
 | `openapi.json` `info.version` (`25.11.0`) | no - spec snapshot only, reported as `specVersion` | n/a |

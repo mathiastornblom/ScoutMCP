@@ -19,7 +19,7 @@
 
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { getClient, ScoutError } from '../client.js';
+import { getClient, ScoutError, PRIVATE_401_HINT } from '../client.js';
 import { requireCapability } from '../compat/detect.js';
 import { ok, fail, type McpTool, type McpToolResult } from '../types.js';
 
@@ -148,16 +148,17 @@ function describeError(err: unknown, right = 'view (415)'): string {
     return `invalid input: ${err.issues.map((i) => `${i.path.join('.') || 'value'} ${i.message}`).join('; ')}`;
   }
   if (err instanceof ScoutError) {
-    if (err.statusCode === 401) return 'authentication failed (HTTP 401) — check credentials / token';
+    if (err.statusCode === 401) return `authentication failed (HTTP 401) — check credentials / token. ${PRIVATE_401_HINT}`;
     if (err.statusCode === 403) {
       if (err.msgId === 'grantKeyChanged') {
         return 'forbidden (HTTP 403, grantKeyChanged) — the per-container grant was issued under an old key; retried once without success. Re-establish the Scout session and try again.';
       }
       if (/no per-container grant/i.test(err.message)) {
         return (
-          'forbidden (HTTP 403) — the request carries no per-container grant. Container-scoped ELIAS calls need a grant ' +
-          'that only the Scout Board UI proxy issues; it may not be issued for this authentication method, so cookie / ' +
-          'UI-session authentication may be required. This tool does not and cannot create the grant.'
+          'forbidden (HTTP 403) — the request carries no per-container grant. This usually means the container id ' +
+          'spelling is wrong (it must be the UPPER CASE GUID exactly as elias_container_list shows it), the grant is ' +
+          'stale (retry), or the right is genuinely denied (see elias_rights). The grant is minted by the Scout Board ' +
+          'proxy; this tool cannot and does not mint it.'
         );
       }
       return `forbidden (HTTP 403) — right denied: the Scout user likely lacks the ELIAS "${right}" right for this container (see elias_rights)`;
@@ -494,7 +495,7 @@ export const eliasUploadStatusTool: McpTool = {
     const { uploadId } = uploadStatusSchema.parse(raw);
     const data = await get<Rec>('elias_upload_status', `/api/v1/files/upload/${seg(EliasGuid, uploadId)}/status`);
     return { chunkCount: Array.isArray(data.chunks) ? data.chunks.length : undefined, parse: data.parse };
-  }),
+  }, 'upload (416)'),
 };
 
 // ── Generic read tools (response schemas unknown: redact, cap, paginate) ──────
@@ -592,6 +593,30 @@ export const eliasImageGetTool: McpTool = {
   }),
 };
 
+// ── elias_my_roles (a read behind a POST) ──────────────────────────────────────
+
+const myRolesSchema = z.object({
+  containerIds: z.array(EliasGuid).min(1).max(100).describe('Container ids (GUIDs); upper-cased before sending'),
+});
+
+export const eliasMyRolesTool: McpTool = {
+  name: 'elias_my_roles',
+  description:
+    TOOL_TAG +
+    "Show the current user's per-container ELIAS roles (POST /api/v1/elias/my-container-roles, body {containerIds}). " +
+    'A read behind a POST: nothing is created or changed. Returns {<id>: {view, upload, delete, manageContainers, runSolver, sign}}; ' +
+    'a mis-spelled id answers all-false, so pass ids exactly as elias_container_list shows them.',
+  annotations: READ_ONLY,
+  inputSchema: zodToJsonSchema(myRolesSchema),
+  execute: wrap('elias_my_roles', async (raw) => {
+    const { containerIds } = myRolesSchema.parse(raw);
+    const body = { containerIds: containerIds.map((c) => c.toUpperCase()) };
+    log('elias_my_roles', '/api/v1/elias/my-container-roles (POST, read-only semantics)');
+    // No `mutating` option: this is not a write, so it must not be affected by mode gates.
+    return getClient().rawRequest<unknown>('POST', '/api/v1/elias/my-container-roles', body);
+  }),
+};
+
 export const eliasTools: McpTool[] = [
   eliasHealthTool,
   eliasContainerListTool,
@@ -608,4 +633,5 @@ export const eliasTools: McpTool[] = [
   eliasPackageVersionsTool,
   eliasPackageDependenciesTool,
   eliasImageGetTool,
+  eliasMyRolesTool,
 ];

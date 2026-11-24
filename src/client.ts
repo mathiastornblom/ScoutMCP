@@ -24,6 +24,12 @@ interface ApiError {
   msgId?: string;
 }
 
+/** Appended when a private (non-/rest) call is still 401 after a successful login + the single retry. */
+export const PRIVATE_401_HINT =
+  'Login succeeded but this non-/rest (private) endpoint still answers 401. On Citrix Cloud (CCAUTH) installs ' +
+  'Bearer-only calls outside /rest are refused, and on OIDC installs the oidcToken cookie is also required, so ' +
+  'private/ELIAS tools may not work on this installation.';
+
 export class ScoutError extends Error {
   constructor(
     message: string,
@@ -335,10 +341,11 @@ export class ScoutClient {
 
     if (!res.ok) {
       const apiError = await this.tryParseError(res);
-      const msg =
+      let msg =
         apiError?.message && apiError.message !== 'OK'
           ? apiError.message
           : `Request failed (HTTP ${res.status})`;
+      if (res.status === 401 && isRetry) msg = `${msg}. ${PRIVATE_401_HINT}`;
       throw new ScoutError(
         msg,
         res.status,

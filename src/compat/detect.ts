@@ -3,10 +3,11 @@
  * never blocks a tool: probes are the source of truth, the version table is advisory.
  *
  * VERSION SOURCES (honest status; no live server was available when this was written):
- *  1. GET /api/v1/ui/instances (private; same endpoint as the server_instances tool):
- *     scan for a `version` field. Shape UNVERIFIED (not present in the HAR capture).
- *  2. GET /api/v1/healthcheck?scoutServer=true: scan for a `version` field. Shape UNVERIFIED;
- *     the OpenAPI example shows no version.
+ *  1. GET /api/v1/ui/instances (private): rows with InstanceType 1/6/8 and `Version` (documented
+ *     in the SBD-UI source review, confidence 'medium'); otherwise a generic `version` scan ('low').
+ *  2. GET /api/v1/healthcheck?scoutServer=true: response.scoutServer.scoutServer[].Version, e.g.
+ *     '15.2611' ('medium'); then ?scoutDatabase=true: response.scoutDatabase.version ('medium').
+ *     The public healthcheck returns HTTP 200 even on errors (errors are in the body).
  *  3. Capability inference: a working ELIAS probe proves Scout >= 2611 (lower bound only).
  *  NOT used as server version:
  *   - openapi.json info.version ("25.11.0" = spec snapshot, shipped with the repo, not the
@@ -68,14 +69,19 @@ export interface CapabilityResult {
   reason?: string;
 }
 
-export type VersionSource = 'server_instances' | 'healthcheck' | 'capability-inference' | 'none';
+export type VersionSource =
+  | 'server_instances'
+  | 'healthcheck'
+  | 'healthcheck_database'
+  | 'capability-inference'
+  | 'none';
 
 export interface VersionInfo {
   /** Raw version string as reported (or '>=2611' for inference), null if unknown. */
   version: string | null;
   yymm: number | null;
   source: VersionSource;
-  confidence: 'low' | 'none';
+  confidence: 'low' | 'medium' | 'none';
   /** openapi.json info.version of the shipped spec - informational, NOT the server version. */
   specVersion: string | null;
 }
@@ -83,7 +89,7 @@ export interface VersionInfo {
 export interface CompatReport {
   scoutVersion: string | null;
   versionSource: VersionSource;
-  versionConfidence: 'low' | 'none';
+  versionConfidence: 'low' | 'medium' | 'none';
   specVersion: string | null;
   capabilities: Record<string, CapabilityResult>;
   /** Cases where the version table and a probe disagree (the probe wins). */
@@ -119,7 +125,13 @@ export function interpretProbe(
   if (err instanceof SyntaxError) return { state: 'available', reason: 'HTTP 200 with non-JSON body' };
   if (err instanceof ScoutError && err.statusCode !== undefined) {
     const sc = err.statusCode;
-    if (sc === 404) return { state: 'unavailable', reason: 'HTTP 404' };
+    if (sc === 404) {
+      const marker = cap.probe?.notFoundMessageMeansAvailable;
+      if (marker && err.message.toLowerCase().includes(marker.toLowerCase())) {
+        return { state: 'available', reason: `HTTP 404 "${marker}" (route exists, entity not found)` };
+      }
+      return { state: 'unavailable', reason: 'HTTP 404' };
+    }
     if (sc === 401 || sc === 403) return { state: 'unknown', reason: `forbidden/unknown (HTTP ${sc})` };
     if (sc === 400 && cap.probe?.badRequestMeansAvailable) {
       return { state: 'available', reason: 'HTTP 400 (route exists, probe omits required parameter)' };
@@ -237,6 +249,35 @@ function readSpecVersion(): string | null {
   }
 }
 
+/** Documented: GET /rest/api/v1/healthcheck?scoutServer -> response.scoutServer.scoutServer[].Version ('15.2611'). */
+export function findDocumentedServerVersion(v: unknown): string | null {
+  const arr = getKey(getKey(getKey(v, 'response'), 'scoutServer'), 'scoutServer');
+  if (!Array.isArray(arr)) return null;
+  for (const row of arr.slice(0, 50)) {
+    const s = sanitizeVersion(getKey(row, 'Version'));
+    if (s !== null && parseScoutVersion(s) !== null) return s;
+  }
+  return null;
+}
+
+/** Documented: GET /rest/api/v1/healthcheck?scoutDatabase -> response.scoutDatabase.version. */
+export function findDocumentedDatabaseVersion(v: unknown): string | null {
+  const s = sanitizeVersion(getKey(getKey(getKey(v, 'response'), 'scoutDatabase'), 'version'));
+  return s !== null && parseScoutVersion(s) !== null ? s : null;
+}
+
+/** Documented: GET /api/v1/ui/instances rows, InstanceType 1 (Server), 6 (DBLayer), 8 (Scout Board), field Version. */
+export function findDocumentedInstanceVersion(v: unknown): string | null {
+  if (!Array.isArray(v)) return null;
+  for (const row of v.slice(0, 200)) {
+    const t = Number(getKey(row, 'InstanceType'));
+    if (t !== 1 && t !== 6 && t !== 8) continue;
+    const s = sanitizeVersion(getKey(row, 'Version'));
+    if (s !== null && parseScoutVersion(s) !== null) return s;
+  }
+  return null;
+}
+
 /** Best-effort server version. Never throws. */
 export async function detectScoutVersion(
   client: ProbeClient,
@@ -245,17 +286,19 @@ export async function detectScoutVersion(
   const privateEnabled = opts.privateEnabled ?? process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS === 'true';
   const timeoutMs = opts.timeoutMs ?? PROBE_TIMEOUT_MS;
   const specVersion = readSpecVersion();
-  const found = (version: string, source: VersionSource): VersionInfo => ({
+  const found = (version: string, source: VersionSource, confidence: 'low' | 'medium' = 'low'): VersionInfo => ({
     version,
     yymm: parseScoutVersion(version),
     source,
-    confidence: 'low',
+    confidence,
     specVersion,
   });
 
   if (privateEnabled) {
     try {
       const data = await withTimeout(client.rawRequest<unknown>('GET', '/api/v1/ui/instances'), timeoutMs);
+      const doc = findDocumentedInstanceVersion(data);
+      if (doc) return found(doc, 'server_instances', 'medium');
       const v = findVersionField(data);
       if (v) return found(v, 'server_instances');
     } catch {
@@ -267,8 +310,21 @@ export async function detectScoutVersion(
       client.request<unknown>('GET', '/api/v1/healthcheck?scoutServer=true'),
       timeoutMs,
     );
+    const doc = findDocumentedServerVersion(data);
+    if (doc) return found(doc, 'healthcheck', 'medium');
     const v = findVersionField(data);
     if (v) return found(v, 'healthcheck');
+  } catch {
+    /* fall through */
+  }
+  try {
+    // NB: the public healthcheck answers HTTP 200 even on errors (errors are in the body).
+    const data = await withTimeout(
+      client.request<unknown>('GET', '/api/v1/healthcheck?scoutDatabase=true'),
+      timeoutMs,
+    );
+    const doc = findDocumentedDatabaseVersion(data);
+    if (doc) return found(doc, 'healthcheck_database', 'medium');
   } catch {
     /* fall through */
   }

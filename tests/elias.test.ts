@@ -26,6 +26,7 @@ import {
   eliasPackageVersionsTool,
   eliasPackageDependenciesTool,
   eliasImageGetTool,
+  eliasMyRolesTool,
   redactSecrets,
   capOutput,
   MAX_OUTPUT_CHARS,
@@ -55,6 +56,8 @@ const UP = '26cb81fe-b629-4c81-b126-0a5c6cffc535';
 interface Call {
   method: string;
   path: string;
+  body?: unknown;
+  opts?: unknown;
 }
 let calls: Call[] = [];
 let responder: (path: string) => unknown = () => ({});
@@ -64,8 +67,8 @@ process.env.SCOUT_BASE_URL = 'https://scout.invalid';
 process.env.SCOUT_USERNAME = 'test';
 process.env.SCOUT_PASSWORD = 'test';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test stub replaces the private HTTP layer
-(ScoutClient.prototype as any).rawRequest = async (method: string, path: string) => {
-  calls.push({ method, path });
+(ScoutClient.prototype as any).rawRequest = async (method: string, path: string, body?: unknown, opts?: unknown) => {
+  calls.push({ method, path, body, opts });
   return responder(path);
 };
 
@@ -82,13 +85,13 @@ async function main(): Promise<void> {
   process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS = 'true';
 
   await test('all tools are annotated readOnlyHint and GET-only', async () => {
-    assert(eliasTools.length === 15, 'fifteen tools');
+    assert(eliasTools.length === 16, 'sixteen tools');
     for (const t of eliasTools) assert(t.annotations?.readOnlyHint === true, `${t.name} readOnlyHint`);
     responder = () => [];
     for (const t of eliasTools) {
       calls = [];
-      await t.execute({ containerId: CID, uploadId: UP, signing: true, id: 'x.epm' });
-      for (const c of calls) assert(c.method === 'GET', `${t.name} uses GET`);
+      await t.execute({ containerId: CID, uploadId: UP, signing: true, id: 'x.epm', containerIds: [CID] });
+      for (const c of calls) assert(c.method === (t.name === 'elias_my_roles' ? 'POST' : 'GET'), `${t.name} method`);
     }
   });
 
@@ -432,15 +435,6 @@ async function main(): Promise<void> {
     process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS = 'true';
   });
 
-  await test('403 no per-container grant -> explains UI-proxy grant, no workaround', async () => {
-    responder = () => {
-      throw new ScoutError('Insufficient permissions: the request carries no per-container grant', 403);
-    };
-    const t = text(await run(eliasContainerFilesTool, { containerId: CID }));
-    assert(t.includes('UI proxy') && t.includes('cookie') && t.includes('cannot create'), t);
-    assert(!t.includes('right denied'), t);
-  });
-
   await test('403 grantKeyChanged: retried once (GET), success on retry', async () => {
     let n = 0;
     responder = () => {
@@ -482,6 +476,51 @@ async function main(): Promise<void> {
     };
     const r = await run(eliasCertificateGetTool, { containerId: CID, signing: true });
     assert(r.isError === true && !text(r).includes('"none"') && calls.length === 1, text(r));
+  });
+
+  await test('403 no grant message: no cookie/Bearer claim, mentions id spelling + stale + right', async () => {
+    responder = () => {
+      throw new ScoutError('Insufficient permissions: the request carries no per-container grant', 403);
+    };
+    const t = text(await run(eliasContainerFilesTool, { containerId: CID }));
+    assert(t.includes('UPPER CASE') && t.includes('stale') && t.includes('cannot and does not mint'), t);
+    assert(!t.includes('cookie') && !t.includes('UI-session'), t);
+  });
+
+  await test('right named per tool: upload status -> upload (416), others view (415)', async () => {
+    responder = () => {
+      throw new ScoutError('nope', 403);
+    };
+    assert(text(await run(eliasUploadStatusTool, { uploadId: UP })).includes('upload (416)'), 'upload');
+    assert(text(await run(eliasContainerRulesTool, { containerId: CID })).includes('view (415)'), 'rules');
+    assert(text(await run(eliasContainerCapabilitiesTool, {})).includes('view (415)'), 'capabilities');
+  });
+
+  await test('401 carries the CCAUTH/OIDC private-endpoint hint', async () => {
+    responder = () => {
+      throw new ScoutError('x', 401);
+    };
+    const t = text(await run(eliasContainerListTool, {}));
+    assert(t.includes('CCAUTH') && t.includes('oidcToken'), t);
+    assert(calls.length === 1, 'no extra requests');
+  });
+
+  await test('elias_my_roles: POST body is only {containerIds} (upper-cased), not mutating, no extra fields', async () => {
+    const lc = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    responder = () => ({ [lc.toUpperCase()]: { view: true, upload: false } });
+    const r = await run(eliasMyRolesTool, { containerIds: [lc], extra: 'ignored' });
+    assert(calls.length === 1 && calls[0].method === 'POST' && calls[0].path === '/api/v1/elias/my-container-roles', 'call');
+    assert(JSON.stringify(calls[0].body) === JSON.stringify({ containerIds: [lc.toUpperCase()] }), JSON.stringify(calls[0].body));
+    assert(calls[0].opts === undefined, 'mutating flag must not be set');
+    assert(text(r).includes('"view": true'), text(r));
+    for (const bad of [[], ['x'], [`{${lc}}`], Array(101).fill(CID)]) {
+      const e = await run(eliasMyRolesTool, { containerIds: bad });
+      assert(e.isError === true && calls.length === 0, 'invalid ids rejected');
+    }
+    process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS = 'false';
+    const g = await run(eliasMyRolesTool, { containerIds: [CID] });
+    process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS = 'true';
+    assert(g.isError === true && calls.length === 0, 'gated');
   });
 
   console.log(`\n${passed}/${passed + failed} passed`);
