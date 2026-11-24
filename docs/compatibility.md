@@ -46,8 +46,7 @@ and a `capabilities` map. Sources, in order, all best-effort:
 | `GET /api/v1/ui/instances` (private) - `Version` on rows with `InstanceType` 1 (Server), 6 (DBLayer) or 8 (Scout Board) | yes | medium (documented in the Scout Board source review; not yet seen live) |
 | `GET /rest/api/v1/healthcheck?scoutServer` - `response.scoutServer.scoutServer[].Version`, e.g. `15.2611` | yes | medium (documented; public healthcheck returns HTTP 200 even on errors, which are in the body) |
 | `GET /rest/api/v1/healthcheck?scoutDatabase` - `response.scoutDatabase.version` | yes | medium (documented; format unverified, `26.11.0` plausible) |
-| Generic `version`/`scoutVersion` scan of the same bodies (fallback) | yes, if present | low |
-| `GET /api/v1/healthcheck?scoutServer=true` - `scoutServer.version`/`scoutVersion` (optionally under `response`) | yes, if present | low (OpenAPI example shows none) |
+| Generic `version`/`scoutVersion` scan of the same bodies, incl. `/api/v1/healthcheck?scoutServer=true` (fallback) | yes, if present | low |
 | Capability inference: working ELIAS probe | as lower bound `>=2611` | low |
 | `openapi.json` `info.version` (`25.11.0`) | no - spec snapshot only, reported as `specVersion` | n/a |
 

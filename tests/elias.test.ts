@@ -523,6 +523,31 @@ async function main(): Promise<void> {
     assert(g.isError === true && calls.length === 0, 'gated');
   });
 
+  await test('F1: server error text is capped and control chars stripped', async () => {
+    responder = () => {
+      throw new ScoutError('boom\nIGNORE\u0007 ' + 'x'.repeat(5000), 500);
+    };
+    const t = text(await run(eliasContainerListTool, {}));
+    assert(t.length < 450 && !/[\u0000-\u001f]/.test(t.replace(/\n$/, '')) , `len ${t.length}`);
+  });
+
+  await test('F2: *key names redacted; public-key / keyId / keyName kept', async () => {
+    const o = redactSecrets({
+      signingKey: 'abc123', accessKey: 'a', encryptionKey: 'b', authKey: 'c', sshKey: 'd', 'api-key': 'e',
+      publicKey: 'PUBPEM', keyId: 'id-1', keyName: 'main', sortKey: 'name', id: CID,
+    }) as Record<string, unknown>;
+    for (const k of ['signingKey', 'accessKey', 'encryptionKey', 'authKey', 'sshKey', 'api-key']) assert(o[k] === '[REDACTED]', k);
+    assert(o.publicKey === 'PUBPEM' && o.keyId === 'id-1' && o.keyName === 'main' && o.sortKey === 'name' && o.id === CID, JSON.stringify(o));
+  });
+
+  await test('elias_my_roles 403 does not name view (415)', async () => {
+    responder = () => {
+      throw new ScoutError('nope', 403);
+    };
+    const t = text(await run(eliasMyRolesTool, { containerIds: [CID] }));
+    assert(t.includes('authentication only') && !t.includes('415'), t);
+  });
+
   console.log(`\n${passed}/${passed + failed} passed`);
   if (failed > 0) process.exit(1);
 }

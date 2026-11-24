@@ -30,6 +30,13 @@ export const PRIVATE_401_HINT =
   'Bearer-only calls outside /rest are refused, and on OIDC installs the oidcToken cookie is also required, so ' +
   'private/ELIAS tools may not work on this installation.';
 
+/** Server-supplied error text is untrusted: strip control chars/newlines and cap length. */
+export function sanitizeServerText(text: string, max = 300): string {
+  // eslint-disable-next-line no-control-regex
+  const t = text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
 export class ScoutError extends Error {
   constructor(
     message: string,
@@ -343,7 +350,7 @@ export class ScoutClient {
       const apiError = await this.tryParseError(res);
       let msg =
         apiError?.message && apiError.message !== 'OK'
-          ? apiError.message
+          ? sanitizeServerText(String(apiError.message))
           : `Request failed (HTTP ${res.status})`;
       if (res.status === 401 && isRetry) msg = `${msg}. ${PRIVATE_401_HINT}`;
       throw new ScoutError(

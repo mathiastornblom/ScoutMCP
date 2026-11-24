@@ -43,4 +43,4 @@ Read tools report `view (415)` as the likely missing right.
 
 ## Deliberately NOT exposed (pending the write-phase design)
 Signing / sign / signing-upload-key, trust-certificate import and restore, uploads, deletes, and
-solver solve/generate. Only GET endpoints are implemented.
+solver solve/generate. Only read endpoints are implemented: GET, plus the read-only POST `my-container-roles` (`elias_my_roles`).

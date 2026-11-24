@@ -19,7 +19,7 @@
 
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { getClient, ScoutError, PRIVATE_401_HINT } from '../client.js';
+import { getClient, ScoutError, PRIVATE_401_HINT, sanitizeServerText } from '../client.js';
 import { requireCapability } from '../compat/detect.js';
 import { ok, fail, type McpTool, type McpToolResult } from '../types.js';
 
@@ -80,13 +80,17 @@ const PKCS12_WORD_RE = /\bPKCS\s*#?\s*12\b/i;
 /** Long base64 (with optional line breaks) = a key/keystore blob when it sits in a key-ish field. */
 const BASE64_BLOB_RE = /^[A-Za-z0-9+/=\s_-]{128,}$/;
 
+/** Names ending in 'key' that are NOT secrets (public keys, sort/primary/foreign keys ...). */
+const NON_SECRET_KEY_SUFFIX = /(?:public|sort|hot|primary|foreign|group|order|cache|lookup)key$/;
+
 function normKey(k: string): string {
   return k.toLowerCase().replace(/[\s_-]+/g, '');
 }
 
 function isSecretKey(k: string): boolean {
   const n = normKey(k);
-  return n === 'key' || n === 'secret' || SECRET_KEY_SUBSTRINGS.test(n) || (n.includes('pem') && n.includes('private'));
+  const symmetricKeyName = n.endsWith('key') && !NON_SECRET_KEY_SUFFIX.test(n);
+  return n === 'key' || n === 'secret' || symmetricKeyName || SECRET_KEY_SUBSTRINGS.test(n) || (n.includes('pem') && n.includes('private'));
 }
 
 /** Recursively redacts key/secret-looking fields and private-key/PKCS#12-looking values. */
@@ -143,7 +147,7 @@ function privateEnabled(): boolean {
   return process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS === 'true';
 }
 
-function describeError(err: unknown, right = 'view (415)'): string {
+function describeError(err: unknown, right: string | null = 'view (415)'): string {
   if (err instanceof z.ZodError) {
     return `invalid input: ${err.issues.map((i) => `${i.path.join('.') || 'value'} ${i.message}`).join('; ')}`;
   }
@@ -161,6 +165,7 @@ function describeError(err: unknown, right = 'view (415)'): string {
           'proxy; this tool cannot and does not mint it.'
         );
       }
+      if (right === null) return 'forbidden (HTTP 403) — this endpoint needs authentication only; check that the session is valid';
       return `forbidden (HTTP 403) — right denied: the Scout user likely lacks the ELIAS "${right}" right for this container (see elias_rights)`;
     }
     if (err.statusCode === 404) {
@@ -169,13 +174,13 @@ function describeError(err: unknown, right = 'view (415)'): string {
       }
       return 'not found (HTTP 404) — wrong id, or ELIAS is not available (requires Scout 2611+)';
     }
-    return err.message;
+    return sanitizeServerText(err.message);
   }
-  return err instanceof Error ? err.message : String(err);
+  return err instanceof Error ? sanitizeServerText(err.message) : sanitizeServerText(String(err));
 }
 
 /** Shared wrapper: private-endpoint gate, error mapping. */
-function wrap(tool: string, run: (input: unknown) => Promise<unknown>, right = 'view (415)') {
+function wrap(tool: string, run: (input: unknown) => Promise<unknown>, right: string | null = 'view (415)') {
   return async (raw: unknown): Promise<McpToolResult> => {
     if (!privateEnabled()) {
       return fail(`${tool} is a private endpoint tool. Set SCOUT_ENABLE_PRIVATE_ENDPOINTS=true to enable it.`);
@@ -614,7 +619,7 @@ export const eliasMyRolesTool: McpTool = {
     log('elias_my_roles', '/api/v1/elias/my-container-roles (POST, read-only semantics)');
     // No `mutating` option: this is not a write, so it must not be affected by mode gates.
     return getClient().rawRequest<unknown>('POST', '/api/v1/elias/my-container-roles', body);
-  }),
+  }, null),
 };
 
 export const eliasTools: McpTool[] = [
