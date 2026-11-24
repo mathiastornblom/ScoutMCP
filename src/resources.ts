@@ -18,6 +18,7 @@
  */
 
 import { getClient } from './client.js';
+import { parseOuTree } from './ou_tree.js';
 import { loadEluxConfigSchema } from './schema/eluxConfig.js';
 
 // ── URI helpers ───────────────────────────────────────────────────────────────
@@ -58,24 +59,8 @@ function decodeOuPath(uriPath: string): string {
 
 // ── OU tree flattening ────────────────────────────────────────────────────────
 
-interface OuNode {
-  OUID?: number;
-  OUName?: string;
-  OUPath?: string;
-  SubOUs?: OuNode[];
-}
-
-function flattenOuTree(node: OuNode): Array<{ ouid: number; name: string; path: string }> {
-  const result: Array<{ ouid: number; name: string; path: string }> = [];
-  if (node.OUID !== undefined && node.OUPath && node.OUName) {
-    result.push({ ouid: node.OUID, name: node.OUName, path: node.OUPath });
-  }
-  if (Array.isArray(node.SubOUs)) {
-    for (const child of node.SubOUs) {
-      result.push(...flattenOuTree(child));
-    }
-  }
-  return result;
+function flattenOuTree(raw: unknown): Array<{ ouid: number; name: string; path: string }> {
+  return parseOuTree(raw).nodes.map((n) => ({ ouid: n.ouid, name: n.name, path: n.path }));
 }
 
 // ── List handlers ─────────────────────────────────────────────────────────────
@@ -137,7 +122,7 @@ export async function listResources(): Promise<ResourceDescriptor[]> {
   // Failures are silently ignored — client gets the tree resource but no per-OU entries.
   try {
     const client = getClient();
-    const tree = await client.request<OuNode>('GET', '/api/v1/ou/structure');
+    const tree = await client.request<unknown>('GET', '/api/v1/ou/structure');
     const ous = flattenOuTree(tree);
 
     for (const ou of ous) {

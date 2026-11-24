@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
-import { resolveOuRef } from '../resolver.js';
+import { resolveOuRef, invalidateOuCache, resolveOuForWriteGate, resolveWriteTarget, assertOuPathUnchanged, type OuMatch } from '../resolver.js';
 import { enrich } from '../enricher.js';
 import { isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
@@ -23,19 +23,36 @@ function assertTestScope(ouPath: string): string | null {
 }
 
 /**
- * Resolves the OU path a device currently sits in, by fetching the device record (which
- * carries an OUID field) and resolving that ID against the OU tree. Used by
- * action=move to identify the *source* OU before issuing the move — moving a device OUT
- * of a protected OU changes what config it inherits just as much as moving one IN, so the
- * protected-OU gate (checkOuWriteAllowed) must see both sides of a move, not just the
- * destination. Returns undefined (rather than throwing) if the device can't be resolved,
- * so a not-found device surfaces its normal "device not found" error from the move call
- * itself rather than a confusing failure from this pre-check.
+ * Resolves the OU path a device currently sits in, by fetching the single-device record and
+ * resolving its OU id against a FRESH OU tree. Used by action=move to identify the *source* OU
+ * before issuing the move: moving a device OUT of a protected OU changes what config it inherits
+ * just as much as moving one in, so the protected-OU gate must see both sides.
+ *
+ * FAILS CLOSED: every failure (request error, device not found, record without a numeric
+ * OUID, OU id not in the tree, tree unparseable) throws a GuardrailError - the move is refused.
+ * There is no "undefined" return and no swallowing catch: an unknown source OU is not "unprotected".
+ * Only the OUID field is accepted; GroupID (seen on /api/v1/devices rows) is NOT assumed to be
+ * the OU id without live proof, so if the single-device record lacks OUID the move is refused.
  */
 async function resolveCurrentDeviceOuPath(
   client: ReturnType<typeof getClient>,
   identifiers: { name?: string; mac?: string; id?: string; clientid?: string },
-): Promise<string | undefined> {
+): Promise<string> {
+  const refuse = (detail: string): never => {
+    auditLog({
+      opName: 'device_manage(move)',
+      target: identifiers.name ?? identifiers.mac ?? identifiers.id ?? identifiers.clientid ?? 'unknown',
+      result: 'refused',
+      gate: 'unresolvable-source-ou',
+      detail,
+    });
+    throw new GuardrailError(
+      `Could not determine the source OU of the device (${detail}). Refusing to move: the protected-OU ` +
+        'check cannot run against an unknown source OU.',
+      'unresolvable-source-ou',
+    );
+  };
+  let data: Record<string, unknown> | undefined;
   try {
     const qs = buildQuery({
       name: identifiers.name,
@@ -43,13 +60,18 @@ async function resolveCurrentDeviceOuPath(
       id: identifiers.id,
       clientid: identifiers.clientid,
     });
-    const data = await client.request<Record<string, unknown>>('GET', `/api/v1/device${qs}`);
-    const ouId = data?.['OUID'];
-    if (typeof ouId !== 'number') return undefined;
-    const match = await resolveOuRef(ouId);
-    return match.path;
-  } catch {
-    return undefined;
+    data = await client.request<Record<string, unknown>>('GET', `/api/v1/device${qs}`);
+  } catch (err) {
+    return refuse(`device lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const ouId = data?.['OUID'];
+  if (typeof ouId !== 'number' || !Number.isInteger(ouId)) {
+    return refuse('device record has no numeric OUID field');
+  }
+  try {
+    return (await resolveOuForWriteGate(ouId)).path;
+  } catch (err) {
+    return refuse(`OU ${ouId} could not be resolved: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -358,16 +380,23 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
     // checked unconditionally for add/move (a device's resolved destination matters even
     // if the device doesn't exist yet, for add); the source is resolved by looking up the
     // device's current OUID before the move executes.
+    let destMatch: OuMatch | undefined;
     if (input.action === 'move' || input.action === 'add') {
-      let destPathForGate = resolvedDestPath;
-      if (!destPathForGate && resolvedDestId !== undefined) {
-        // destouid was supplied without a path (no destouRef) — resolve it so the
-        // protected-OU gate can do its path-prefix match.
-        const match = await resolveOuRef(resolvedDestId);
-        destPathForGate = match.path;
-      }
-      if (destPathForGate) {
-        checkOuWriteAllowed({ targetPath: destPathForGate });
+      // Gate on the canonical path from a FRESH tree read, never the raw caller string.
+      // Every supplied destination reference must name the same OU; gate on it and send ONLY
+      // its id, so the gated OU and the written OU are the same by construction.
+      destMatch = await resolveWriteTarget(
+        input.destouRef !== undefined
+          ? [input.destouRef]
+          : input.destoupath === undefined && input.destouid === undefined
+            ? [resolvedDestPath] // working-OU fallback, only when no explicit destination was given
+            : [input.destoupath, input.destouid],
+        'destination OU',
+      );
+      if (destMatch) {
+        checkOuWriteAllowed({ targetPath: destMatch.path });
+        resolvedDestId = destMatch.ouid;
+        resolvedDestPath = destMatch.path;
       }
     }
     if (input.action === 'move') {
@@ -377,9 +406,7 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
         id: input.id,
         clientid: input.clientid,
       });
-      if (sourcePath) {
-        checkOuWriteAllowed({ targetPath: sourcePath });
-      }
+      checkOuWriteAllowed({ targetPath: sourcePath });
     }
 
     if (!modeCheck.proceed) {
@@ -391,6 +418,10 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
       });
     }
 
+    // Re-assert, immediately before the mutating call, that the gated destination still has the
+    // gated path (a concurrent rename/move must not slip through).
+    if (destMatch) await assertOuPathUnchanged(destMatch.ouid, destMatch.path);
+
     let data: unknown;
 
     switch (input.action) {
@@ -398,7 +429,6 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
         if (!input.newDeviceName) return fail('newDeviceName is required for action=add');
         if (!input.newDeviceMac) return fail('newDeviceMac is required for action=add');
         const qs = buildQuery({
-          destoupath: resolvedDestPath,
           destouid: resolvedDestId,
           name: input.newDeviceName,
           mac: input.newDeviceMac,
@@ -449,7 +479,6 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           mac: input.mac,
           id: input.id,
           clientid: input.clientid,
-          destoupath: resolvedDestPath,
           destouid: resolvedDestId,
         });
         data = await client.request<unknown>('PUT', `/api/v1/device/move${qs}`, undefined, {
@@ -476,6 +505,8 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
       return fail(baseMsg + hint);
     }
     return fail(baseMsg);
+  } finally {
+    if (input.action === 'add' || input.action === 'move') invalidateOuCache();
   }
 }
 

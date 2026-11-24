@@ -10,6 +10,7 @@
  */
 
 import { getClient } from './client.js';
+import { parseOuTree } from './ou_tree.js';
 
 // ── Levenshtein distance (two-row O(n) space) ─────────────────────────────────
 
@@ -46,8 +47,6 @@ export function similarity(query: string, candidate: string): number {
 
 export interface OuSuggestion { name: string; path: string }
 
-interface OuNode { OUName?: string; OUPath?: string; SubOUs?: OuNode[] }
-
 const CACHE_TTL_MS = 5 * 60 * 1000;
 let ouList: OuSuggestion[] | null = null;
 let ouListLoadedAt = 0;
@@ -55,13 +54,8 @@ let ouListLoadedAt = 0;
 async function loadOuList(): Promise<OuSuggestion[]> {
   if (ouList && Date.now() - ouListLoadedAt < CACHE_TTL_MS) return ouList;
   const client = getClient();
-  const tree = await client.request<OuNode>('GET', '/api/v1/ou/structure');
-  const entries: OuSuggestion[] = [];
-  function walk(node: OuNode): void {
-    if (node.OUName && node.OUPath) entries.push({ name: node.OUName, path: node.OUPath });
-    if (Array.isArray(node.SubOUs)) node.SubOUs.forEach(walk);
-  }
-  walk(tree);
+  const tree = parseOuTree(await client.request<unknown>('GET', '/api/v1/ou/structure'));
+  const entries: OuSuggestion[] = tree.nodes.map((n) => ({ name: n.name, path: n.path }));
   ouList = entries;
   ouListLoadedAt = Date.now();
   return entries;
