@@ -59,6 +59,20 @@ function extractDevicesOrThrow(raw: unknown, opName = 'move_devices_by_filter'):
       'unresolvable-source-ou',
     );
   }
+  if (parsed.unlisted > 0) {
+    auditLog({
+      opName,
+      target: 'unknown',
+      result: 'refused',
+      gate: 'unresolvable-source-ou',
+      detail: `${parsed.unlisted} hidden/pending/denied device(s) matched but are not listed`,
+    });
+    throw new GuardrailError(
+      `${parsed.unlisted} matched device(s) are hidden/pending/denied and not listed, so their source OU cannot be checked. ` +
+        'Refusing: an unlisted device would skip the protected-OU gate.',
+      'unresolvable-source-ou',
+    );
+  }
   return parsed.devices;
 }
 

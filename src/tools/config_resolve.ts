@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
-import { readDeviceOuId } from '../devices.js';
+import { readDeviceOuId, parseSingleDevice } from '../devices.js';
 import { resolveOuRef, getOuChain } from '../resolver.js';
 import { loadEluxConfigSchema } from '../schema/eluxConfig.js';
 import {
@@ -203,7 +203,9 @@ export async function resolveTargetRef(target: 'device' | 'ou', ref: string): Pr
   const isNumeric = /^\d+$/.test(ref.trim());
   const qs = isNumeric ? buildQuery({ id: ref }) : buildQuery({ name: ref });
   const data = await client.request<unknown>('GET', `/api/v1/device${qs}`);
-  const dev = normalizeConfigPayload(data) as Record<string, unknown>;
+  const single = parseSingleDevice(data);
+  if (!single.ok) throw new Error(`Could not determine OU for device "${ref}" - ${single.reason}.`);
+  const dev = single.row as Record<string, unknown>;
 
   const ouPath = String(dev['OUPath'] ?? dev['ouPath'] ?? '');
   let resolvedOu: Awaited<ReturnType<typeof resolveOuRef>>;

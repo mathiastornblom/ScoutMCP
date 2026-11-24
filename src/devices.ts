@@ -58,7 +58,20 @@ export function extractSearchDevices(raw: unknown): DeviceRecord[] {
 }
 
 export type ParseSearchDevicesResult =
-  | { ok: true; devices: DeviceRecord[]; hiddenDevices: number }
+  | {
+      ok: true;
+      /** The visible rows (legacy envelope `visibleDevices`, or the live list). */
+      devices: DeviceRecord[];
+      /** Count of hidden devices (integer count, or length of a hidden list). */
+      hiddenDevices: number;
+      /**
+       * Devices that exist but are NOT in `devices`: hidden + pending + denied (integer counts, or the
+       * lengths of lists of rows). Gate paths must refuse when this is > 0 (an unlisted device would
+       * skip its gate). Rows delivered in hidden/pending/denied LISTS are in `otherRows`.
+       */
+      unlisted: number;
+      otherRows: DeviceRecord[];
+    }
   | { ok: false; reason: string };
 
 /**
@@ -87,23 +100,63 @@ export function parseSearchDevices(raw: unknown): ParseSearchDevicesResult {
   // msg is { visibleDevices: [...], hiddenDevices: n }. Anything else is refused, never "empty".
   let rows: unknown;
   let hiddenDevices = 0;
+  let unlisted = 0;
+  const otherRows: DeviceRecord[] = [];
+  const isRow = (d: unknown): boolean => !!d && typeof d === 'object' && !Array.isArray(d);
   if (Array.isArray(msg)) {
     rows = msg;
   } else if (msg && typeof msg === 'object') {
-    rows = (msg as Record<string, unknown>)['visibleDevices'];
+    const m = msg as Record<string, unknown>;
+    rows = m['visibleDevices'];
     if (!Array.isArray(rows)) {
       return { ok: false, reason: 'response.response.status.msg.visibleDevices was missing or not an array' };
     }
-    const hiddenRaw = (msg as Record<string, unknown>)['hiddenDevices'];
-    hiddenDevices = typeof hiddenRaw === 'number' ? hiddenRaw : 0;
+    // hidden/pending/denied: absent (0), a non-negative INTEGER count (live single-device read), or a LIST of rows.
+    for (const key of ['hiddenDevices', 'pendingDevices', 'deniedDevices'] as const) {
+      const v = m[key];
+      let n = 0;
+      if (v === undefined) n = 0;
+      else if (typeof v === 'number') {
+        if (!Number.isInteger(v) || v < 0) return { ok: false, reason: `${key} was not a non-negative integer (${JSON.stringify(v)})` };
+        n = v;
+      } else if (Array.isArray(v)) {
+        if (!v.every(isRow)) return { ok: false, reason: `a ${key} row was not a JSON object` };
+        n = v.length;
+        otherRows.push(...(v as DeviceRecord[]));
+      } else {
+        return { ok: false, reason: `${key} was neither a count nor a list` };
+      }
+      unlisted += n;
+      if (key === 'hiddenDevices') hiddenDevices = n;
+    }
   } else {
     return { ok: false, reason: 'response.response.status.msg was neither a device list nor a {visibleDevices} object' };
   }
   const list = rows as unknown[];
-  if (list.some((d) => !d || typeof d !== 'object' || Array.isArray(d))) {
+  if (!list.every(isRow)) {
     return { ok: false, reason: 'a device row was not a JSON object' };
   }
-  return { ok: true, devices: list as DeviceRecord[], hiddenDevices };
+  return { ok: true, devices: list as DeviceRecord[], hiddenDevices, unlisted, otherRows };
+}
+
+export type ParseSingleDeviceResult = { ok: true; row: DeviceRecord } | { ok: false; reason: string };
+
+/**
+ * Locates THE device row of a single-device read (GET /api/v1/device). Live shape (Scout 26.11.0) is the
+ * legacy envelope with `visibleDevices:[row]` and INTEGER hidden/pending/denied counts. Requires exactly
+ * one row in total (across every list) and every count to be 0; zero rows, several rows, any non-zero
+ * count, bad counts or an unknown shape refuse. A flat record (no `response` key) is accepted as-is
+ * (older/other servers); its OU id is still validated by the caller.
+ */
+export function parseSingleDevice(raw: unknown): ParseSingleDeviceResult {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, reason: 'response was not a JSON object' };
+  if (!('response' in (raw as Record<string, unknown>))) return { ok: true, row: raw as DeviceRecord };
+  const p = parseSearchDevices(raw);
+  if (!p.ok) return p;
+  if (p.unlisted > 0) return { ok: false, reason: `${p.unlisted} hidden/pending/denied device(s) also matched; the device is ambiguous` };
+  const all = [...p.devices, ...p.otherRows];
+  if (all.length !== 1) return { ok: false, reason: `expected exactly 1 device row, got ${all.length}` };
+  return { ok: true, row: all[0] };
 }
 
 /** Reads a device record's display name, trying the field names Scout is known to use. */
