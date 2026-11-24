@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
+import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 const maintenanceWindowManageSchema = z.object({
   action: z.enum(['list', 'create', 'update', 'delete']),
@@ -22,28 +23,48 @@ async function maintenanceWindowManageExecute(raw: unknown): Promise<McpToolResu
         return ok(data);
       }
       case 'create': {
-        const data = await client.request<unknown>('POST', '/api/v1/maintenanceWindows', input.body);
+        const modeCheck = checkMutationAllowed('maintenance_window_manage(create)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
+        const data = await client.request<unknown>('POST', '/api/v1/maintenanceWindows', input.body, {
+          mutating: true,
+          opName: 'maintenance_window_manage(create)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
       case 'update': {
         if (!input.maintenanceWindowId) return fail('maintenanceWindowId is required for action=update');
+        const modeCheck = checkMutationAllowed('maintenance_window_manage(update)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, maintenanceWindowId: input.maintenanceWindowId, message: modeCheck.dryRunNotice });
+        }
         const data = await client.request<unknown>(
           'PUT',
           `/api/v1/maintenanceWindows/${input.maintenanceWindowId}`,
           input.body,
+          { mutating: true, opName: 'maintenance_window_manage(update)' },
         );
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
       case 'delete': {
         if (!input.maintenanceWindowId) return fail('maintenanceWindowId is required for action=delete');
+        const modeCheck = checkMutationAllowed('maintenance_window_manage(delete)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, maintenanceWindowId: input.maintenanceWindowId, message: modeCheck.dryRunNotice });
+        }
         const data = await client.request<unknown>(
           'DELETE',
           `/api/v1/maintenanceWindows/${input.maintenanceWindowId}`,
+          undefined,
+          { mutating: true, opName: 'maintenance_window_manage(delete)' },
         );
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
     }
   } catch (err) {
+    if (err instanceof GuardrailError) return fail(`maintenance_window_manage blocked: ${err.message}`);
     return fail(`maintenance_window_manage failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

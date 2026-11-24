@@ -8,7 +8,14 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
-import { ok, fail, type McpToolResult } from '../types.js';
+import { ok, fail, type McpToolResult, type ToolContext } from '../types.js';
+import { confirmDestructiveAction } from '../elicitation.js';
+import {
+  checkMutationAllowed,
+  checkPrivateWriteAllowedInProduction,
+  isDryRunSkip,
+  GuardrailError,
+} from '../safety/guardrails.js';
 
 // ── Logging helpers ───────────────────────────────────────────────────────────
 
@@ -53,7 +60,7 @@ const dbCleanupSchema = z.object({
 
 type DbCleanupInput = z.infer<typeof dbCleanupSchema>;
 
-async function dbCleanupExecute(raw: unknown): Promise<McpToolResult> {
+async function dbCleanupExecute(raw: unknown, ctx?: ToolContext): Promise<McpToolResult> {
   const input = dbCleanupSchema.parse(raw) as DbCleanupInput;
   const client = getClient();
   const tool = 'db_cleanup';
@@ -70,16 +77,41 @@ async function dbCleanupExecute(raw: unknown): Promise<McpToolResult> {
       }
 
       case 'delete': {
-        if (!input.confirm) return fail('db_cleanup action=delete requires confirm=true (destructive operation)');
         if (!input.filter) return fail('db_cleanup action=delete requires filter to specify which records to delete');
+        const delOutcome = await confirmDestructiveAction(
+          { server: ctx?.server },
+          {
+            opName: 'db_cleanup(delete)',
+            summary: `Permanently delete database records matching filter: ${input.filter}`,
+            confirmFlag: input.confirm,
+          },
+        );
+        if (!delOutcome.proceed) return fail(`db_cleanup blocked: ${delOutcome.reason}`);
+        // Gate 7: private-endpoint writes are hard-disabled in SCOUT_MODE=write (production)
+        // by default, even with SCOUT_ENABLE_PRIVATE_ENDPOINTS=true — db_cleanup(delete) is
+        // one of the explicitly named high-risk endpoints for this gate.
+        checkPrivateWriteAllowedInProduction('db_cleanup(delete)');
+        // Gate 1: mode tiers — db_cleanup(delete) is a destructive, irreversible operation.
+        const modeCheck = checkMutationAllowed('db_cleanup(delete)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, filter: input.filter, message: modeCheck.dryRunNotice });
+        }
         const path = `/api/v1/dbCleanUp?filter=${encodeURIComponent(input.filter)}`;
         log(tool, 'DELETE', path);
-        const data = await client.rawRequest<unknown>('DELETE', path);
+        const data = await client.rawRequest<unknown>('DELETE', path, undefined, {
+          mutating: true,
+          opName: 'db_cleanup(delete)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
     }
   } catch (err) {
+    if (err instanceof GuardrailError) {
+      logErr(tool, err);
+      return fail(`db_cleanup blocked: ${err.message}`);
+    }
     logErr(tool, err);
     return fail(`db_cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
   }

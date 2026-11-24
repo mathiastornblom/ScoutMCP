@@ -1,5 +1,17 @@
 import { Agent, fetch } from 'undici';
-import { type ScoutConfig, resolveConfig } from './session.js';
+import { type ScoutConfig, resolveConfig, buildCcTokenUrl } from './session.js';
+import {
+  checkMutationAllowed,
+  type MutationCheckResult,
+  DRY_RUN_SKIP_MARKER,
+} from './safety/guardrails.js';
+
+function makeDryRunSkip<T>(notice?: string): T {
+  return {
+    [DRY_RUN_SKIP_MARKER]: true,
+    notice: notice ?? 'Skipped by SCOUT_MODE=dry-run.',
+  } as unknown as T;
+}
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 /** Renew token this many ms before its actual expiry to avoid race windows. */
@@ -58,9 +70,12 @@ export class ScoutClient {
   }
 
   async login(): Promise<void> {
+    if (this.config.authMethod === 'citrix-cloud') {
+      return this.loginCitrixCloud();
+    }
     const loginPayload = JSON.stringify({
-      username: this.config.username,
-      password: this.config.password,
+      username: this.config.username ?? '',
+      password: this.config.password ?? '',
       domain: this.config.domain ?? '',
     });
     const loginData64 = Buffer.from(loginPayload).toString('base64');
@@ -85,15 +100,135 @@ export class ScoutClient {
     this.tokenExpiresAt = parseJwtExpiry(data.token);
   }
 
-  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  /**
+   * Citrix Cloud service-principal flow:
+   *   1. Mint a CC bearer token via OAuth2 client-credentials (form-urlencoded — JSON gets 400).
+   *   2. Exchange it at /rest/auth/v1/ccauth/login using a STANDARD `Bearer` prefix
+   *      (NOT Citrix's `CwsAuth Bearer=` prefix — common mistake per the vendor doc).
+   * The resulting Scout Board JWT is stored in the same token fields as password auth,
+   * so the existing 401→re-login retry in doRequest/doRawRequest re-runs the full flow.
+   */
+  private async loginCitrixCloud(): Promise<void> {
+    // Step 1: mint the Citrix Cloud bearer token.
+    const tokenUrl = buildCcTokenUrl(this.config);
+    const form = new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: this.config.ccClientId ?? '',
+      client_secret: this.config.ccClientSecret ?? '',
+    });
+    const mintRes = await this.fetchWithTimeout(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...(this.dispatcher ? { dispatcher: this.dispatcher as any } : {}),
+    });
+
+    if (!mintRes.ok) {
+      let msg: string;
+      switch (mintRes.status) {
+        case 401:
+          msg =
+            'Citrix Cloud rejected the service principal credentials (HTTP 401) — check client_id/secret and region.';
+          break;
+        case 403:
+          msg =
+            "Citrix Cloud token endpoint returned 403 — the token endpoint region doesn't match the service principal's tenant region.";
+          break;
+        case 400:
+          msg =
+            'Citrix Cloud token endpoint returned 400 — likely a request body-encoding issue (the token request must be application/x-www-form-urlencoded).';
+          break;
+        default:
+          msg = `Citrix Cloud token request failed (HTTP ${mintRes.status}).`;
+      }
+      throw new ScoutError(msg, mintRes.status);
+    }
+
+    // Note: expires_in is a STRING in the CC response; we don't rely on it —
+    // the CC token is used exactly once, immediately, to obtain the Scout JWT.
+    const mintData = (await mintRes.json()) as { access_token?: string };
+    if (!mintData.access_token) {
+      throw new ScoutError('Citrix Cloud token response missing access_token');
+    }
+
+    // Step 2: exchange the CC token for a Scout Board JWT.
+    const exchangeUrl = `${this.baseUrl}/rest/auth/v1/ccauth/login`;
+    const exchangeRes = await this.fetchWithTimeout(exchangeUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${mintData.access_token}`,
+        Accept: 'application/json',
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...(this.dispatcher ? { dispatcher: this.dispatcher as any } : {}),
+    });
+
+    if (!exchangeRes.ok) {
+      let msg: string;
+      switch (exchangeRes.status) {
+        case 401:
+          msg =
+            'Scout Board could not validate the Citrix Cloud token (HTTP 401) — server-side CC service configuration issue, contact the Scout Board admin.';
+          break;
+        case 403:
+          msg =
+            'Service principal is not registered as a Scout Board user (HTTP 403) — add its client_id under Users with Login + WebService rights.';
+          break;
+        default:
+          msg = `Citrix Cloud login to Scout Board failed (HTTP ${exchangeRes.status}).`;
+      }
+      throw new ScoutError(msg, exchangeRes.status);
+    }
+
+    const data = (await exchangeRes.json()) as { token?: string };
+    if (!data.token) throw new ScoutError('ccauth login response missing token');
+    this.token = data.token;
+    // Scout JWTs carry an exp claim; if not, fall back to the documented 1-hour lifetime.
+    this.tokenExpiresAt = parseJwtExpiry(data.token) ?? Date.now() + 3_600_000;
+  }
+
+  /**
+   * @param opts.mutating - Set true for any call that changes server state (POST/PUT/
+   *   DELETE/PATCH that writes data, as opposed to e.g. a POST used as a read/search).
+   *   This is the Gate 1 (SCOUT_MODE) chokepoint: callers MUST pass this explicitly for
+   *   write-capable calls — it is not inferred from the HTTP verb, because some tools use
+   *   POST for read/search operations (e.g. structure export, device search-by-filter).
+   *   When mutating=true and SCOUT_MODE=read-only, this throws. When SCOUT_MODE=dry-run,
+   *   this returns a DryRunResult<T> sentinel instead of issuing the HTTP call — tools
+   *   should check `isDryRunSkip(result)` and report the planned action instead of `data`.
+   */
+  async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    opts?: { mutating?: boolean; opName?: string },
+  ): Promise<T> {
+    if (opts?.mutating) {
+      const check = this.checkMode(opts.opName ?? `${method} ${path}`);
+      if (!check.proceed) return makeDryRunSkip<T>(check.dryRunNotice);
+    }
     await this.ensureAuth();
     return this.doRequest<T>(method, path, body, false);
   }
 
   /** Like request(), but skips the /rest prefix — for private endpoints served outside /rest/. */
-  async rawRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+  async rawRequest<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    opts?: { mutating?: boolean; opName?: string },
+  ): Promise<T> {
+    if (opts?.mutating) {
+      const check = this.checkMode(opts.opName ?? `${method} ${path}`);
+      if (!check.proceed) return makeDryRunSkip<T>(check.dryRunNotice);
+    }
     await this.ensureAuth();
     return this.doRawRequest<T>(method, path, body, false);
+  }
+
+  private checkMode(opName: string): MutationCheckResult {
+    return checkMutationAllowed(opName);
   }
 
   isAuthenticated(): boolean {
@@ -246,8 +381,20 @@ export function getClient(): ScoutClient {
     );
   }
 
-  // Invalidate cached instance if credentials changed
-  const key = `${config.baseUrl}|${config.username}|${config.password}`;
+  // Invalidate cached instance if credentials changed. The key includes the client
+  // secret so switching service principals invalidates correctly — it is kept
+  // in-memory only and must never be logged.
+  const key = [
+    config.baseUrl,
+    config.authMethod ?? 'password',
+    config.username ?? '',
+    config.password ?? '',
+    config.ccClientId ?? '',
+    config.ccClientSecret ?? '',
+    config.ccCustomerId ?? '',
+    config.ccRegion ?? '',
+    config.ccTokenUrl ?? '',
+  ].join('|');
   if (!_instance || _instanceKey !== key) {
     _instance = new ScoutClient(config);
     _instanceKey = key;

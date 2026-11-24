@@ -1,0 +1,6755 @@
+[
+  {
+    "section": "!NETDRIVE!#",
+    "key": "Directory",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies which directory provides the access to the data."
+  },
+  {
+    "section": "!NETDRIVE!#",
+    "key": "Password",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Password for the authorisation at the server."
+  },
+  {
+    "section": "!NETDRIVE!#",
+    "key": "Server",
+    "default": "unset",
+    "range": "servername",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Server, where the network drive is shared."
+  },
+  {
+    "section": "!NETDRIVE!#",
+    "key": "Share",
+    "default": "unset",
+    "range": "\\\\\\\\server\\\\freigabe",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Share name at the server"
+  },
+  {
+    "section": "!NETDRIVE!#",
+    "key": "UseKerberos",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether authorisation has to be done by certificate. (Requires that the security settings define ADS as authorisation method.)"
+  },
+  {
+    "section": "!NETDRIVE!#",
+    "key": "User",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "User for the authorisation at the server"
+  },
+  {
+    "section": "!PRINTER!#",
+    "key": "Address",
+    "default": "unset",
+    "range": "printer1.my.org",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The network address of the printer (only for type=net, then mandatory)"
+  },
+  {
+    "section": "!PRINTER!#",
+    "key": "Baud",
+    "default": "unset",
+    "range": [
+      0,
+      1200,
+      2400,
+      4800,
+      9600,
+      19200,
+      38400
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The baud rate. If set to 0, the value from the hardware settings is used."
+  },
+  {
+    "section": "!PRINTER!#",
+    "key": "Com",
+    "default": "unset",
+    "range": "0",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The number of the COM port which is to be printed on. Always set to 0"
+  },
+  {
+    "section": "!PRINTER!#",
+    "key": "Default",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether this printer is to be the default printer."
+  },
+  {
+    "section": "!PRINTER!#",
+    "key": "Driver",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the driver name for this printer."
+  },
+  {
+    "section": "!PRINTER!#",
+    "key": "Name",
+    "default": "unset",
+    "range": "PR-Lexmark",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "!PRINTER!#",
+    "key": "PclFilter",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether a PCL filter is to be used."
+  },
+  {
+    "section": "!PRINTER!#",
+    "key": "Queue",
+    "default": "unset",
+    "range": "queue1",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The name of the printer queue (only for type=net, then mandatory)"
+  },
+  {
+    "section": "!PRINTER!#",
+    "key": "TextFilter",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether a text filter is to be used."
+  },
+  {
+    "section": "!PRINTER!#",
+    "key": "Tp",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the printer is to be defined as ThinPrint printer."
+  },
+  {
+    "section": "!PRINTER!#",
+    "key": "TpClass",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The name of the ThinPrint class"
+  },
+  {
+    "section": "!PRINTER!#",
+    "key": "Type",
+    "default": "unset",
+    "range": [
+      "net",
+      "par",
+      "ser",
+      "usb"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The printer type: net=network printer, par=printer at parallel port, usb=printer at the USB port, ser=printer at a serial port"
+  },
+  {
+    "section": "Bluetooth",
+    "key": "AllowedServiceUuids",
+    "default": "empty (all services allowed)",
+    "range": null,
+    "sinceVersion": "7.2411",
+    "publish": false,
+    "notes": "Specifies the bluetooth service UUIDS which are allowed and can be connected to. For example one can allow HID device but not headset. See also bluetooth plugin wiki page."
+  },
+  {
+    "section": "Bluetooth",
+    "key": "Enabled",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Enable/disable bluetooth"
+  },
+  {
+    "section": "Browser<1-N>",
+    "key": "Default",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Since RP 6.8: This Url will be loaded after boot. Only one item can be default and this will change automatically if the user selected a different item. And the new item will get the default one"
+  },
+  {
+    "section": "Browser<1-N>",
+    "key": "Favorite",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Since RP 6.8: If set to true the item will be marked as favorite in the portal selector"
+  },
+  {
+    "section": "Browser<1-N>",
+    "key": "FriendlyName",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Since RP 6.8: Name to be displayed to the user"
+  },
+  {
+    "section": "Browser<1-N>",
+    "key": "Homepage",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "The URL which should be loaded when pressing the home button"
+  },
+  {
+    "section": "Browser<1-N>",
+    "key": "Navbar",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Toggles browser navigation bar"
+  },
+  {
+    "section": "Browser<1-N>",
+    "key": "NavbarBackward",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Toggles backward button in browser navigation bar"
+  },
+  {
+    "section": "Browser<1-N>",
+    "key": "NavbarForward",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Toggles forward button in browser navigation bar"
+  },
+  {
+    "section": "Browser<1-N>",
+    "key": "NavbarHome",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Toggles home button in browser navigation bar"
+  },
+  {
+    "section": "Browser<1-N>",
+    "key": "NavbarNavigate",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "(no description given in source)"
+  },
+  {
+    "section": "Browser<1-N>",
+    "key": "NavbarPrint",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Toggles print button in browser navigation bar"
+  },
+  {
+    "section": "Browser<1-N>",
+    "key": "NavbarRefresh",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Toggles refresh button in browser navigation bar"
+  },
+  {
+    "section": "Browser<1-N>",
+    "key": "NavbarUrl",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Toggles url bar in browser navigation bar"
+  },
+  {
+    "section": "Browser<1-N>",
+    "key": "SaveFirstLink",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "If true the first url loaded when coming from the homepage will be saved as Url"
+  },
+  {
+    "section": "Browser<1-N>",
+    "key": "Url",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "The URL which will be displayed on startup"
+  },
+  {
+    "section": "Com#Settings",
+    "key": "BitWidth",
+    "default": 8,
+    "range": [
+      5,
+      6,
+      7,
+      8
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Com#Settings",
+    "key": "FlowControl",
+    "default": "xonxoff",
+    "range": [
+      "none",
+      "rtscts",
+      "xonxoff",
+      "both"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Com#Settings",
+    "key": "Parity",
+    "default": "none",
+    "range": [
+      "none",
+      "even",
+      "odd"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Com#Settings",
+    "key": "Speed",
+    "default": 9600,
+    "range": [
+      1200,
+      2400,
+      4800,
+      9600,
+      19200,
+      38400,
+      57600,
+      115200
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Com#Settings",
+    "key": "StopBits",
+    "default": 1,
+    "range": [
+      1,
+      2
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "ctxh264",
+    "key": "DrawLogo",
+    "default": false,
+    "range": [
+      false,
+      true
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "if true the unicon logo is shown as an overlay"
+  },
+  {
+    "section": "ctxh264",
+    "key": "EnableHardwareInterop",
+    "default": true,
+    "range": [
+      false,
+      true
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "If true the HardwareAccelerationType is used for yuv420 to rgb conversion, if false it is done manually with shaders"
+  },
+  {
+    "section": "ctxh264",
+    "key": "EnableLogging",
+    "default": false,
+    "range": [
+      false,
+      true
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Activates logging of the ica ctxh264 plugin"
+  },
+  {
+    "section": "ctxh264",
+    "key": "ForceRenderMethod",
+    "default": "NONE,OPENGL,XSHM",
+    "range": "NONE",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Normally the best supported render method is used. The rating is OPENGL > XSHM > X11. If ForceRenderMethod is not NONE this render method is used when it is supported"
+  },
+  {
+    "section": "ctxh264",
+    "key": "GlVariant",
+    "default": "GLX",
+    "range": [
+      "GLX",
+      "EGL"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Set the OpenGL variant to use"
+  },
+  {
+    "section": "ctxh264",
+    "key": "HardwareAccelerationType",
+    "default": "VAAPI",
+    "range": [
+      "NONE",
+      "VAAPI"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The used hardware acceleration for frame decoding, NONE is software decoding"
+  },
+  {
+    "section": "ctxh264",
+    "key": "LogPath",
+    "default": "/tmp/ctxh264.log",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Path where the log file is written"
+  },
+  {
+    "section": "dconfm",
+    "key": "org.mate.interface:cursor-blink:bool",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Cursor in input fields will blink or not"
+  },
+  {
+    "section": "dconfm",
+    "key": "org.mate.Marco.general:action-right-click-titlebar:string",
+    "default": "menu",
+    "range": [
+      "toggle_shade",
+      "toggle_maximize"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "dconfm",
+    "key": "org.mate.Marco.general:compositing-manager:bool",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "dconfm",
+    "key": "org.mate.Marco.general:mouse-button-modifier:string",
+    "default": "<Alt>",
+    "range": "<key combination> or disabled",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Modifier in combination with mouse buttons to: move window (left click), resize window (middle click), show window menu (right click)"
+  },
+  {
+    "section": "dconfm",
+    "key": "org.mate.Marco.general:num-workspaces:int",
+    "default": 4,
+    "range": "1..36",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Number of workspaces"
+  },
+  {
+    "section": "dconfm",
+    "key": "org.mate.Marco.general:use-focus-all-fullscreen:bool",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "6 monitors solution for switching between several Citrix sessions; the eLux system bar moved to the foreground on RP5 images (ONLY RP5, cause side effects in RP6)"
+  },
+  {
+    "section": "dconfm",
+    "key": "org.mate.Marco.global-keybindings:panel-main-menu:string",
+    "default": "<Control>Super_L",
+    "range": "<key combination>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "disabled"
+  },
+  {
+    "section": "dconfm",
+    "key": "org.mate.Marco.global-keybindings:run-command-screenshot:string",
+    "default": "disabled",
+    "range": "<key combination>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Starts the screenshot utility to capture the whole screen, f.e. <Shift>Print"
+  },
+  {
+    "section": "dconfm",
+    "key": "org.mate.Marco.global-keybindings:run-command-window-screenshot:string",
+    "default": "disabled",
+    "range": "<key combination>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Starts the screenshot utility to capture the active window, f.e. <Shift><Alt>Print"
+  },
+  {
+    "section": "dconfm",
+    "key": "org.mate.Marco.global-keybindings:show-desktop:string",
+    "default": "<Control><Alt>d",
+    "range": "<key combination> or disabled",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Show/hide desktop"
+  },
+  {
+    "section": "dconfm",
+    "key": "org.mate.peripherals-touchpad:natural-scroll:bool",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Two finger scroll direction of touch pad like Windows = true"
+  },
+  {
+    "section": "dconfm",
+    "key": "org.mate.SettingsDaemon.plugins.media-keys:home:string",
+    "default": "XF86HomePage",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Extended key binding, if set starts: caja"
+  },
+  {
+    "section": "Desktop",
+    "key": "customGridLabels",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": "7.2603.0",
+    "publish": false,
+    "notes": "Comma separated list of labels eg. `first label, second label, third label, ..`"
+  },
+  {
+    "section": "Desktop",
+    "key": "useCustomGridLayout",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.2603.0",
+    "publish": false,
+    "notes": "Enable desktop application launcher grid layout. See ELUX-5518. Works in concert with (1) the terminal.ini entry `customGridLabels`, (2) application free parameter `GridPosition=i,j` (where i is row, j is column, optional). Each application displayed on the desktop is required to have the \"GridPosition\" free parameter configured in Scout. Note: Scout Application parameter `showOnDesktop` is ignored, and `hidden` property leads to \"empty\" grid tiles."
+  },
+  {
+    "section": "DynamicProxy",
+    "key": "ProxyMonitoringTimeout",
+    "default": 120,
+    "range": "int in seconds",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Avoid proxy consumers without update partition from having no proxy, after reboot while updating"
+  },
+  {
+    "section": "DynamicProxy",
+    "key": "TerminatedMonitoringTimeout",
+    "default": 1800,
+    "range": "int in seconds",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Looking for all consumer, if there are no more updater (search failed): update myself (shutdown proxy service) and shutdown/reboot in case this provider was used by any consumer"
+  },
+  {
+    "section": "DynamicProxy",
+    "key": "UseConsumer",
+    "default": true,
+    "range": "{true,false}",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Enable/Disable consumer"
+  },
+  {
+    "section": "DynamicProxy",
+    "key": "UseProvider",
+    "default": true,
+    "range": "{true,false}",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Enable/Disable provider"
+  },
+  {
+    "section": "Environment",
+    "key": "LIBVA_DRIVER_NAME",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Disable hardware acceleration for device"
+  },
+  {
+    "section": "Environment",
+    "key": "VDPAU_DRIVER",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Disable hardware acceleration for device"
+  },
+  {
+    "section": "Environment_Store<1-N>",
+    "key": "AutostartResources",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "List (separated by semicolon) of Citrix apps/desktops to be launched after logon. Currently only available with PreLogin=true"
+  },
+  {
+    "section": "Environment_Store<1-N>",
+    "key": "Default",
+    "default": false,
+    "range": [
+      false,
+      true
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Is this the default store"
+  },
+  {
+    "section": "Environment_Store<1-N>",
+    "key": "Environment",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "The stores will be grouped by the environment. Obsolete since RP6.8: Grouping was replaced by favorites"
+  },
+  {
+    "section": "Environment_Store<1-N>",
+    "key": "FriendlyName",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Name to be displayed to the user"
+  },
+  {
+    "section": "Environment_Store<1-N>",
+    "key": "Url",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "URL of the citrix store"
+  },
+  {
+    "section": "Evidian",
+    "key": "AllowScUserAuth",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Users may log on with username and password"
+  },
+  {
+    "section": "Evidian",
+    "key": "AuthDisplayNames",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The domain prefilled in evidian dialog"
+  },
+  {
+    "section": "Evidian",
+    "key": "AuthServer",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The evidian server to be used, e.g. https://win-evidian-01.presales.unicon-ka.de:9765/soap"
+  },
+  {
+    "section": "Evidian",
+    "key": "Autologin",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Configured by scout, but there is no implementation on elux"
+  },
+  {
+    "section": "Evidian",
+    "key": "ScRemovalAction",
+    "default": "lockscreen",
+    "range": [
+      "lockscreen",
+      "logoffuser"
+    ],
+    "sinceVersion": "6.2302.3000",
+    "publish": false,
+    "notes": "Smartcard Removal Action. 0=lockscreen, 1=logoffuser"
+  },
+  {
+    "section": "Evidian",
+    "key": "Secret",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Encrypted secret from the registry entry of the Enterprise Access Management server. HKEY_LOCAL_MACHINE\\SOFTWARE\\Enatel\\WiseGuard\\Framework\\Authentication from the key ExternalRoamingSessionSecret. Required for smartcard authentication"
+  },
+  {
+    "section": "Evidian",
+    "key": "UseSmartcard",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enables authentication via smart card"
+  },
+  {
+    "section": "FileFetch",
+    "key": "FilePattern",
+    "default": "unset",
+    "range": "string (regex)",
+    "sinceVersion": "no",
+    "publish": false,
+    "notes": "Regular expression containing pattern for files to fetch. Optional. Example: `\\d*\\.(gif | Datamodel Object: png)`"
+  },
+  {
+    "section": "FileFetch",
+    "key": "LocalDirectory",
+    "default": "/setup/xscreensaver",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Local folder in which files are stored. Optional."
+  },
+  {
+    "section": "FileFetch",
+    "key": "URL",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "URL of file webserver including hostname and path. Trailing slash can be omitted."
+  },
+  {
+    "section": "gconfm",
+    "key": "/apps/metacity/general/fullscreen_mod_stacking:bool",
+    "default": "unset",
+    "range": "default:false",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "#bewirkt faktisch ein panel-always-on-top, auch wenn apps fullscreen sind (effectively forces panel-always-on-top even when apps are fullscreen)"
+  },
+  {
+    "section": "gconfm",
+    "key": "/apps/metacity/general/reduced_resources:bool",
+    "default": "unset",
+    "range": "false",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "gconfm",
+    "key": "/apps/metacity/global_keybindings/panel_main_menu:string",
+    "default": "<Control>Super_L",
+    "range": "<Alt>space",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "hotkey for startmenu (CTRL+WindowsKey) für FI: <Shift><Control><Alt>d"
+  },
+  {
+    "section": "gconfm",
+    "key": "/apps/metacity/global_keybindings/run_command_1:string",
+    "default": "<Control>",
+    "range": "<Alt>End",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "hotkey to lock the screen"
+  },
+  {
+    "section": "gconfm",
+    "key": "/apps/metacity/global_keybindings/show_desktop:string",
+    "default": "unset",
+    "range": "disabled",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "#durch den Eintrag wird CTRL-ALT-D deaktiviert (this entry disables CTRL-ALT-D)"
+  },
+  {
+    "section": "gconfm",
+    "key": "/apps/metacity/window_keybindings/toggle_fullscreen:string",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "gconfm",
+    "key": "/apps/metacity/window_keybindings/toggle_maximized:string",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "gconfm",
+    "key": "/apps/metacity/window_keybindings/toggle_on_all_workspaces:string",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "gconfm",
+    "key": "/apps/metacity/window_keybindings/toggle_shaded:string",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "gconfm",
+    "key": "/apps/metacity/window_keybindings/toggle_unmaximize:string",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "gconfm",
+    "key": "/apps/panel/toplevels/bottom_panel_screen0/hide_delay:int",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "delay for hiding the taskbar"
+  },
+  {
+    "section": "Global",
+    "key": "ActionAfterLastWfica",
+    "default": 0,
+    "range": "0=nothing,1=reboot,2=shutdown,4=logoff,8=lock,16=VPN disconnect",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Specifies action to take place if the last Citrix Receiver instance (app/desktop) was closed, when using Firefox web browser in kiosk mode."
+  },
+  {
+    "section": "Global",
+    "key": "ActionIfNoAppRunning",
+    "default": 0,
+    "range": "0=nothing,1=reboot,2=shutdown,4=logoff,8=lock,16=VPN disconnect",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies action to take place if the last application/session was closed"
+  },
+  {
+    "section": "Global",
+    "key": "ActionIfNoAppRunningDelay",
+    "default": 0,
+    "range": "int (seconds)",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies how long specified action is delayed"
+  },
+  {
+    "section": "Global",
+    "key": "AutoRequestLicenses",
+    "default": 0,
+    "range": "0=Off,1=by package,2=by software",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "How licenses are requested by the client (eLux RP 6.4 required)"
+  },
+  {
+    "section": "Global",
+    "key": "Autostart",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enable or disable start of sessions marked as autostart"
+  },
+  {
+    "section": "Global",
+    "key": "ClientIdentifier",
+    "default": "unset",
+    "range": "Example: {50095A7A-39EA-4B1C-9C08-4E7F7CF5E44C}",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Unique id created and sent to client by Scout."
+  },
+  {
+    "section": "Global",
+    "key": "ClientIdLegacy",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "since 4.9.0: enforces the same mac address behaviour as it was in 4.1.0"
+  },
+  {
+    "section": "Global",
+    "key": "ComSettings",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "denies com port initialization"
+  },
+  {
+    "section": "Global",
+    "key": "ConfigurationId",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Identifies currently used Scout configuration"
+  },
+  {
+    "section": "Global",
+    "key": "DefaultSystemBrowsers",
+    "default": "google-chrome,chromium,firefox,ucbrowser",
+    "range": "one or more of chromium, google-chrome, firefox, edge",
+    "sinceVersion": "7.2505",
+    "publish": false,
+    "notes": "Set the first browser of the list, if installed, as the system default browser (used by xdg-open <url>) | Datamodel Object: Desktop.DefaultSystemBrowsers"
+  },
+  {
+    "section": "Global",
+    "key": "Development",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "**Since RP 6.10:** If set to true development logging is activated. At the moment this impacts the coreinstaller and the boot ramdisk. If set to true coreinstaller will open a shell in case of error instead of doing a reboot. Scripts run in the initramdisk will be executed with debug output \"set -x\". The logs can be found in /setup/logs/{init,update}.log"
+  },
+  {
+    "section": "Global",
+    "key": "DiagURL",
+    "default": "unset",
+    "range": "ftp://ftpserver.de (example)",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The URL where the diagnostic data should be sent to"
+  },
+  {
+    "section": "Global",
+    "key": "DisableUsbStorageAutomount",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Disables automount of USB storage devices. Is evaluated by \"/etc/init.d/usbStorageAutomount\"."
+  },
+  {
+    "section": "Global",
+    "key": "DoFactoryReset",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Executes factory reset on boot/shutdown if true"
+  },
+  {
+    "section": "Global",
+    "key": "EnableVirtualKeyboard",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "If true and a virtual keyboard package (maliit) is installed the virtual keyboard is activated"
+  },
+  {
+    "section": "Global",
+    "key": "FactoryResetOption",
+    "default": "unset",
+    "range": "0=none,1=keep Scout,2=halt,4=reboot,8=remove licences,16=preserve unlocked fields",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Options for factory reset"
+  },
+  {
+    "section": "Global",
+    "key": "FactorySettings",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Indicates whether the first contact wizard should be displayed"
+  },
+  {
+    "section": "Global",
+    "key": "FollowMeDesktop",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Activate FollowMeDesktop feature"
+  },
+  {
+    "section": "Global",
+    "key": "GroupID",
+    "default": 0,
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "OU-ID, to resolve ID to name you have to query Scout"
+  },
+  {
+    "section": "Global",
+    "key": "GroupName",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "(marked for removal from code per source annotation)"
+  },
+  {
+    "section": "Global",
+    "key": "IdleTimeout",
+    "default": 10,
+    "range": "int (seconds)",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Timeout of Scout Agent if waiting for response from Scout"
+  },
+  {
+    "section": "Global",
+    "key": "InstallLogLevel",
+    "default": 0,
+    "range": "integer",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Log stdout and stderr of package scripts during update to eluxman.log, even if the return code is 0"
+  },
+  {
+    "section": "Global",
+    "key": "LastShutdownAction",
+    "default": "unset",
+    "range": [
+      0,
+      5
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Determines which action should be executed when the last active application is closed"
+  },
+  {
+    "section": "Global",
+    "key": "LogCycles",
+    "default": 5,
+    "range": ">=2",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Save cycle versions of the logfiles last_boot.zip"
+  },
+  {
+    "section": "Global",
+    "key": "LogLevel",
+    "default": 0,
+    "range": "0-6",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Log level"
+  },
+  {
+    "section": "Global",
+    "key": "LogPath",
+    "default": "/setup/logs",
+    "range": null,
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "File path where the logfiles last_boot.zip are stored"
+  },
+  {
+    "section": "Global",
+    "key": "LpdService",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the LPD Service is to be initiated at the client."
+  },
+  {
+    "section": "Global",
+    "key": "LprTimeout",
+    "default": "unset",
+    "range": "#sec",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Timeout, after which a LPR-print is to be cancelled, if 0 no timeout is set"
+  },
+  {
+    "section": "Global",
+    "key": "LprTimeoutSave",
+    "default": 10,
+    "range": "#sec",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Timeout, after which a LPR-print is to be cancelled."
+  },
+  {
+    "section": "Global",
+    "key": "MaxRamDisk",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Global",
+    "key": "MemoryTrapValue",
+    "default": 80,
+    "range": "30-100",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "If memory usage exceeds this threshold (in percent), user gets a warning"
+  },
+  {
+    "section": "Global",
+    "key": "MinRamDisk",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Global",
+    "key": "MinSpace",
+    "default": 5,
+    "range": "0-100",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "If available disk space (/setup, /tmp) falls below this threshold (in percent), user gets a warning"
+  },
+  {
+    "section": "Global",
+    "key": "OSName",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Name of operating system (f.e. eLux RP)"
+  },
+  {
+    "section": "Global",
+    "key": "OSVersion",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Full qualifying version of operating system"
+  },
+  {
+    "section": "Global",
+    "key": "PcscLogging",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Activate advanced logging in pcsc lite package"
+  },
+  {
+    "section": "Global",
+    "key": "PersistentHomeApplications",
+    "default": "unset",
+    "range": "ALL or comma-separated list with one or more of ica, google-chrome, firefox, edge, gnome-keyring",
+    "sinceVersion": "7.2511",
+    "publish": true,
+    "notes": "The list specifies applications for which persistent home is enabled. Setting this to ALL applies the policy to all supported applications where EPM is configured in the IDF. Example to set some applications instead of ALL: ica,google-chrome,edge. The list is comma-separated and no whitespace. When firefox is in PersistentHomeApplications, firefox related configs (like `HomeDirectory`) MUST NOT be set."
+  },
+  {
+    "section": "Global",
+    "key": "RestartXOnLogoff",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "(no description given in source)"
+  },
+  {
+    "section": "Global",
+    "key": "SearchWficaPidCount",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "(no setting needed, leave in code with default ≈100)"
+  },
+  {
+    "section": "Global",
+    "key": "ServerFeatures",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Decimal representation of Scout supported features, depending on currently used Scout. Bit flags: FEATURE_HELPDESK 0x0001, FEATURE_CFGIO 0x0002, FEATURE_LICENCEIO 0x0004, FEATURE_DETAILEDSECURITY 0x0008, FEATURE_HIERARCHIES 0x0010, FEATURE_ELUXRL 0x0020, FEATURE_NETWORKPROFILES 0x0040, FEATURE_ELUXRT 0x0080, FEATURE_WES7 0x0100, FEATURE_ELUXRP 0x0200, FEATURE_RELOCATION 0x0400, FEATURE_CONFIGSNAPSHOT 0x0800, FEATURE_ANDROID 0x1000, FEATURE_RP6 0x2000. (Source note: as of 2024-04-18 this hasn't been updated for at least 6 years.)"
+  },
+  {
+    "section": "Global",
+    "key": "SysLogLevel",
+    "default": 0,
+    "range": "0-1",
+    "sinceVersion": "7.0.0",
+    "publish": false,
+    "notes": "Activates log files for eluxd only (6.11.1). **Removed in eLux 7**"
+  },
+  {
+    "section": "Global",
+    "key": "ThinPrintChannel",
+    "default": 0,
+    "range": "0=TCP/IP,1=RDP/ICA",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "ThinPrint transfer protocol to be used by thinprint client"
+  },
+  {
+    "section": "Global",
+    "key": "TimeFormat",
+    "default": 0,
+    "range": "0=Auto (12h for en_US desktop, 24h for others), 1=12h (AM/PM), 2=24h",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Shows current time in the given format"
+  },
+  {
+    "section": "Global",
+    "key": "Timeout",
+    "default": 5,
+    "range": "#sec",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Timeout in seconds, after which the attempt to connect to the manager is cancelled."
+  },
+  {
+    "section": "Global",
+    "key": "UpdateLastContactInterval",
+    "default": 1440,
+    "range": "unsigned int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Interval in minutes for sending tstatus up if jpmc_updating_last_contact is installed (publish to JPMC only)"
+  },
+  {
+    "section": "Global",
+    "key": "USB",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether USB mass storage devices are to be allowed for use."
+  },
+  {
+    "section": "Global",
+    "key": "USBCD,USBFD,MemoryBird",
+    "default": "unset",
+    "range": "obsolete",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Global",
+    "key": "USBRedirectOnly",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "USB devices can be used redirected only"
+  },
+  {
+    "section": "Global",
+    "key": "USBUserInfo",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the user should be informed when an USB mass storage device is connected"
+  },
+  {
+    "section": "Global",
+    "key": "USBUseRules",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "USB rules are active and will be obeyed"
+  },
+  {
+    "section": "Global",
+    "key": "UseRamDisk",
+    "default": "depends on main memory",
+    "range": "#kB",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Global",
+    "key": "verbose",
+    "default": false,
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "high level Xserver trace to /tmp/X.log"
+  },
+  {
+    "section": "Global",
+    "key": "WaitAppClose",
+    "default": 1,
+    "range": "#sec",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Seconds to wait until application closes before killing it"
+  },
+  {
+    "section": "Global",
+    "key": "WinConfigurationTimeOut",
+    "default": 900,
+    "range": "int (seconds)",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "How long WinScoutAgent waits before rebooting on configuration change"
+  },
+  {
+    "section": "Global",
+    "key": "Zone",
+    "default": "Europe/Berlin",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the time zone"
+  },
+  {
+    "section": "Hardware",
+    "key": "Channel",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Hardware",
+    "key": "Device",
+    "default": "unset",
+    "range": [
+      "none",
+      "intern",
+      "extern",
+      "usb"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the type of the Smart-Card devices."
+  },
+  {
+    "section": "Hardware",
+    "key": "ESSID",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Hardware",
+    "key": "Flash",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Technical description of flash storage, written by /etc/init.d/detect-hw, setting required"
+  },
+  {
+    "section": "Hardware",
+    "key": "Media",
+    "default": "unset",
+    "range": [
+      "ethernet",
+      "adsl",
+      "isdn",
+      "modem",
+      "tokenring",
+      "wavelan"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies which network media the client is to use for connection."
+  },
+  {
+    "section": "Hardware",
+    "key": "Mode",
+    "default": "auto",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Tokenring mode"
+  },
+  {
+    "section": "Hardware",
+    "key": "NetworkName",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Hardware",
+    "key": "RamdiskPercent",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the size of the RAM disk at the client (in %)."
+  },
+  {
+    "section": "Hardware",
+    "key": "ScreenLayout",
+    "default": 39539,
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the number of monitors to be used."
+  },
+  {
+    "section": "Hardware",
+    "key": "Speed",
+    "default": "unset",
+    "range": [
+      "auto",
+      "100HD",
+      "100FD",
+      "10HD",
+      "10FD",
+      1000,
+      "BNC",
+      "AUI"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Network speed in case of setting 'ethernet' or 'adsl'. Same `Speed` key is reused with value range 4,16,100,auto for 'tokenring' and 1200,2400,3600,4800,9600,14400,19200,28200,38400,57600,115200 for 'modem' (per the older terminal.ini.pdf, these are continuation/enum rows of the same `Speed` parameter, not separate keys)."
+  },
+  {
+    "section": "Hardware",
+    "key": "USBUserInfo",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the user is to be informed about USB mass storage devices when being mounted or dismounted."
+  },
+  {
+    "section": "Hardware",
+    "key": "WPAIdentity",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Hardware",
+    "key": "WPAMode",
+    "default": "unset",
+    "range": [
+      "WEP",
+      "WPA",
+      "WPA2",
+      "WPA2-EAP",
+      "IEEE8021X"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Mode in case of setting 'wavelan'. WEP=WEP, WPA=WPA(PSK), WPA2=WPA2(PSK), WPA2-EAP=WPA2(EAP), IEEE8021X=IEEE 802.1X(LEAP)"
+  },
+  {
+    "section": "Hotkeys",
+    "key": "CloneDisplays",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the hotkey combination for monitor cloning, f.e. <Hyper>p. Alternative notations for the Win modifier key: <Mod4>p, <Super>p"
+  },
+  {
+    "section": "Hotkeys",
+    "key": "Fadeout",
+    "default": "unset",
+    "range": "Special keys: e.g. <Ctrl>,<Alt>,<Super>...",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Given key combination + 1 is fading out primary display. Given key combination + 2 is fading out all non primary displays. Example: <Ctrl><Alt>. When user presses <Ctrl><Alt>1 primary monitor is hidden. When user presses <Ctrl><Alt>2 all non primary monitors are hidden"
+  },
+  {
+    "section": "Hotkeys",
+    "key": "Lock",
+    "default": "<Alt><Ctrl>End",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the hotkey combination for lock"
+  },
+  {
+    "section": "Hotkeys",
+    "key": "Logoff",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the hotkey combination for logoff"
+  },
+  {
+    "section": "Hotkeys",
+    "key": "PauseAction",
+    "default": "<Shift>,<Ctrl>,<Alt><Shift>",
+    "range": null,
+    "sinceVersion": "7.2601",
+    "publish": true,
+    "notes": "Controls which keyboard key activates the Pause workflow during SmartCard removal."
+  },
+  {
+    "section": "HwInfo",
+    "key": "BaseboardAssetTag",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "HwInfo",
+    "key": "BIOS",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Datamodel Object: ucsettingsd, Hardware"
+  },
+  {
+    "section": "HwInfo",
+    "key": "CanSuspend",
+    "default": 1,
+    "range": [
+      0,
+      1
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Indicates whether hardware supports suspend"
+  },
+  {
+    "section": "HwInfo",
+    "key": "ChassisAssetTag",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "HwInfo",
+    "key": "CPU",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "CPU Frequency | Datamodel Object: ucsettingsd, Hardware"
+  },
+  {
+    "section": "HwInfo",
+    "key": "DeviceType",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "HwInfo",
+    "key": "Flash",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "HwInfo",
+    "key": "HasTpm",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Datamodel Object: ucsettingsd, Hardware"
+  },
+  {
+    "section": "HwInfo",
+    "key": "Kernel",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "HwInfo",
+    "key": "Memslot...",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Datamodel Object: ucsettingsd, Hardware"
+  },
+  {
+    "section": "HwInfo",
+    "key": "Supplier",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Datamodel Object: ucsettingsd, Hardware"
+  },
+  {
+    "section": "ICALayout",
+    "key": "DomainFieldStatus",
+    "default": 0,
+    "range": "0=Enabled,1=Disabled,2=Invisible,3=Read-Only",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Disables/hides the domain field in the ICA logon dialog"
+  },
+  {
+    "section": "ICALayout",
+    "key": "ServerFieldStatus",
+    "default": 0,
+    "range": "0=Enabled,1=Disabled,2=Invisible,3=Read-Only",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Disables/hides the server field in the ICA logon dialog"
+  },
+  {
+    "section": "Imprivata",
+    "key": "AuthenticationTimeoutSeconds",
+    "default": "60.0",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Timeout (seconds) until authentication process has to be completed | Datamodel Object: Imprivata.AuthenticationTimeoutSeconds"
+  },
+  {
+    "section": "Imprivata",
+    "key": "BootstrapUrl",
+    "default": "unset",
+    "range": "a URL",
+    "sinceVersion": "7.2505.0",
+    "publish": false,
+    "notes": "Initial boot strap URL | Datamodel Object: Imprivata"
+  },
+  {
+    "section": "Imprivata",
+    "key": "ErrorTimeoutSeconds",
+    "default": "60.0",
+    "range": "0s-3600s (float)",
+    "sinceVersion": "7.2601.0",
+    "publish": false,
+    "notes": "Abort request when it takes longer than this time. 0 to disable errors. | Datamodel Object: Imprivata.ErrorTimeoutSeconds"
+  },
+  {
+    "section": "Imprivata",
+    "key": "FailoverSiteTimeoutSeconds",
+    "default": "300.0",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Datamodel Object: Imprivata.FailoverTimeoutSeconds"
+  },
+  {
+    "section": "Imprivata",
+    "key": "OfflineTimeoutSeconds",
+    "default": "300.0",
+    "range": "0s-3600s (float)",
+    "sinceVersion": "7.2601.0",
+    "publish": false,
+    "notes": "Find alternative sites when the offline timer is reached. 0 to disable timer. | Datamodel Object: Imprivata.OfflineTimeoutSeconds"
+  },
+  {
+    "section": "Imprivata",
+    "key": "WarnTimeoutSeconds",
+    "default": "5.0",
+    "range": "0s-3600s (float)",
+    "sinceVersion": "7.2601.0",
+    "publish": false,
+    "notes": "Warn when a request takes longer than this time. 0 to disable warnings. | Datamodel Object: Imprivata.WarnTimeoutSeconds"
+  },
+  {
+    "section": "Keyboard",
+    "key": "DisableKBPowerOff",
+    "default": false,
+    "range": "bool",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "disables power button on USB keyboard."
+  },
+  {
+    "section": "Keyboard",
+    "key": "ForceShiftLock",
+    "default": false,
+    "range": "bool",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Forces CapsLock to the same behaviour as the Shift key"
+  },
+  {
+    "section": "Keyboard",
+    "key": "Model",
+    "default": "auto",
+    "range": [
+      "K293",
+      "TYPE6",
+      "K235",
+      "K257"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Layout",
+    "key": "AutostartStarter",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Defines whether the System control should be started automatically on device start"
+  },
+  {
+    "section": "Layout",
+    "key": "BackgroundImage",
+    "default": "unset",
+    "range": "background.jpg",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The file name of a background image"
+  },
+  {
+    "section": "Layout",
+    "key": "BackgroundImageOption",
+    "default": "unset",
+    "range": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "1=zentriert (centered) 2=gedehnt (stretched) 3=gekachelt (tiled) 4=skaliert (scaled)"
+  },
+  {
+    "section": "Layout",
+    "key": "ClientBackgroundImage",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "URL for background image on primary screen. Since 6.8: URL can be either local path, file, or http/https. Fallbacks: NonPrimaryBeforeLogin → PrimaryBeforeLogin → NonPrimary → Primary; PrimaryBeforeLogin → Primary; NonPrimary → Primary; Primary. If empty BackgroundColor is used. if BackgroundColor is our default color the eLux default background image is used."
+  },
+  {
+    "section": "Layout",
+    "key": "ClientBackgroundImageBeforeLogin",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "since 6.8: URL for background image on primary screen before user is logged on. URL can be either local path, file, or http/https"
+  },
+  {
+    "section": "Layout",
+    "key": "ClientBackgroundImageNonPrimary",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "since 6.8: URL for background image on all non primary screen. URL can be either local path, file, or http/https"
+  },
+  {
+    "section": "Layout",
+    "key": "ClientBackgroundImageNonPrimaryBeforeLogin",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "since 6.8: URL for background image for all non primary screens before user is logged on. URL can be either local path, file, or http/https"
+  },
+  {
+    "section": "Layout",
+    "key": "ClientInfoHotKey",
+    "default": "<Super_L><Alt>i",
+    "range": "key combination",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Show Device Info"
+  },
+  {
+    "section": "Layout",
+    "key": "CurrentTheme",
+    "default": "unset",
+    "range": "unicon_default",
+    "sinceVersion": "eLux7",
+    "publish": false,
+    "notes": "Specify the eLux7 theme; requires theme resources to be available in /setup/elux/themes/<CurrentTheme>/. Note: Scout Background images are prioritized over the theme image, whereas the background color has lower priority. To disable the default themed background set this parameter to an invalid value, eg \"invalidThemeWorkaround\""
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopBackColor",
+    "default": "#FF00FF",
+    "range": "#rrggbb",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the background color of the client desktop. Format is RGB: #rrggbb whereby rr=red, gg=green, bb=blue."
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopBackColr",
+    "default": "#0080FF",
+    "range": "#<rgb>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Modern UI V2: Desktop background color"
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopBackgroundColorMenu",
+    "default": "#000000",
+    "range": "#<rgb>",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Modern UI V1: Menu background color"
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopHighlightedTextColor",
+    "default": "#209ac0",
+    "range": "#<rgb>",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Modern UI V2: Desktop highlighted text color"
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopHomeDir",
+    "default": "/setup/elux",
+    "range": "<Directory>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Modern UI V1: Desktop icons are saved within this directory to the subdirectory .eluxdesktop, ($ELUXUSER, $ELUXDOMAIN; ...) can be used as part of the directory name"
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopLayout",
+    "default": "medium",
+    "range": [
+      "small",
+      "medium",
+      "large"
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Modern UI V1: Size of desktop icons"
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopLogo",
+    "default": "unset",
+    "range": "<absolute file name to pixmap>, none",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Modern UI V1: Show this logo in the upper left corner instead of eLux logo. Modern UI V2: Show this logo in the lower right corner instead of eLux logo. Modern UI V2: DesktopLogo=none hides the logo"
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopOption",
+    "default": 3,
+    "range": "bitmask",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Decimal representation of desktop options (RP5): DT_OPT_SHOW_NON 0x0, DT_OPT_SHOW_DESKTOP 0x1, DT_OPT_SHOW_VOLUMES 0x2, DT_OPT_SHOW_HOMEFOLDER 0x4, DT_OPT_SHOW_COMPUTER 0x8, DT_OPT_SHOW_TRASH 0x10, DT_OPT_SHOW_NETWORK 0x20, DT_OPT_USE_CLASSIC 0x40"
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopSearchBackgroundColor",
+    "default": "#f5f5f5",
+    "range": "#<rgb>",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Modern UI V2: background color of search input area"
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopSearchIconColor",
+    "default": "#616161",
+    "range": "#<rgb>",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Modern UI V2: Color of search icon"
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopSearchTextColor",
+    "default": "#616161",
+    "range": "#<rgb>",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Modern UI V2: text color of search input area"
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopSortIconColor",
+    "default": "#616161",
+    "range": "#<rgb>",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Modern UI V2: Color of sort icon"
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopTextColor",
+    "default": "#546e7a / #ffffff",
+    "range": "#<rgb>",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Modern UI V2: Text color under desktop icons. Modern UI V1: Text color under desktop icons"
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopTextColorMenu",
+    "default": "#ffffff",
+    "range": "#<rgb>",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Modern UI V1: Text color in menus"
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopTitleTextColor",
+    "default": "#209ac0",
+    "range": "#<rgb>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Modern UI V2: text color of desktop title. Works with >=rp.6.5.2000 and >=rp.6.7.0; for < rp.6.5.2000 and rp6.6.0 use DesktopHighlightedTextColor instead"
+  },
+  {
+    "section": "Layout",
+    "key": "DesktopURI",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Modern UI V2: URI of the CustomerDesktop. If set, ucdesktop..."
+  },
+  {
+    "section": "Layout",
+    "key": "EnableConfigurationPanel",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Whether configuration panel is available for the user or not"
+  },
+  {
+    "section": "Layout",
+    "key": "EnableFloatingNotifications",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.2503.0",
+    "publish": false,
+    "notes": "since eLux7 (7.2503.0): Whether the system floating notifications should be shown or not. The mirroring banner, authentication dialog and notification panel are not part of the floating notifications and therefore not controlled by this boolean."
+  },
+  {
+    "section": "Layout",
+    "key": "EnableSystemBar",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Use elux systembar instead of mate-panel"
+  },
+  {
+    "section": "Layout",
+    "key": "KioskMode",
+    "default": 0,
+    "range": [
+      0,
+      1,
+      2
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "If appliance mode is not 0 the client is locked down and only the configured appliance mode application can be used. To configure the application see kioskmode.ini. 0=none, 1=ucselfservice, 2=browser"
+  },
+  {
+    "section": "Layout",
+    "key": "LargeApplicationIcons",
+    "default": 0,
+    "range": [
+      0,
+      1
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Control Panel/starter shows 32x32 app icons instead of 16x16"
+  },
+  {
+    "section": "Layout",
+    "key": "NextFocusKey",
+    "default": "Down,Tab",
+    "range": [
+      "Down",
+      "Tab"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the shortkey for switching between active applications. Down=Use Ctrl-Alt-Down to switch between the applications; Tab=Use Alt-Tab to switch between the applications."
+  },
+  {
+    "section": "Layout",
+    "key": "NotifyNewWLAN",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Popup WLAN profile editor if an unknown WLAN is detected and client is offline"
+  },
+  {
+    "section": "Layout",
+    "key": "RestoreDesktop",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Modern UI V1: Save/Restore desktop icons before/after logoff/logon"
+  },
+  {
+    "section": "Layout",
+    "key": "ScreenSaverCustomLockImage",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "since eLux7: Local path to background image to be used for the screensaver's lock screen"
+  },
+  {
+    "section": "Layout",
+    "key": "ShowControlPanelIcon",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "UCDesktop: Visibility of legacy Control Panel Icon"
+  },
+  {
+    "section": "Layout",
+    "key": "ShowTaskbar",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the taskbar is to be displayed."
+  },
+  {
+    "section": "Layout",
+    "key": "SortConfigurationPanel",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Sort segments of configuration panel (ascending)"
+  },
+  {
+    "section": "Layout",
+    "key": "SplashWaitForAppAutostart",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "If a storefront or avd is configured with the autostart delay 0s, the loading screen ucsplash is kept open until the store loads its children. The loading screen will be closed automatically after 10s as a fallback."
+  },
+  {
+    "section": "Layout",
+    "key": "StarterDelay",
+    "default": "unset",
+    "range": "#sec",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the delay in seconds after which the starter is to be opened."
+  },
+  {
+    "section": "Layout",
+    "key": "SystembarPosition",
+    "default": 0,
+    "range": [
+      0,
+      1
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "since 6.8: 0=Bottom, 1=Top"
+  },
+  {
+    "section": "Layout",
+    "key": "TaskbarAlwaysOnTop",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the taskbar is to be always on top."
+  },
+  {
+    "section": "Layout",
+    "key": "TaskbarAutoHide",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the taskbar is to be hidden automatically."
+  },
+  {
+    "section": "Layout",
+    "key": "TaskbarOption",
+    "default": "0x07",
+    "range": "bitmask",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the applets of Quick Setup are to be shown in the taskbar. No Applet=0x0, MouseKeyboard=0x1, Multimedia=0x2, USB=0x4. The values are allocated by 'or'."
+  },
+  {
+    "section": "Layout",
+    "key": "TaskbarShowClock",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the clock is to be shown in the taskbar."
+  },
+  {
+    "section": "Layout",
+    "key": "Theme",
+    "default": "greenCrux",
+    "range": [
+      "greenCrux",
+      "blueCrux",
+      "Keramik",
+      "SilverXP",
+      "TrueCurve",
+      "WinClassic",
+      "XP"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the desktop theme to be used."
+  },
+  {
+    "section": "Layout",
+    "key": "UsbUnmountHotKey",
+    "default": "<Alt><Mod4><Hyper>s",
+    "range": "key combination",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Unmount all USB volumes. (WinKey+Alt+s) By default there is no hotkey defined."
+  },
+  {
+    "section": "Layout",
+    "key": "UseBackgroundImageBeforeLogon",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Logon dialog uses background pixmap"
+  },
+  {
+    "section": "Layout",
+    "key": "UseScreenSaver",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the screensaver is to be used."
+  },
+  {
+    "section": "Layout",
+    "key": "UseScreenSaverBeforeLogon",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Screensaver activate in logon dialog, a xscreensaver config can be given in /setup/xscreensaver/xslogon.ini"
+  },
+  {
+    "section": "Layout",
+    "key": "Workspace",
+    "default": "unset",
+    "range": "#",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the number of the workspaces to be shown."
+  },
+  {
+    "section": "Layout",
+    "key": "XAutoLockDelay",
+    "default": "unset",
+    "range": "#min",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the period of time in minutes, after which the screensaver is to be activated."
+  },
+  {
+    "section": "Layout",
+    "key": "XAutoLockPwd",
+    "default": "empty or $ELUXPASSWORD",
+    "range": "empty,$ELUXPASSWORD",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Entering the password $ELUXPASSWORD automatically uses the password of the ADS authorisation. Otherwise the field must remain empty."
+  },
+  {
+    "section": "LicenseInfo",
+    "key": "EndOfLeases",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "End of lease | Datamodel Object: Security"
+  },
+  {
+    "section": "LicenseInfo",
+    "key": "EndOfSubscription",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "End of subscription | Datamodel Object: Security"
+  },
+  {
+    "section": "LicenseInfo",
+    "key": "IssuedAt",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": "7.2411.0",
+    "publish": false,
+    "notes": "Time of lease issue | Datamodel Object: Security"
+  },
+  {
+    "section": "LicenseInfo",
+    "key": "LicenseValid",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.2411.0",
+    "publish": false,
+    "notes": "Indicates whether eLux is licensed | Datamodel Object: Security"
+  },
+  {
+    "section": "LicenseInfo",
+    "key": "ProductLeases",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": "7.2411.0",
+    "publish": false,
+    "notes": "Comma separated list of licensed thirdparty product ids | Datamodel Object: Security"
+  },
+  {
+    "section": "LicenseInfo",
+    "key": "SubscriptionValid",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Indicates whether subscription is valid | Datamodel Object: Security"
+  },
+  {
+    "section": "MemoryOptimisation",
+    "key": "CleanupDelayMs",
+    "default": 5000,
+    "range": "0-∞ (int)",
+    "sinceVersion": "7.2605",
+    "publish": false,
+    "notes": "Delay in milliseconds after an on-demand window is hidden before it is destroyed to free memory. | Datamodel Object: Desktop"
+  },
+  {
+    "section": "MemoryOptimisation",
+    "key": "Enabled",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.2605",
+    "publish": false,
+    "notes": "Enable or disable memory optimisation for on-demand windows (Device Configuration, Quick Config, Quick System Access). When enabled, on-demand windows are destroyed after the cleanup delay to reclaim memory. | Datamodel Object: Desktop"
+  },
+  {
+    "section": "MemoryOptimisation",
+    "key": "MemorySizeThresholdMb",
+    "default": 4096,
+    "range": "0-∞ (int)",
+    "sinceVersion": "7.2605",
+    "publish": false,
+    "notes": "RAM threshold in MB. Memory optimisation is active only on devices with total RAM ≤ this value. Set to 0 to apply to all devices regardless of RAM. | Datamodel Object: Desktop"
+  },
+  {
+    "section": "Multimedia",
+    "key": "IgnoreAsDefault",
+    "default": "unset",
+    "range": "comma separated list () of <vendorId>:<productId>",
+    "sinceVersion": "6.2302.1000",
+    "publish": false,
+    "notes": "Comma separated list of usb audio devices (vendorId:productId) which are not automatically set as default if connected. Wildcard allowed for productId (vendorId:*). Do not add blanks between devices (no blank after comma). Example: IgnoreAsDefault=1188:03cf,1188:1234 or IgnoreAsDefault=1188:* | Datamodel Object: Audio"
+  },
+  {
+    "section": "Multimedia",
+    "key": "MasterVolume",
+    "default": 49,
+    "range": "#",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Master volume"
+  },
+  {
+    "section": "Multimedia",
+    "key": "MicMute",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The muting of the microphone"
+  },
+  {
+    "section": "Multimedia",
+    "key": "MicVolume",
+    "default": 80,
+    "range": "#",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The microphone volume"
+  },
+  {
+    "section": "Multimedia",
+    "key": "PCMVolume",
+    "default": 24,
+    "range": "#",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "PCM volume"
+  },
+  {
+    "section": "Multimedia",
+    "key": "PulseAudio",
+    "default": "system",
+    "range": [
+      "system",
+      "session",
+      "off"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies how Pulse Audio System is running."
+  },
+  {
+    "section": "Multimedia",
+    "key": "VolumeMute",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The muting of the volume (speakers)"
+  },
+  {
+    "section": "Multimedia",
+    "key": "XDMCPSound",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether sound is to be available in XDMCP sessions."
+  },
+  {
+    "section": "NetDriveList",
+    "key": "1",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The key number must match with the # of the [!NETDRIVE!#] section"
+  },
+  {
+    "section": "NetDriveList",
+    "key": "2",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "(same pattern as key 1)"
+  },
+  {
+    "section": "Network",
+    "key": "BiosFile",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Name of the UDF file for uefifwupdate (relative to the usual update file location)"
+  },
+  {
+    "section": "Network",
+    "key": "BootMode",
+    "default": "unset",
+    "range": "dhcp, bootp, off",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the client gets its network data via DHCP, BOOTP or enters the data individually."
+  },
+  {
+    "section": "Network",
+    "key": "Broadcast",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Broadcast address of the client"
+  },
+  {
+    "section": "Network",
+    "key": "CurrentProfile",
+    "default": "unset",
+    "range": "uint",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "ID of the currently active network profile | Datamodel Object: CurrentProfileId"
+  },
+  {
+    "section": "Network",
+    "key": "CurrentProfileUserDefined",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "False if currently active profile is defined in scout, true if by the user | Datamodel Object: CurrentProfileUserDefined"
+  },
+  {
+    "section": "Network",
+    "key": "DHCPServer",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "not longer used"
+  },
+  {
+    "section": "Network",
+    "key": "DisableAutonegForAutoSpeed",
+    "default": "true (baseos >= 6.2302.1000-4), false (baseos < 6.2302.1000-4)",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "6.2302.3",
+    "publish": false,
+    "notes": "Normally when network speed is set to 'Auto' we want to enable auto-negotiate setting for the relevant network connection. However with new network manager (at least 1.36+) this leads to problems on some hardware when using some network splitters. Surprisingly, disabling auto-negotiate (without specifying speed) for the relevant connection makes the connection work and negotiate speed with the switch. This is also consistent with the way Ubuntu configures network connections. | Datamodel Object: DisableAutonegForAutoSpeed"
+  },
+  {
+    "section": "Network",
+    "key": "DisableConnectivityCheck",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Since RP 6.9.101: Disable ConnectivityCheck globally. Setting in network profiles are ignored."
+  },
+  {
+    "section": "Network",
+    "key": "DisableIPv6",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Disables IPv6 networking support"
+  },
+  {
+    "section": "Network",
+    "key": "DisableSCEP2TPM",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Disable storing private key in TPM2 space."
+  },
+  {
+    "section": "Network",
+    "key": "DisableScoutContactOnNetChange",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Disable scout contact on network change"
+  },
+  {
+    "section": "Network",
+    "key": "Domain",
+    "default": "unset",
+    "range": "mycompany.com",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "domain name of the client"
+  },
+  {
+    "section": "Network",
+    "key": "Dot1x",
+    "default": "unset",
+    "range": "obsolete",
+    "sinceVersion": "6.2212",
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Network",
+    "key": "Dot1xAuthenticationRetries",
+    "default": 4,
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Network",
+    "key": "Dot1xAutoconnectRetries",
+    "default": 3,
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Network",
+    "key": "Dot1xCA",
+    "default": "unset",
+    "range": "URL",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "URL of ROOT CA. DHCP Tag 230"
+  },
+  {
+    "section": "Network",
+    "key": "Dot1xCert",
+    "default": "unset",
+    "range": "URL",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Certificate URL. DHCP Tag 226"
+  },
+  {
+    "section": "Network",
+    "key": "Dot1xCertPhrase",
+    "default": "unset",
+    "range": "<password>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Certificate password, DHCP Tag 228"
+  },
+  {
+    "section": "Network",
+    "key": "Dot1xCertPhraseCrypt",
+    "default": "unset",
+    "range": "<crypt password>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Crypted certificate password, from dhclient-script"
+  },
+  {
+    "section": "Network",
+    "key": "Dot1xChanged",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Update 802.1x configuration"
+  },
+  {
+    "section": "Network",
+    "key": "Dot1xConf",
+    "default": "unset",
+    "range": "URL",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "URL of 802.1x config file. DHCP Tag 227"
+  },
+  {
+    "section": "Network",
+    "key": "Dot1xDays",
+    "default": "unset",
+    "range": "#days",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Anzahl der Tage ab der ein Hinweis angezeigt wird bevor das Zertifikat abläuft. (Number of days before certificate expiry a warning is shown.)"
+  },
+  {
+    "section": "Network",
+    "key": "Dot1xFirstLoad",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "detect initial loading of 802.1x configuration"
+  },
+  {
+    "section": "Network",
+    "key": "Dot1xIdentity",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Certificate Identity, account name on IAS, CN for Linux radius, DHCP Tag 229"
+  },
+  {
+    "section": "Network",
+    "key": "Dot1xOptional",
+    "default": "true (from 6.9.1000 and 6.11)",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Network",
+    "key": "Dot1xTimeout",
+    "default": 25,
+    "range": "obsolete",
+    "sinceVersion": "6.2212",
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Network",
+    "key": "EST",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Enable EST agent for client certificate transfer/enrollment. | Datamodel Object: Est→Enabled"
+  },
+  {
+    "section": "Network",
+    "key": "ETHLinkTimeout",
+    "default": 5,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": ">=6.2.4-4: Timeout for ethlink detection. Network script will wait for the given time to detect ethlink. RP5 >= 5.7.2002, default 10"
+  },
+  {
+    "section": "Network",
+    "key": "FqdnOption",
+    "default": "off",
+    "range": "off, auto, or Fully Qualified Domain Name string",
+    "sinceVersion": "6.2110.2",
+    "publish": false,
+    "notes": "Fully Qualified Domain Name of the client. Works as follows: (none)/\"off\"/(empty string): Don't use option 81; \"auto\": The hostname is constructed from network.Hostname and network.Domain; (qualified string): A string that contains a dot is taken literally — mostly for testing; Any other value: Undefined behavior. | Datamodel Object: FqdnOptionData in 6.2110.2, part of Network data in master"
+  },
+  {
+    "section": "Network",
+    "key": "GetSetup",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Force eluxd to fetch configuration on next boot | Datamodel Object: UpdateGetSetup (yes, really)"
+  },
+  {
+    "section": "Network",
+    "key": "Hostname",
+    "default": "myclient",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Host name of the client"
+  },
+  {
+    "section": "Network",
+    "key": "HostName1",
+    "default": "myclient22",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Network",
+    "key": "HostNameTemplate",
+    "default": "unset",
+    "range": "valid hostname",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Auto-create hostname from template which can contain the following patterns: %HOSTID% is replaced by the thin client's hostid; %MAC% is replaced by the thin client's mac address"
+  },
+  {
+    "section": "Network",
+    "key": "HW",
+    "default": "unset",
+    "range": "12-digit hex string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The MAC address of the first ethernet device"
+  },
+  {
+    "section": "Network",
+    "key": "IgnoreDHCPHostname",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Ignores the hostname sent by the DHCP server"
+  },
+  {
+    "section": "Network",
+    "key": "IgnoreScoutServerDHCPOptionsGlobal",
+    "default": "undefined",
+    "range": [
+      "undefined",
+      true,
+      false
+    ],
+    "sinceVersion": "6.2302.3",
+    "publish": false,
+    "notes": "Ignore the Scout server DHCP options. If defined, it overloads the IgnoreScoutServerDHCPOptions setting from network profiles."
+  },
+  {
+    "section": "Network",
+    "key": "IPAddr",
+    "default": "192.168.10.21",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "IP address of the client"
+  },
+  {
+    "section": "Network",
+    "key": "KeepWpa2EnterpriseCredentialsFromLastUser",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.2603.0",
+    "publish": false,
+    "notes": "Remember WPA2 Enterprise credentials. Credentials are associated with an eLux user. If another eLux user logs in, these remembered WPA2 Enterprise credentials are deleted. | Datamodel Object: Network.KeepWpa2EnterpriseCredentialsFromLastUser"
+  },
+  {
+    "section": "Network",
+    "key": "ManagerAddrList",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "List of IPs generated from ManagerNameList"
+  },
+  {
+    "section": "Network",
+    "key": "ManagerId",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Identifies Scout database installation (marked for removal from code per source annotation)"
+  },
+  {
+    "section": "Network",
+    "key": "ManagerLoadBalancer",
+    "default": "unset",
+    "range": "Fully Qualified Domain-Name",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Full Qualified Domain Name of Loadbalancer, which will be resolved by DNS Server to one of valid Scoutserver working on same database"
+  },
+  {
+    "section": "Network",
+    "key": "ManagerName",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "IP or Full Qualified Domain Name of Scoutserver (deployed per Scout), treated same as entry of ManagerNameList, so isn't needed, if ManagerNameList is present"
+  },
+  {
+    "section": "Network",
+    "key": "ManagerNameList",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "comma separated List of IPs or Full Qualified Domain Name of Scoutservers (deployed per Scout)"
+  },
+  {
+    "section": "Network",
+    "key": "MediaMac",
+    "default": "unset",
+    "range": "12-digit hex string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The MAC address of the connected network device"
+  },
+  {
+    "section": "Network",
+    "key": "MergeWLANProfile",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Merge transmitted wpa.conf with local auto connected wlan profile"
+  },
+  {
+    "section": "Network",
+    "key": "MTU",
+    "default": "<leer>",
+    "range": "512..MTUMax",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Network",
+    "key": "MTUMax",
+    "default": "<leer>",
+    "range": "512..1500",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Network",
+    "key": "NBDomain",
+    "default": "unset",
+    "range": "DOM01",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Netbios domain name of the client"
+  },
+  {
+    "section": "Network",
+    "key": "Netmask",
+    "default": "255.255.255.0",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Network mask of the client"
+  },
+  {
+    "section": "Network",
+    "key": "OverwriteIdenticalOrHigherVersion",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Allow re-installing the same or older firmware for uefifwupdate"
+  },
+  {
+    "section": "Network",
+    "key": "RequestAvayaTag",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Used to alter DHCP client configuration for usage with the Avaya Equinox client. Can be set by Scout administrators that somehow know about this. Probably still in use (see EL-2677, OTRS 11969 or trac 3340). Warning: This will only request the following DHCP Tags: subnet-mask, broadcast-address, time-offset, routers, domain-name, domain-name-servers, host-name, avaya_vdi_communicator_option_242 — all others include the Scout tags"
+  },
+  {
+    "section": "Network",
+    "key": "SCEP",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Enable SCEP agent for client certificate transfer/enrollment. | Datamodel Object: Scep→Enabled"
+  },
+  {
+    "section": "Network",
+    "key": "ScoutCloudGateway",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The name or ip of the scout cloud gateway."
+  },
+  {
+    "section": "Network",
+    "key": "ScoutMappingPath",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Since RP 6.9.1000: Filename of the ini file containing rules for directing the client to a specific scout server"
+  },
+  {
+    "section": "Network",
+    "key": "ShowNotificationOnEthernetDot1xFail",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "If false, suppress UI notification about LAN 802.1X notification failure | Datamodel Object: ShowNotificationOnEthernetDot1xFail"
+  },
+  {
+    "section": "Network",
+    "key": "ShowNotificationOnWlanDot1xFail",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "If false, suppress UI notification about wireless 802.1X notification failure | Datamodel Object: ShowNotificationOnWlanDot1xFail"
+  },
+  {
+    "section": "Network",
+    "key": "Timeout",
+    "default": "unset",
+    "range": "#sec",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "obsolete, DHCP Timeout is defined in profiles.ini→[<Network-Profile>]→DhcpTimeout"
+  },
+  {
+    "section": "Network",
+    "key": "TimeServer1",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Name or IP address of the time server"
+  },
+  {
+    "section": "Network",
+    "key": "TimeServerProtocol1",
+    "default": "RFC868",
+    "range": "RFC868, NTP",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the time server protocol. RFC868 = Unix-time server; NTP = Windows time server"
+  },
+  {
+    "section": "Network",
+    "key": "VPN",
+    "default": "unset",
+    "range": "PPTP/vpnclient vpnc",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Type of the vpnclients"
+  },
+  {
+    "section": "Network",
+    "key": "VpnLocationCheckTimeout",
+    "default": 10,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "not used"
+  },
+  {
+    "section": "Network",
+    "key": "VpnLocationCheckUrl",
+    "default": "unset",
+    "range": "Url",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Used to determine whether the client is connected to the company's internal network - directly or via VPN. If the webserver responds with a file containing the text \"Beacon is visible\" an internal connection is assumed. Every change of network connectivity triggers this check again. The check is only performed if sandboxing of the internal browser is activated."
+  },
+  {
+    "section": "Network",
+    "key": "Wpa2EnterpriseCredentialsKeptForUser",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": "7.2603.0",
+    "publish": false,
+    "notes": "Should not be set via Scout. If WPA2 Enterprise credentials were stored (because KeepWpa2EnterpriseCredentialsFromLastUser is enabled) this setting stores which eLux user the credentials are associated with. | Datamodel Object: Network.Wpa2EnterpriseCredentialsKeptForUser"
+  },
+  {
+    "section": "nfs_options",
+    "key": "protocol",
+    "default": "udp",
+    "range": "\"tcp\",\"udp\"",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "nfs protocol"
+  },
+  {
+    "section": "nfs_options",
+    "key": "rsize",
+    "default": 8192,
+    "range": "integer",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man 5 nfs"
+  },
+  {
+    "section": "nfs_options",
+    "key": "wsize",
+    "default": 8192,
+    "range": "integer",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man 5 nfs"
+  },
+  {
+    "section": "OpenId",
+    "key": "ClientId",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": "7.2411.0",
+    "publish": false,
+    "notes": "client ID obtained from the OpenID provider | Datamodel Object: OpenIdConfiguration"
+  },
+  {
+    "section": "OpenId",
+    "key": "ClientSecret",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": "7.2507.0",
+    "publish": false,
+    "notes": "client secret obtained from the OpenID provider | Datamodel Object: OpenIdConfiguration"
+  },
+  {
+    "section": "OpenId",
+    "key": "DiscoveryUrl",
+    "default": "unset",
+    "range": "a URL",
+    "sinceVersion": "7.2511.0",
+    "publish": false,
+    "notes": "URL to the well-known OpenID configuration Endpoint | Datamodel Object: OpenIdConfiguration"
+  },
+  {
+    "section": "OpenId",
+    "key": "RedirectUrl",
+    "default": "unset",
+    "range": "a URL",
+    "sinceVersion": "7.2411.0",
+    "publish": false,
+    "notes": "OpenID redirect URL configured with OpenID provider. recommended choice is https://localhost/login/ | Datamodel Object: OpenIdConfiguration"
+  },
+  {
+    "section": "Parameters",
+    "key": "Domain<1-N>",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Each entry contains one domain in the format `<friendlyName>,<domain>,<domain helper url>`. If a domain helper url is given, the pre-login dialog shows an additional button which calls the internal browser with this url. The additional button shows the given text \"I forgot my password\" which can be changed by the setting DomainHelperName."
+  },
+  {
+    "section": "Parameters",
+    "key": "DomainHelperName",
+    "default": "\"I forgot my password\"",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Alternate button text for domain helper button."
+  },
+  {
+    "section": "Parameters",
+    "key": "DomainHelperOptions",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Options to be added to the domain helpers command-line"
+  },
+  {
+    "section": "Parameters",
+    "key": "DomainHelperTimeout",
+    "default": 0,
+    "range": "seconds",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The domain helper browser is closed after given timeout (in seconds)"
+  },
+  {
+    "section": "Parameters",
+    "key": "KeepAbove",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Keep prelogin dialog window above others"
+  },
+  {
+    "section": "Parameters",
+    "key": "KeepBelow",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Keep prelogin dialog window below others"
+  },
+  {
+    "section": "Parameters",
+    "key": "LogoffDelay",
+    "default": 0,
+    "range": "seconds",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Defines delay in seconds until logoff takes place after logoff timer has started"
+  },
+  {
+    "section": "Parameters",
+    "key": "LogoffInfoTimeout",
+    "default": 0,
+    "range": "seconds",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Shows user info for n seconds if logoff has started"
+  },
+  {
+    "section": "Parameters",
+    "key": "LogoffMode",
+    "default": 0,
+    "range": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "0 = None; 1 = Logoff timer is started with logon; 2 = Logoff timer is started when the latest Citrix app is closed; 3 = Logoff timer is started when first Citrix app/desktop is opened"
+  },
+  {
+    "section": "Parameters",
+    "key": "PassThroughMode",
+    "default": 0,
+    "range": [
+      0,
+      1,
+      2
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "0 = none; 1 = AD; 2 = UserPassword"
+  },
+  {
+    "section": "Parameters",
+    "key": "PreLogin",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Whether to show the pre-login dialog. Recommended: Do not use this setting in combination with SharedUserMode=true"
+  },
+  {
+    "section": "Parameters",
+    "key": "PreLoginTitle",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Pre-login dialog title"
+  },
+  {
+    "section": "Parameters",
+    "key": "ReconnectOnLaunchOrRefresh",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Citrix SelfService setting. Determines whether the self-service UI tries to reconnect to all sessions when an application is launched or the store is refreshed."
+  },
+  {
+    "section": "Parameters",
+    "key": "ReconnectOnLogon",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Citrix SelfService setting. Determines whether the self-service UI tries to reconnect to all sessions, for a given store, immediately after logon to that store."
+  },
+  {
+    "section": "Parameters",
+    "key": "SelfSelection",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Citrix SelfService setting. Used to disable the search box and the self-selection panel. Note that this is used only by the legacy green UI. The self-selection panel appears on the left of the self-service UI when you click + (the plus sign). Disabling these UI elements prevents users from subscribing to extra applications."
+  },
+  {
+    "section": "Parameters",
+    "key": "SessionWindowedMode",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Display desktops windowed or fullscreen"
+  },
+  {
+    "section": "Parameters",
+    "key": "SharedUserMode",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Citrix SelfService setting. Indicates whether Shared User Mode is enabled. This allows the self-service UI to use one system user account for multiple users by removing user data from the device when users log off or close the UI. Recommended: Do not use this setting in combination with PreLogin=true"
+  },
+  {
+    "section": "Parameters",
+    "key": "ShowLastUser",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Fills user field with last logged in user name"
+  },
+  {
+    "section": "PassThroughCredentials",
+    "key": "Domain",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Domain for pass-through"
+  },
+  {
+    "section": "PassThroughCredentials",
+    "key": "Password",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "ICA encrypted password for pass-through"
+  },
+  {
+    "section": "PassThroughCredentials",
+    "key": "Username",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Username for pass-through"
+  },
+  {
+    "section": "pkcs11",
+    "key": "active",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Einer aus der Liste installed. Er ist der default für [security][PamPkcs11Module] (one from the `installed` list; default for [Security]PamPkcs11Module)"
+  },
+  {
+    "section": "pkcs11",
+    "key": "installed",
+    "default": "unset",
+    "range": "blank-separated list",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Die Namen der installierten PKCS#11 Pakete. Bisher gibt es: \"HiPath\" \"SafeSign\" und \"eToken\" (names of installed PKCS#11 packages; so far: HiPath, SafeSign, eToken)"
+  },
+  {
+    "section": "pkcs11",
+    "key": "logging",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Aktiviert logging für die aktive pkcs11 bibliothek (WARNUNG: kann in kurzer Zeit eine große Datenmenge produzieren) (Activates logging for the active pkcs11 library; WARNING: can produce a large amount of data quickly)"
+  },
+  {
+    "section": "pkcs11 <string>",
+    "key": "LongName",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "vollständiger Name der Bibliothek, siehe pkcs11-tool -I (full name of the library, see pkcs11-tool -I)"
+  },
+  {
+    "section": "pkcs11 <string>",
+    "key": "Module",
+    "default": "unset",
+    "range": "path",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Pfad zur PKCS#11 Bibliothek (path to the PKCS#11 library)"
+  },
+  {
+    "section": "pkcs11 <string>",
+    "key": "Version",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Version der Bibliothek, siehe pkcs11-tool -I (library version, see pkcs11-tool -I)"
+  },
+  {
+    "section": "PNLLayout",
+    "key": "DomainFieldStatus",
+    "default": 0,
+    "range": "0=Enabled,1=Disabled,2=Invisible,3=Read-Only",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Disables/hides the domain field in the PN logon dialog"
+  },
+  {
+    "section": "PNLLayout",
+    "key": "ServerFieldStatus",
+    "default": 0,
+    "range": "0=Enabled,1=Disabled,2=Invisible,3=Read-Only",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Disables/hides the server field in the PN logon dialog"
+  },
+  {
+    "section": "PowerManagement",
+    "key": "ConfirmationTimer",
+    "default": 10,
+    "range": "10-60",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Shutdown, Sleep timer before automatic confirmation (timer in seconds)"
+  },
+  {
+    "section": "PowerManagement",
+    "key": "ConfirmationTimerEnabled",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Activates/deactivates shutdown timer"
+  },
+  {
+    "section": "PowerManagement",
+    "key": "LogoffBeforeSuspend",
+    "default": false,
+    "range": [
+      false,
+      true
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Proceed logoff before suspend when sleep mode is triggered"
+  },
+  {
+    "section": "PowerManagement",
+    "key": "LowBatteryThreshold",
+    "default": 10,
+    "range": "1-100",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Threshold in percent for low battery warning notification"
+  },
+  {
+    "section": "PowerManagement",
+    "key": "Profile",
+    "default": 0,
+    "range": [
+      0,
+      1,
+      2
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The currently used power management profile. 0=Auto: Automatically switch between eco and performance based on the ac power plug. Plugged in: Performance, Unplugged: Eco. 1=Eco: Force eco profile. 2=Performance: Force performance profile"
+  },
+  {
+    "section": "PowerManagementEco",
+    "key": "BrightnessLevel",
+    "default": 50,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Brightness level in percent"
+  },
+  {
+    "section": "PowerManagementEco",
+    "key": "DisplayLockTimer",
+    "default": 60,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Lock display off after n-seconds of idle time"
+  },
+  {
+    "section": "PowerManagementEco",
+    "key": "DisplayLockTimerEnabled",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enable display lock timer"
+  },
+  {
+    "section": "PowerManagementEco",
+    "key": "DisplayOffTimer",
+    "default": 60,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Turn display off after n-seconds of idle time"
+  },
+  {
+    "section": "PowerManagementEco",
+    "key": "DisplayOffTimerEnabled",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enable display off timer"
+  },
+  {
+    "section": "PowerManagementEco",
+    "key": "IdleAction",
+    "default": 3,
+    "range": "2-3",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "2=ShutDown, 3=Suspend"
+  },
+  {
+    "section": "PowerManagementEco",
+    "key": "IdleTimer",
+    "default": 600,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Execute IdleAction after n-seconds of idle time"
+  },
+  {
+    "section": "PowerManagementEco",
+    "key": "IdleTimerEnabled",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enable idle timer"
+  },
+  {
+    "section": "PowerManagementEco",
+    "key": "LidCloseAction",
+    "default": 3,
+    "range": "0-3",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "0=None, 1=DisplayOff (lock if screensaver is configured and AD login is active), 2=ShutDown, 3=Suspend"
+  },
+  {
+    "section": "PowerManagementEco",
+    "key": "PowerButtonAction",
+    "default": 2,
+    "range": "0-4",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "0=None, 1=DisplayOff (lock if screensaver is configured and AD login is active), 2=ShutDown, 3=Suspend, 4=Ask"
+  },
+  {
+    "section": "PowerManagementEcoNonWorking",
+    "key": "BrightnessLevel",
+    "default": 50,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Brightness level in percent"
+  },
+  {
+    "section": "PowerManagementEcoNonWorking",
+    "key": "DisplayLockTimer",
+    "default": 60,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Lock display off after n-seconds of idle time"
+  },
+  {
+    "section": "PowerManagementEcoNonWorking",
+    "key": "DisplayLockTimerEnabled",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enable display lock timer"
+  },
+  {
+    "section": "PowerManagementEcoNonWorking",
+    "key": "DisplayOffTimer",
+    "default": 60,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Turn display off after n-seconds of idle time"
+  },
+  {
+    "section": "PowerManagementEcoNonWorking",
+    "key": "DisplayOffTimerEnabled",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enable display off timer"
+  },
+  {
+    "section": "PowerManagementEcoNonWorking",
+    "key": "IdleAction",
+    "default": 3,
+    "range": "2-3",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "2=ShutDown, 3=Suspend"
+  },
+  {
+    "section": "PowerManagementEcoNonWorking",
+    "key": "IdleTimer",
+    "default": 600,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Execute IdleAction after n-seconds of idle time"
+  },
+  {
+    "section": "PowerManagementEcoNonWorking",
+    "key": "IdleTimerEnabled",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enable idle timer"
+  },
+  {
+    "section": "PowerManagementEcoNonWorking",
+    "key": "LidCloseAction",
+    "default": 3,
+    "range": "0-3",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "0=None, 1=DisplayOff (lock if screensaver is configured and AD login is active), 2=ShutDown, 3=Suspend"
+  },
+  {
+    "section": "PowerManagementEcoNonWorking",
+    "key": "PowerButtonAction",
+    "default": 2,
+    "range": "0-4",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "0=None, 1=DisplayOff (lock if screensaver is configured and AD login is active), 2=ShutDown, 3=Suspend, 4=Ask"
+  },
+  {
+    "section": "PowerManagementPerformance",
+    "key": "BrightnessLevel",
+    "default": 100,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Brightness level in percent"
+  },
+  {
+    "section": "PowerManagementPerformance",
+    "key": "DisplayLockTimer",
+    "default": "See [Layout]→XAutoLockDelay",
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Lock display off after n-seconds of idle time, value will be copied over from old value if not explicitly specified"
+  },
+  {
+    "section": "PowerManagementPerformance",
+    "key": "DisplayLockTimerEnabled",
+    "default": "See [Layout]→UseScreenSaver",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enable display lock timer, value will be copied over from old value if not explicitly specified"
+  },
+  {
+    "section": "PowerManagementPerformance",
+    "key": "DisplayOffTimer",
+    "default": "See [Screen]→StandbyTime",
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Turn display off after n-seconds of idle time, value will be copied over from old value if not explicitly specified"
+  },
+  {
+    "section": "PowerManagementPerformance",
+    "key": "DisplayOffTimerEnabled",
+    "default": "See [Screen]→ScreenSaverOff negated",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enable display off timer, value will be copied over from old value if not explicitly specified"
+  },
+  {
+    "section": "PowerManagementPerformance",
+    "key": "IdleAction",
+    "default": 3,
+    "range": "2-3",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "2=ShutDown, 3=Suspend"
+  },
+  {
+    "section": "PowerManagementPerformance",
+    "key": "IdleTimer",
+    "default": 1200,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Execute IdleAction after n-seconds of idle time"
+  },
+  {
+    "section": "PowerManagementPerformance",
+    "key": "IdleTimerEnabled",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enable idle timer"
+  },
+  {
+    "section": "PowerManagementPerformance",
+    "key": "LidCloseAction",
+    "default": 1,
+    "range": "0-3",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "0=None, 1=DisplayOff (lock if screensaver is configured and AD login is active), 2=ShutDown, 3=Suspend"
+  },
+  {
+    "section": "PowerManagementPerformance",
+    "key": "PowerButtonAction",
+    "default": 2,
+    "range": "0-4",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "0=None, 1=DisplayOff (lock if screensaver is configured and AD login is active), 2=ShutDown, 3=Suspend, 4=Ask"
+  },
+  {
+    "section": "PowerManagementPerformanceNonWorking",
+    "key": "BrightnessLevel",
+    "default": 100,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Brightness level in percent"
+  },
+  {
+    "section": "PowerManagementPerformanceNonWorking",
+    "key": "DisplayLockTimer",
+    "default": "See [Layout]→XAutoLockDelay",
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Lock display off after n-seconds of idle time, value will be copied over from old value if not explicitly specified"
+  },
+  {
+    "section": "PowerManagementPerformanceNonWorking",
+    "key": "DisplayLockTimerEnabled",
+    "default": "See [Layout]→UseScreenSaver",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enable display lock timer, value will be copied over from old value if not explicitly specified"
+  },
+  {
+    "section": "PowerManagementPerformanceNonWorking",
+    "key": "DisplayOffTimer",
+    "default": "See [Screen]→StandbyTime",
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Turn display off after n-seconds of idle time, value will be copied over from old value if not explicitly specified"
+  },
+  {
+    "section": "PowerManagementPerformanceNonWorking",
+    "key": "DisplayOffTimerEnabled",
+    "default": "See [Screen]→ScreenSaverOff negated",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enable display off timer, value will be copied over from old value if not explicitly specified"
+  },
+  {
+    "section": "PowerManagementPerformanceNonWorking",
+    "key": "IdleAction",
+    "default": 3,
+    "range": "2-3",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "2=ShutDown, 3=Suspend"
+  },
+  {
+    "section": "PowerManagementPerformanceNonWorking",
+    "key": "IdleTimer",
+    "default": 1200,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Execute IdleAction after n-seconds of idle time"
+  },
+  {
+    "section": "PowerManagementPerformanceNonWorking",
+    "key": "IdleTimerEnabled",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enable idle timer"
+  },
+  {
+    "section": "PowerManagementPerformanceNonWorking",
+    "key": "LidCloseAction",
+    "default": 1,
+    "range": "0-3",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "0=None, 1=DisplayOff (lock if screensaver is configured and AD login is active), 2=ShutDown, 3=Suspend"
+  },
+  {
+    "section": "PowerManagementPerformanceNonWorking",
+    "key": "PowerButtonAction",
+    "default": 2,
+    "range": "0-4",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "0=None, 1=DisplayOff (lock if screensaver is configured and AD login is active), 2=ShutDown, 3=Suspend, 4=Ask"
+  },
+  {
+    "section": "PPTP",
+    "key": "Activated",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "PPTP vpnclient"
+  },
+  {
+    "section": "PPTP",
+    "key": "AllowedNetworks",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Anzahl der Netze die getunnelt werden (number of networks tunneled)"
+  },
+  {
+    "section": "PPTP",
+    "key": "AllowNet0",
+    "default": "unset",
+    "range": "1..n Netz",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Netz/Maske 192.168.16.0/255.255.255.0 (one row per tunneled network, e.g. AllowNet0, AllowNet1, ...)"
+  },
+  {
+    "section": "PPTP",
+    "key": "Password",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "PPTP",
+    "key": "Server",
+    "default": "unset",
+    "range": "ip-addr",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Server IP Address"
+  },
+  {
+    "section": "PPTP",
+    "key": "User",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Printd",
+    "key": "port_lp",
+    "default": 0,
+    "range": "#",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Port number for the LP print, if 0 the direct print is disabled"
+  },
+  {
+    "section": "Printd",
+    "key": "port_lpsave",
+    "default": 9100,
+    "range": "#",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Port number for the LP print (save)"
+  },
+  {
+    "section": "Printd",
+    "key": "port_usb",
+    "default": 9101,
+    "range": "#",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Port number for the USB print"
+  },
+  {
+    "section": "PrinterList",
+    "key": "1",
+    "default": "unset",
+    "range": "PrinterName1",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "List of defined printers"
+  },
+  {
+    "section": "PrinterList",
+    "key": "2",
+    "default": "unset",
+    "range": "PrinterName2",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The key number must match with the # of the [!PRINTER!#] section"
+  },
+  {
+    "section": "SAML",
+    "key": "Audience",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": "7.2511.0",
+    "publish": false,
+    "notes": "The audience restriction | Datamodel Object: SamlConfiguration"
+  },
+  {
+    "section": "SAML",
+    "key": "CertificatePath",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": "7.2511.0",
+    "publish": false,
+    "notes": "The path to where the IdP certificate is stored on eLux | Datamodel Object: SamlConfiguration"
+  },
+  {
+    "section": "SAML",
+    "key": "Issuer",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": "7.2511.0",
+    "publish": false,
+    "notes": "The issuer ID | Datamodel Object: SamlConfiguration"
+  },
+  {
+    "section": "SAML",
+    "key": "SsoUrl",
+    "default": "unset",
+    "range": "a URL",
+    "sinceVersion": "7.2511.0",
+    "publish": false,
+    "notes": "URL used for single sign on | Datamodel Object: SamlConfiguration"
+  },
+  {
+    "section": "ScoutHandshake",
+    "key": "CanCancel",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "whether the user can cancel the reboot process or not"
+  },
+  {
+    "section": "ScoutHandshake",
+    "key": "MaxRetries (MaxRetry deprecated)",
+    "default": 0,
+    "range": null,
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "stop trying after reaching this value, if set to 0 (default), the Scout handshake is inactive"
+  },
+  {
+    "section": "ScoutHandshake",
+    "key": "PermanentRetriesAfterDays",
+    "default": 0,
+    "range": null,
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "start handshake after this number of days has passed"
+  },
+  {
+    "section": "ScoutHandshake",
+    "key": "RetryTimer",
+    "default": 5,
+    "range": null,
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "seconds before next retry, after each retry this time is doubled"
+  },
+  {
+    "section": "ScoutHandshake",
+    "key": "WaitUser",
+    "default": 60,
+    "range": null,
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "seconds to wait for the user to close/logoff all applications"
+  },
+  {
+    "section": "Screen",
+    "key": "AccelMethod",
+    "default": "XAA",
+    "range": [
+      "XAA",
+      "EXA"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The selection is only supported by individual graphics drivers (intel)"
+  },
+  {
+    "section": "Screen",
+    "key": "AutomaticLayoutAdjustment",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "eLux7 < 7.2409.0, Obsolete since 7.2409.0 Beta1, behavior is as if the parameter is always true. If true the monitor layout will be adjusted automatically if a monitor is disconnected. Disconnect can also happen if a DP monitor is turned off. Primary monitors and windows can be moved around to make sure all content is visible. If false the monitor layout will stay potentially with gaps and windows in invisible areas"
+  },
+  {
+    "section": "Screen",
+    "key": "BackingStore",
+    "default": "unset",
+    "range": [
+      "on",
+      "off"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Optimization for graphical presentation at the client."
+  },
+  {
+    "section": "Screen",
+    "key": "BellDuration",
+    "default": 100,
+    "range": "0-???",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "in ms"
+  },
+  {
+    "section": "Screen",
+    "key": "BellPitch",
+    "default": 400,
+    "range": "0-???",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "tone"
+  },
+  {
+    "section": "Screen",
+    "key": "BellVolume",
+    "default": 0,
+    "range": "0-100",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "keyboard beep"
+  },
+  {
+    "section": "Screen",
+    "key": "BusID0",
+    "default": "internal use",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Depends on hardware"
+  },
+  {
+    "section": "Screen",
+    "key": "BusID1",
+    "default": "internal use",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Depends on hardware"
+  },
+  {
+    "section": "Screen",
+    "key": "BusID2",
+    "default": "internal use",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Depends on hardware"
+  },
+  {
+    "section": "Screen",
+    "key": "BusID3",
+    "default": "internal use",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Depends on hardware"
+  },
+  {
+    "section": "Screen",
+    "key": "Buttons",
+    "default": "auto",
+    "range": [
+      "auto",
+      "none",
+      2,
+      3,
+      5
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the mouse type. auto=automatic detection, none=NoMouse, 2=Two button mouse, 3=Three button mouse, 5=Wheel mouse"
+  },
+  {
+    "section": "Screen",
+    "key": "CanRotate",
+    "default": 0,
+    "range": [
+      0,
+      90,
+      180,
+      270
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Ob und welche Gradzahl die Grafikkarte den Bildschirm drehen kann (whether/which rotation degree the graphics card can rotate the screen). Depends on hardware/graphic driver"
+  },
+  {
+    "section": "Screen",
+    "key": "ColorDepth",
+    "default": 16,
+    "range": [
+      8,
+      16,
+      24
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Color depth of the screen"
+  },
+  {
+    "section": "Screen",
+    "key": "DacSpeed",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "overrule DacSpeed (i810)"
+  },
+  {
+    "section": "Screen",
+    "key": "DeadKeys",
+    "default": "unset",
+    "range": [
+      "on",
+      "off"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether dead keys should be enabled."
+  },
+  {
+    "section": "Screen",
+    "key": "DefaultMonitor2Position",
+    "default": "\"Right\"",
+    "range": "{\"Right\",\"Left\"}",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Screen",
+    "key": "DefaultResolutions",
+    "default": "blank",
+    "range": "comma-separated list of resolutions",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Predefined list of resolutions from UniCon. Is active if NoDDC=true."
+  },
+  {
+    "section": "Screen",
+    "key": "Device",
+    "default": "internal use",
+    "range": "Identifier of Graphic Device",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Internal name of the display device driver"
+  },
+  {
+    "section": "Screen",
+    "key": "DeviceID",
+    "default": "internal use",
+    "range": "pci device id",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Depends on hardware"
+  },
+  {
+    "section": "Screen",
+    "key": "DeviceResolutions",
+    "default": "internal use",
+    "range": "comma-separated list of resolutions",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Depends on hardware. Can be predefined by the Device-Script, if empty DefaultResolutions is used instead."
+  },
+  {
+    "section": "Screen",
+    "key": "DisableVSync",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "RP6>=6.2204 and RP6==6.2104.2001. Warning: This setting might lead to screen tearing or other graphical errors. Setting this to true will disable VSync for the GPU(s) which will usually drastically increase FPS. Can be useful to work around bugs in xorg regarding multi-GPU screen stutter issues."
+  },
+  {
+    "section": "Screen",
+    "key": "DontVTSwitch",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether Ctrl Alt F1...F12 should be enabled to switch between the consoles."
+  },
+  {
+    "section": "Screen",
+    "key": "Emulate3Buttons",
+    "default": "unset",
+    "range": [
+      "empty",
+      "Emulate3Buttons"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether 3 buttons are to be emulated."
+  },
+  {
+    "section": "Screen",
+    "key": "Enable_YCable",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Entscheidet ob die Kabelpeitsche unterstützt wird. Achtung: Wenn VGA-DVI Adapter verwendet wird, kann es zu einem weiteren Monitoreintrag kommen. (Decides whether the Y-cable/cable-splitter is supported. Warning: when a VGA-DVI adapter is used this can result in an additional monitor entry.)"
+  },
+  {
+    "section": "Screen",
+    "key": "FontPath%d",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "additional User Font path"
+  },
+  {
+    "section": "Screen",
+    "key": "FrequenciesAvailable",
+    "default": "generated",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "This list is displayed by the starter. Depends on hardware/graphic driver"
+  },
+  {
+    "section": "Screen",
+    "key": "Frequency",
+    "default": "unset",
+    "range": "60",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Screen frequency"
+  },
+  {
+    "section": "Screen",
+    "key": "HorizontalAlignment",
+    "default": "left",
+    "range": [
+      "left",
+      "center",
+      "right"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "RP6 >= 6.2209: left=old behavior, displays aligned by left display side; center=align displays horizontally by center of max row width; right=align displays by right display side."
+  },
+  {
+    "section": "Screen",
+    "key": "HWCursor",
+    "default": "blank",
+    "range": [
+      "blank",
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "force usage of HWCursor"
+  },
+  {
+    "section": "Screen",
+    "key": "IgnoreMonitorDisableEvent",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "ONLY RP5. If set to true traycrtl does ignore monitor disconnect events. For the calculation of the virtual framebuffer size and monitor position the disconnected monitor is processed as connected."
+  },
+  {
+    "section": "Screen",
+    "key": "KeyboardDelay",
+    "default": 500,
+    "range": "#",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Keyboard delay"
+  },
+  {
+    "section": "Screen",
+    "key": "KeyboardSpeed",
+    "default": 30,
+    "range": "#",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Key repetition rate"
+  },
+  {
+    "section": "Screen",
+    "key": "LANG",
+    "default": "en_US",
+    "range": "de_DE",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the desktop language"
+  },
+  {
+    "section": "Screen",
+    "key": "LeftHandMouse",
+    "default": "unset",
+    "range": [
+      "empty",
+      "LeftHandMouse"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether to swap left and right hand mouse button."
+  },
+  {
+    "section": "Screen",
+    "key": "ManagerResolutions",
+    "default": "blank",
+    "range": "comma-separated list of resolutions",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Requires NoDDC=true, to override list 'ResolutionsAvailable' via Scout. Example: 1024x768,1280x1024,1920x1080"
+  },
+  {
+    "section": "Screen",
+    "key": "MaxScreens",
+    "default": "generiert",
+    "range": [
+      1,
+      2,
+      4
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Anzahl der möglichen Bildschirme (number of possible screens). Depends on hardware/graphic driver"
+  },
+  {
+    "section": "Screen",
+    "key": "Monitor1,Monitor2,Monitor3,Monitor4",
+    "default": "internal",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Links the outputs (xrandr 1.2) with the monitor sections. Only supported by certain graphics drivers (intel)"
+  },
+  {
+    "section": "Screen",
+    "key": "Monitor2Position",
+    "default": "Right",
+    "range": [
+      "Left",
+      "Right",
+      "Above",
+      "Below"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Position relative to Monitor1: one of \"Left\",\"Right\",\"Above\",\"Below\""
+  },
+  {
+    "section": "Screen",
+    "key": "MoreModules",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "enables different driver for devices of same family"
+  },
+  {
+    "section": "Screen",
+    "key": "multiClickTime",
+    "default": 500,
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Double click speed"
+  },
+  {
+    "section": "Screen",
+    "key": "NoDDC",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether to value the monitor information."
+  },
+  {
+    "section": "Screen",
+    "key": "Numlock",
+    "default": "on",
+    "range": [
+      "on",
+      "off"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Initial numlock state"
+  },
+  {
+    "section": "Screen",
+    "key": "OffTime",
+    "default": "unset",
+    "range": "#min",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the time in minutes after which the Monitor is powered off (DPMS). Default: $StandbyTime"
+  },
+  {
+    "section": "Screen",
+    "key": "OutputProviderId",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "If a device with multiple GPUs is detected all GPUs are activated; the primary GPU is auto detected if the autodetection does not work the id can be overwritten here"
+  },
+  {
+    "section": "Screen",
+    "key": "PointerProtocol",
+    "default": "auto",
+    "range": [
+      "auto",
+      "none"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Controls whether mouse cursor is shown or not"
+  },
+  {
+    "section": "Screen",
+    "key": "PointerSpeed",
+    "default": "10/10",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Mouse pointer speed"
+  },
+  {
+    "section": "Screen",
+    "key": "PrependUserPath",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether defined font paths are to be evaluated prior to the system paths."
+  },
+  {
+    "section": "Screen",
+    "key": "Radeon.Audio",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "False=fix DP port out of range, true=enable audio over DP port."
+  },
+  {
+    "section": "Screen",
+    "key": "Resolution",
+    "default": "unset",
+    "range": "1024x768",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Screen resolution"
+  },
+  {
+    "section": "Screen",
+    "key": "ResolutionsAvailable",
+    "default": "generated",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "This list is displayed by the starter. Depends on hardware/graphic driver"
+  },
+  {
+    "section": "Screen",
+    "key": "Rotate",
+    "default": "unset",
+    "range": "one of the values from 'CanRotate'",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the level of rotation of the screen contents."
+  },
+  {
+    "section": "Screen",
+    "key": "ScreenSaverOff",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the power-save mode of the screen (screensaver) is to be switched on."
+  },
+  {
+    "section": "Screen",
+    "key": "SetDacSpeed",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Screen",
+    "key": "setMy",
+    "default": "internal use",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": ""
+  },
+  {
+    "section": "Screen",
+    "key": "StandbyTime",
+    "default": 10,
+    "range": "#min",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the time in minutes after which the Monitor is put in Standby Mode (DPMS)."
+  },
+  {
+    "section": "Screen",
+    "key": "SubDevice",
+    "default": "internal use",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Subclass of graphic device. Depends on hardware"
+  },
+  {
+    "section": "Screen",
+    "key": "SuspendTime",
+    "default": "unset",
+    "range": "#min",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the time in minutes after which the Monitor is put in Suspend Mode (DPMS). Default: $StandbyTime"
+  },
+  {
+    "section": "Screen",
+    "key": "TouchpadState",
+    "default": "on",
+    "range": [
+      "on",
+      "off",
+      "auto"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "on=Touchpad enabled, off=Touchpad disabled, auto=Automatically disables the touchpad when an external mouse (e.g. USB mouse) is connected."
+  },
+  {
+    "section": "Screen",
+    "key": "VerticalAlignment",
+    "default": "bottom",
+    "range": [
+      "top",
+      "bottom"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "RP5 >= 5.7.2001 or RP6 >= 6.9.0: If VerticalAlignment is set to \"top\" the old behavior is forced where the monitors are aligned at the top right corner. If set to \"bottom\" the new behavior is forced where the monitors are aligned at the bottom right corner."
+  },
+  {
+    "section": "Screen",
+    "key": "XkbCompat",
+    "default": "<empty>",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "special XKB Compat Mode, e.g. on bulgarian layout: \"group_led\""
+  },
+  {
+    "section": "Screen",
+    "key": "XkbLayout",
+    "default": "de",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies the keyboard language"
+  },
+  {
+    "section": "Screen",
+    "key": "XkbModel",
+    "default": "K293",
+    "range": [
+      "K293",
+      "K235",
+      "TYPE6"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "from [Keyboard]→Model"
+  },
+  {
+    "section": "Screen",
+    "key": "XkbOptions",
+    "default": "<empty>",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "special XKB Options, e.g. on russian layout: \"grp:toggle\""
+  },
+  {
+    "section": "Screen",
+    "key": "XkbVariant",
+    "default": "internal",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "handles 'DeadKeys' by setting XKB variant"
+  },
+  {
+    "section": "Security",
+    "key": "ADPasswordUTF8",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Send AD password as UTF8 (required by Win7 ADS), otherwise passwords containing Umlaute will fail"
+  },
+  {
+    "section": "Security",
+    "key": "AllowScUserAuth",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enables to change from SmartCard-Authentification to AD-Authentification (User, Password, Domain) via [Esc]-Key"
+  },
+  {
+    "section": "Security",
+    "key": "AllowX11Clients",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether other clients are allowed to open windows on this client."
+  },
+  {
+    "section": "Security",
+    "key": "AuthBase",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "LDAP Search Base (AuthType: 2,3,4,5,7)"
+  },
+  {
+    "section": "Security",
+    "key": "AuthBDC",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "2nd AuthServer for SMB"
+  },
+  {
+    "section": "Security",
+    "key": "AuthBindDN",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "if LDAP query requires authentication"
+  },
+  {
+    "section": "Security",
+    "key": "AuthBindPW",
+    "default": 0,
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "if LDAP query requires authentication"
+  },
+  {
+    "section": "Security",
+    "key": "AuthDomain",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "SMB Domain or IP/ADS Domain"
+  },
+  {
+    "section": "Security",
+    "key": "AuthDomainADS",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Overwrite the domain evaluated from AuthServer value."
+  },
+  {
+    "section": "Security",
+    "key": "AuthDomainFieldStatus",
+    "default": 0,
+    "range": [
+      0,
+      1,
+      2
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies how the domain field is to be displayed at the client. 0=enabled, 1=disabled, 2=invisible"
+  },
+  {
+    "section": "Security",
+    "key": "AuthPDC",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "1st AuthServer for SMB"
+  },
+  {
+    "section": "Security",
+    "key": "AuthServer",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Authorisation server"
+  },
+  {
+    "section": "Security",
+    "key": "AuthShowLastUser",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the user, who has logged in last, is to be shown at the client."
+  },
+  {
+    "section": "Security",
+    "key": "AuthType",
+    "default": 0,
+    "range": [
+      0,
+      1,
+      2,
+      3,
+      5,
+      6,
+      7,
+      10,
+      11,
+      12,
+      13,
+      14
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "same as SCAuthType"
+  },
+  {
+    "section": "Security",
+    "key": "AuthVersion",
+    "default": "unset",
+    "range": [
+      2,
+      3
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "LDAP Protocol Version. LDAP: 2 or 3, ADS: 3 only"
+  },
+  {
+    "section": "Security",
+    "key": "BrowserSandboxed",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "If set to true the internal browser will be started in a sandbox only. In this case the firejail package must have been installed."
+  },
+  {
+    "section": "Security",
+    "key": "BrowserTrustedUris",
+    "default": "<empty>",
+    "range": "comma separated uri list",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Exports trusted uris list into gss api and enables kerberos authentication with these urls"
+  },
+  {
+    "section": "Security",
+    "key": "Check",
+    "default": "unset",
+    "range": [
+      "none",
+      "forever",
+      "boot"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies when to check the SmartCard. boot=SmartCard is checked for during the boot procedure of the client. forever=The SmartCard must always be available."
+  },
+  {
+    "section": "Security",
+    "key": "CryptSetupPartition",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "**Deprecated since 6.10.0**, please use DiskEncryption instead. **Removed in eLux 7.0.0.** To be backward compatible this parameter will still work but has the same effect as DiskEncryption. Since 6.7.0: If set to true the setup partition will be encrypted on next reboot of device. If set to false setup partition will be decrypted on next reboot. TPM2 is used to store the key for encryption, no user input is needed."
+  },
+  {
+    "section": "Security",
+    "key": "DesktopLockResource",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": "7.2503.0",
+    "publish": false,
+    "notes": "When AuthType=Citrix (13) then this is used by CWA to specify the resource to be used. Optional. e.g.: Controller.auto2203w10-1$A10-3-6E7F2AFD-0001"
+  },
+  {
+    "section": "Security",
+    "key": "DesktopLockStore",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": "7.2503.0",
+    "publish": false,
+    "notes": "When AuthType=Citrix (13) then this is used by CWA to launch a locked down session. e.g.: https://vad72203.itsr.qa.unicon-ka.de/Citrix/vad72203ItsrStore"
+  },
+  {
+    "section": "Security",
+    "key": "DisableLdapSearch",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "6.2303.3000",
+    "publish": false,
+    "notes": "During Login disables a LDAP search to find User variables. This setting was introduced with EL-8916. It is a workaround for Europcar, eLux7 receives a proper solution and thus has not this setting."
+  },
+  {
+    "section": "Security",
+    "key": "DisableSecurePin",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Since 6.4.1: If set to true secure pin login is disabled in loginmanager"
+  },
+  {
+    "section": "Security",
+    "key": "DiskEncryption",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "**Since 6.10.0**: If set to true disk encryption will be used. Root and Setup partition will be encrypted"
+  },
+  {
+    "section": "Security",
+    "key": "EncryptedSetup",
+    "default": "unset",
+    "range": [
+      false,
+      true
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "**Removed since 6.10.0**, it will be available in Security DataModel but not in terminal.ini because value is gathered on each boot. Status if setup partition is encrypted"
+  },
+  {
+    "section": "Security",
+    "key": "Info1",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Free text info to specify client specific information (f.e. location, room, division)"
+  },
+  {
+    "section": "Security",
+    "key": "Info2",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Free text info to specify client specific information (f.e. location, room, division)"
+  },
+  {
+    "section": "Security",
+    "key": "Info3",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Free text info to specify client specific information (f.e. location, room, division)"
+  },
+  {
+    "section": "Security",
+    "key": "Krb5EnterpriseMode",
+    "default": false,
+    "range": "boolean",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Darf im Username ein '@' enthalten sein. Beispiel: MS-UPN ist Siegbert.Teuscher@unicon-software.com, die Realm ist W2K3.UNICON-KA.DE. Dann ist der volle Kerberosname: Siegbert.Teuscher\\@unicon-software.com@W2K3.UNICON-KA.DE"
+  },
+  {
+    "section": "Security",
+    "key": "Krb5KpasswdProto",
+    "default": "udp",
+    "range": [
+      "tcp",
+      "udp"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "mit welchem Protokoll wird das PE:changepassword schickt. Hintergrund: RFC 3244 - Microsoft Windows 2000 Kerberos Change Password and Set Password Protocols"
+  },
+  {
+    "section": "Security",
+    "key": "Krb5LargeMessageSize",
+    "default": 1400,
+    "range": "integer",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "ab welcher Paketgröße wechselt die Bibliothek von UDP auf TCP (packet size threshold at which the library switches from UDP to TCP)"
+  },
+  {
+    "section": "Security",
+    "key": "Krb5LogLevel",
+    "default": "-",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man krb5.conf. Der Parameter wird, abhängig von LogLevel automatisch auf \"-3\" oder \"0-\" gesetzt"
+  },
+  {
+    "section": "Security",
+    "key": "Krb5RenewLifetime",
+    "default": "<Krb5TicketLifetime>",
+    "range": "integer [seconds]",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man krb5.conf - renew_lifetime"
+  },
+  {
+    "section": "Security",
+    "key": "Krb5SrvLookup",
+    "default": false,
+    "range": "boolean",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "kdc in krb5.conf eintragen, oder soll die Bibliothek dynamisch per DNS danach suchen (whether to enter kdc in krb5.conf, or have the library search dynamically via DNS)"
+  },
+  {
+    "section": "Security",
+    "key": "Krb5TicketLifetime",
+    "default": 36000,
+    "range": "integer [seconds]",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man krb5.conf - ticket_lifetime"
+  },
+  {
+    "section": "Security",
+    "key": "Krb5WeakCrypto",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Set allow_weak_crypto to true or false in krb5.conf"
+  },
+  {
+    "section": "Security",
+    "key": "Krb5Win2k",
+    "default": "yes",
+    "range": [
+      "yes",
+      "no"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Dieser Parameter setzt den pkinit_win2k Parameter in /etc/krb5.conf, see man krb5.conf. Er ist nur bei SmartCard anmeldung relevant. Wenn der Parameter auf aktiv ist, kann man sich an Windows 2000 und 2003 Domänen anmelden. Zur Anmeldung an 2008R2 muss der Parameter auf no gesetzt werden."
+  },
+  {
+    "section": "Security",
+    "key": "LdapReferrals",
+    "default": true,
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man ldap.conf - Referrals"
+  },
+  {
+    "section": "Security",
+    "key": "LdapRestart",
+    "default": true,
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man ldap.conf - Restart"
+  },
+  {
+    "section": "Security",
+    "key": "LdapScope",
+    "default": "sub",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man ldap.conf - Scope"
+  },
+  {
+    "section": "Security",
+    "key": "LdapTlsCrlcheck",
+    "default": "none",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man ldap.conf - TLS_CRLCHECK"
+  },
+  {
+    "section": "Security",
+    "key": "LdapTlsReqcert",
+    "default": "never",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man ldap.conf - TLS_REQCERT"
+  },
+  {
+    "section": "Security",
+    "key": "Licence",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.2411.0",
+    "publish": false,
+    "notes": "Indicates whether eLux is licensed (RP5 only). **Removed in eLux 7.2411.0**"
+  },
+  {
+    "section": "Security",
+    "key": "LocalPassword",
+    "default": "elux",
+    "range": "crypted string",
+    "sinceVersion": "7.0.0",
+    "publish": false,
+    "notes": "The password is used in the base configuration only. **Deprecated in 2018, removed in eLux 7**"
+  },
+  {
+    "section": "Security",
+    "key": "LockedFields",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Bit string for the fields which are to be locked at the client."
+  },
+  {
+    "section": "Security",
+    "key": "Mirror",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the mirroring server is started."
+  },
+  {
+    "section": "Security",
+    "key": "MirrorDashboard",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Specifies whether the websockify daemon is started."
+  },
+  {
+    "section": "Security",
+    "key": "MirrorDashboardCertificate",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Path to the ssl certificate which is used by websockify if MirrorTLS is true"
+  },
+  {
+    "section": "Security",
+    "key": "MirrorDashboardPrivateKey",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Path to the ssl private key file which is used by websockify if MirrorTLS is true"
+  },
+  {
+    "section": "Security",
+    "key": "MirrorDialog",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether initiating a mirror session has to be confirmed at the client."
+  },
+  {
+    "section": "Security",
+    "key": "MirrorDisplays",
+    "default": "unset",
+    "range": [
+      1,
+      2,
+      3,
+      "..."
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Monitors to be shared by the mirroring server"
+  },
+  {
+    "section": "Security",
+    "key": "MirrorDMCP",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether XDMCP sessions are to be mirrored, too."
+  },
+  {
+    "section": "Security",
+    "key": "MirrorPassword",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Password for the mirroring process."
+  },
+  {
+    "section": "Security",
+    "key": "MirrorTLS",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "aes 256 Bit encryption for vncserver"
+  },
+  {
+    "section": "Security",
+    "key": "MirrorViewOnly",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the mirroring client is authorized for viewing only."
+  },
+  {
+    "section": "Security",
+    "key": "pam_filter",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man pam_ldap - pam_filter"
+  },
+  {
+    "section": "Security",
+    "key": "pam_groupdn",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man pam_ldap"
+  },
+  {
+    "section": "Security",
+    "key": "pam_login_attribute",
+    "default": "AuthType 3,5: sAMAccountName; AuthType 1,4: uid",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man pam_ldap"
+  },
+  {
+    "section": "Security",
+    "key": "pam_max_uid",
+    "default": 0,
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man pam_ldap"
+  },
+  {
+    "section": "Security",
+    "key": "pam_member_attribute",
+    "default": "uniquemember",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man pam_ldap"
+  },
+  {
+    "section": "Security",
+    "key": "pam_min_uid",
+    "default": 0,
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man pam_ldap"
+  },
+  {
+    "section": "Security",
+    "key": "pam_password",
+    "default": "AuthType 3,5 except AuthType 1,4: crypt",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man pam_ldap"
+  },
+  {
+    "section": "Security",
+    "key": "pam_sasl_mech",
+    "default": "AuthType 3,5: GSSAPI; AuthType 1,4: \"\"",
+    "range": [
+      "GSSAPI",
+      "GSS-SPNEGO"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "see: man pam_ldap"
+  },
+  {
+    "section": "Security",
+    "key": "PamPkcs11IgnoreSlotMode",
+    "default": "Description",
+    "range": [
+      "Description",
+      "Label"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Wogegen wird der String PamPkcs11IgnoreSlot verglichen? Die Slot Description entspricht dem Namen des Readers. Der Label dem Label, das beim initialisieren der Smartcard angegeben wurde."
+  },
+  {
+    "section": "Security",
+    "key": "PamPkcs11Module",
+    "default": "unset",
+    "range": "<filename>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "(full path-)Name der PKCS#11 Bibliothek. Der default wird durch [pkcs11]Active bestimmt. (full-path name of PKCS#11 library; default determined by [pkcs11]Active)"
+  },
+  {
+    "section": "Security",
+    "key": "Pkcs11CaCerts",
+    "default": "<mandatory>",
+    "range": "<filenames..>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Name der Datei mit dem Zertifikat der Zertifizierungsstelle (Root Zertifikat). Liste mit Blank getrennt. (Name of the file with the CA certificate. List separated by blank.)"
+  },
+  {
+    "section": "Security",
+    "key": "Pkcs11CaCrls",
+    "default": "online",
+    "range": "<filenames...> or 'none'",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "\"\" := (online) Die CRL distribution points werden aus dem Benutzerzertifikat gelesen. Die CRL wird online gelesen und geprüft. Es werden 'ldap:' und 'http:' URLs unterstützt. 'none' := keine CRL Prüfung (CRL distribution points read from user certificate; checked online; ldap: and http: URLs supported; 'none' = no CRL check)"
+  },
+  {
+    "section": "Security",
+    "key": "PKcs11CrlPolicy",
+    "default": "auto",
+    "range": [
+      "auto",
+      "none",
+      "offline"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "intern → pam_pkcs11.conf, pkcs11_eventmgr.conf"
+  },
+  {
+    "section": "Security",
+    "key": "PureAuthLogin",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enables PureAuths authvr5 loopback server for unlocking and custom login user agent."
+  },
+  {
+    "section": "Security",
+    "key": "SCAuthType",
+    "default": 0,
+    "range": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Type of authorisation: 0=off, 1=WinNT Domain (SMB), 2=LDAP (unused), 3=Active Directory Domain (ADS), 4=LDAP+Smartcard (Cert.) (unused), 5=ADS+SmartCard (Cert.), 6=Secude (SmartCard Cert. w/o ADS), 7=Smarty+ADS — both not available in RP6 or eLux7, 10=Evidian, 11=EntraID (since eLux7 Alpha 36), 12=OpenID (since eLux 7.2411.0), 13=Citrix (since eLux 7.2503.0, ELUX-3535), 14=Imprivata, 15=SAML."
+  },
+  {
+    "section": "Security",
+    "key": "ScInitialPIN",
+    "default": false,
+    "range": "#",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Initial PIN for Smarty. Must be changed in the first login dialog."
+  },
+  {
+    "section": "Security",
+    "key": "ScoutCaElprotCertFirstSeenAt",
+    "default": 0,
+    "range": "timestamp (time_t)",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Date/Time when Scout CA was first sent to eLux client. After eLux has received a Scout CA certificate (i.e. once ScoutCaElprotCertFirstSeenAt > 0), eLux will check TLS certs unless disabled (TlsVerifyOption = -1)."
+  },
+  {
+    "section": "Security",
+    "key": "Scoutd",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether scoutd is started and client is accessible via exterm on port 5681"
+  },
+  {
+    "section": "Security",
+    "key": "ScUserAuthAsDefault",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Determines whether the AD-Auth dialog should be displayed as default even if SmartCard-Auth is available. Only to be evaluated if AllowScUserAuth is set to true."
+  },
+  {
+    "section": "Security",
+    "key": "ServerProfilePath",
+    "default": "none",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The path in which the server profile is stored."
+  },
+  {
+    "section": "Security",
+    "key": "TlsVerifyOption",
+    "default": "-1 (eLux >= 7.2505.0), 0",
+    "range": [
+      -1,
+      0,
+      1,
+      3
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Specify trust level for eLux/Scout management protocol: -1=Scout certificate is not verified (eLux >= 7.2505.0); 0: Scout certificate verified if Scout CA certificates sent to eLux, otherwise Scout certificate is not verified (eLux >= 7.2505.0) / Scout certificate is not verified (eLux <= 7.2503.0); 1=Scout certificate is verified, required certificates located in /setup/cacerts/scoutsrv; 3=in addition to 1 the Scout hostname must be identical with certificate's subject CN or SAN"
+  },
+  {
+    "section": "Security",
+    "key": "UseServerProfile",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the client data are to be saved on a server."
+  },
+  {
+    "section": "Security",
+    "key": "WriteFilter",
+    "default": 1,
+    "range": "0-2",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "0=Schreibfilterzustand unbekannt (write filter state unknown), 1=Schreibfilter aus (write filter off), 2=Schreibfilter aktiv (write filter active)"
+  },
+  {
+    "section": "SmartCard",
+    "key": "AvoidRawProtocol",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Choose Block or RAW mode when reading cards."
+  },
+  {
+    "section": "SmartCard",
+    "key": "EnableProcessBlocklist",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.2601",
+    "publish": false,
+    "notes": "To improve browser performance, prevent the listed processes (for example certutil, certificate management in the NSS database, or on tokens) from accessing PKCS#11 functions (such as C_GetFunctionList)."
+  },
+  {
+    "section": "SmartCard",
+    "key": "OnScInsert",
+    "default": "none",
+    "range": [
+      "none",
+      "runscript"
+    ],
+    "sinceVersion": "7.2601",
+    "publish": true,
+    "notes": "Defines the action performed when a SmartCard is inserted."
+  },
+  {
+    "section": "SmartCard",
+    "key": "OnScRemoval",
+    "default": "none",
+    "range": [
+      "none",
+      "lock",
+      "logoff",
+      "runscript"
+    ],
+    "sinceVersion": "7.2601",
+    "publish": true,
+    "notes": "Action if smart card is removed | Datamodel Object: Pkcs11.SmartcardRemoveAction"
+  },
+  {
+    "section": "SmartCard",
+    "key": "PauseActionOnDifferentCardInserted",
+    "default": "switchuser",
+    "range": [
+      "switchuser",
+      "Ignore"
+    ],
+    "sinceVersion": "7.2601",
+    "publish": true,
+    "notes": "Defines how the system reacts if a different SmartCard is inserted while a session is paused."
+  },
+  {
+    "section": "SmartCard",
+    "key": "PauseActionTimeoutSeconds",
+    "default": 30,
+    "range": "5-300",
+    "sinceVersion": "7.2601",
+    "publish": true,
+    "notes": "A timeout in seconds before the standard SmartCard removal action is applied when a session is paused."
+  },
+  {
+    "section": "SmartCard",
+    "key": "ScInsertScript",
+    "default": "none",
+    "range": "full file path",
+    "sinceVersion": "7.2601",
+    "publish": true,
+    "notes": "Specifies the full path to the script executed on SmartCard insertion."
+  },
+  {
+    "section": "SmartCard",
+    "key": "ScRemoveScript",
+    "default": "none",
+    "range": "full file path",
+    "sinceVersion": "7.2601",
+    "publish": true,
+    "notes": "Specifies the full path to the script executed on SmartCard removal."
+  },
+  {
+    "section": "SmartCard",
+    "key": "ScTriggerCardScope",
+    "default": 0,
+    "range": [
+      0,
+      1
+    ],
+    "sinceVersion": "7.2605",
+    "publish": true,
+    "notes": "ScTriggerCardScope=0 (Default): Every card can trigger insert, remove and pause action. ScTriggerCardScope=1: Only first card triggers insert, remove and pause action."
+  },
+  {
+    "section": "Statistics",
+    "key": "KeepAliveInterval",
+    "default": 600,
+    "range": "integer",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Sendeintervall in Sekunden (60-153600) (send interval in seconds)"
+  },
+  {
+    "section": "Statistics",
+    "key": "KeepAliveLegacy",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Activates legacy keep alive protocol (UDP)"
+  },
+  {
+    "section": "Statistics",
+    "key": "KeepAliveOption",
+    "default": 0,
+    "range": "integer",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Bit-weise 1=aktueller Benutzer und Domäne werden mitgesendet, 2=Client Hostname und IP werden mitgesendet (bitwise: 1=current user+domain sent along, 2=client hostname+IP sent along)"
+  },
+  {
+    "section": "Statistics",
+    "key": "Port",
+    "default": 22124,
+    "range": "integer",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Port des Statistik Servers (port of the statistics server)"
+  },
+  {
+    "section": "Statistics",
+    "key": "RespectLimits",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Prüfung der Intervallgrenzen (check of interval bounds)"
+  },
+  {
+    "section": "Statistics",
+    "key": "SendKeepAlive",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Ein/Ausschalter des KeepAlive (KeepAlive on/off switch)"
+  },
+  {
+    "section": "Statistics",
+    "key": "Server",
+    "default": "eLuxManager aus [Network]",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Hostname (oder IP) des Statistik Servers (hostname or IP of the statistics server)"
+  },
+  {
+    "section": "Statistics",
+    "key": "Supervise",
+    "default": "unset",
+    "range": [
+      "usb",
+      "pci"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Aktivierung der Geräteüberwachung bestimmter Gerätetypen (Komma separiert) für Asset (Dashboard) (Activation of device monitoring for certain device types, comma separated, for Asset Dashboard)"
+  },
+  {
+    "section": "Store<1-N>",
+    "key": "AutostartResources",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "List (separated by semicolon) of Citrix apps/desktops to be launched after logon. Currently only available with PreLogin=true"
+  },
+  {
+    "section": "Store<1-N>",
+    "key": "Default",
+    "default": false,
+    "range": [
+      false,
+      true
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Is this the default store"
+  },
+  {
+    "section": "Store<1-N>",
+    "key": "Favorite",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Since RP 6.8: If set to true the item will be marked as favorite in the portal selector, favorites are listed first"
+  },
+  {
+    "section": "Store<1-N>",
+    "key": "FriendlyName",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Name to be displayed to the user"
+  },
+  {
+    "section": "Store<1-N>",
+    "key": "Url",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "URL of the citrix store"
+  },
+  {
+    "section": "Swap",
+    "key": "SwapEnabled",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.2605",
+    "publish": true,
+    "notes": "Enable or disable swap file creation by the low_memory_workaround boot script (custom_swapon_lowmem FPM). When false, no swap is created regardless of system RAM."
+  },
+  {
+    "section": "Swap",
+    "key": "SwapSizeMB",
+    "default": 4096,
+    "range": ">=1 (MB)",
+    "sinceVersion": "7.2605",
+    "publish": true,
+    "notes": "Size of the swap file in megabytes. If an existing swap file at /custom/swap has a different size, it will be recreated with this size on next boot."
+  },
+  {
+    "section": "Theme",
+    "key": "ColorHover",
+    "default": "#e6f1f7",
+    "range": "RGB color string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Citrix list selection widgets: background color for list elements on mouse hover"
+  },
+  {
+    "section": "Theme",
+    "key": "ColorSelected",
+    "default": "#cce3f0",
+    "range": "RGB color string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Citrix list selection widgets: background color for selected list elements"
+  },
+  {
+    "section": "Theme",
+    "key": "ColorUnselected",
+    "default": "#ffffff",
+    "range": "RGB color string",
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "Citrix list selection widgets: background color for unselected list elements"
+  },
+  {
+    "section": "Theme",
+    "key": "Decorated",
+    "default": false,
+    "range": [
+      false,
+      true
+    ],
+    "sinceVersion": null,
+    "publish": true,
+    "notes": "If true the uidialoglib windows have a window decoration"
+  },
+  {
+    "section": "Theme",
+    "key": "ThemeName",
+    "default": "ucselfservice",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The name of the GTK theme to be used within the uidialoglib. A GTK2 resource file can be placed to /setup/ica/<theme name>.gtkrc"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ActIDF",
+    "default": "unset",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Currently installed idf file"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ActUpdateResult",
+    "default": 0,
+    "range": "#",
+    "sinceVersion": "7.0.0",
+    "publish": false,
+    "notes": "Update initiated from Scout. Internal parameter during update. **Removed in eLux 7** (moved to updatestate.ini in eLux 7)"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "AllowIdfBrowse",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Starter/Setup/Firmware: Browse button for all IDF files on the web server. Browsing must be enabled on the web server."
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "AtId",
+    "default": "unset",
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Current at command id."
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "AutoCheckUpdate",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Check for update during the start of the client (Update on boot)"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "AutoStartMigration",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "same as MigrationIdfUrl (EL-9428)",
+    "publish": true,
+    "notes": "Custom parameter for the migration RP6→eLux7 or eLux 7.2408.*→eLux >= 7.2409.0. Only present in migration_enablement epm. Not added to ucsettingsd. Configures if the migration should start automatically on boot after installation of the epm or if a custom trigger is needed. See \"Migration eLux RP6 to eLux7 for Developers\". | Datamodel Object: Not present in data model"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "CheckCertificateValidity",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.2411.0",
+    "publish": true,
+    "notes": "Enable TLS certificate checking for all updates. If CheckCertificateValidity=true, updates via HTTPS will fail if necessary CA certificates are not installed on eLux client. | Datamodel Object: Update"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "CheckUpdateOnShutdown",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether it is to be checked for an update during the shutdown of the client."
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ClearUpdatePartition",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Clean update partition after successfully installation."
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ConfirmUpdate",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the client user is to confirm an update. One-shot during updates"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "Deferred",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "User has deferred"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "DeliveryBatteryThreshold",
+    "default": 50,
+    "range": "0..100",
+    "sinceVersion": "7.2605.0",
+    "publish": false,
+    "notes": "Minimum battery charge allowed to perform delivery | Datamodel Object: Update"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ForceUpdateOnBoot",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.0.0",
+    "publish": false,
+    "notes": "Forces an update on boot; gets set in the update scripts (init.update) if we need to reformat the disks when coming from a kernel older than 5.4.28.7. Formatting will clear the parameter. **Removed in eLux 7**"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "FormatBeforeUpdate",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Controls update with flash format feature. One-shot during updates"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ftphost",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "IP address of the server for the update."
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ftphostname",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "IP name of the server for the update"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ftppath",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The path at the update server"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "idf",
+    "default": "unset",
+    "range": "myimage.idf",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The name of the image file"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "LastArch",
+    "default": "unset",
+    "range": [
+      "EFI",
+      "x64"
+    ],
+    "sinceVersion": "7.0.0",
+    "publish": false,
+    "notes": "Last system architecture from __BM__ macro check, internal use only. **Removed in eLux 7**"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "LockCancelTimeout",
+    "default": 30,
+    "range": "int",
+    "sinceVersion": "7.0.0",
+    "publish": false,
+    "notes": "Timeout in seconds where a user can cancel the update lock dialog (used if device is currently serving as dynamic proxy provider or a delivery is in progress). **Removed in eLux 7**"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ManagerUpdate",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Update initiated from Scout. Internal parameter during update."
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "MaxDeferments",
+    "default": "unset",
+    "range": "count",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Maximum deferment possible"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "MaxUpdateRetry",
+    "default": 3,
+    "range": "count",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Maximal update retry on error, if AutoCheckUpdate on boot is on. Only without user confirmation"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "Mdf",
+    "default": "rp6.mee",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Migration definition file (RP5→RP6) located in the RP6 container"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "MigrationIdfUrl",
+    "default": "unset",
+    "range": "any valid url string",
+    "sinceVersion": "6.2104.300",
+    "publish": true,
+    "notes": "Custom parameter for the migration RP6→eLux7 or eLux 7.2408.*→eLux >= 7.2409.0. Only present in migration_enablement epm. Not added to ucsettingsd. This key contains a url to a target elux7 idf the system should migrate to. The procedure that uses this key is described in \"Migration for eLux 7 for developers\". | Datamodel Object: Not present in data model"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "MigrationServerForVpn",
+    "default": "unset",
+    "range": "<protocol>://<server>",
+    "sinceVersion": "same as MigrationIdfUrl (ELUX-141)",
+    "publish": true,
+    "notes": "Custom parameter for the migration RP6→eLux7 or eLux 7.2408.*→eLux >= 7.2409.0. Only present in migration_enablement epm. Not added to ucsettingsd. Same as ServerForVPN key but affects MigrationIdfUrl instead. | Datamodel Object: Not present in data model"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "PartitionResizing4GB",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "6.2302.2000",
+    "publish": true,
+    "notes": "The repartitioning is only executed if a corresponding parameter is set"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "password",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The password for authorisation at the server"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ProxyServer",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "IP address of the proxy server for the update"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ProxyServerName",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "IP name of the proxy server for the update"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ProxyServerPort",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Port of the proxy server"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ProxyType",
+    "default": 0,
+    "range": "0=None,1=Static consumer,2=Static provider,3=Dynamic",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Defines the type of proxy to be used."
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "SecurityOptions",
+    "default": 0,
+    "range": "int",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "0=no signature check, 1=check idf signature, 2=check package signatures, 3=check idf and package signatures"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ServerForVPN",
+    "default": "unset",
+    "range": "<protocol>://<server>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Url prefix (protocol and server) for the update in case of vpn"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ShowNotificationOnDelivery",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.2605.0",
+    "publish": false,
+    "notes": "Allow showing system notifications during delivery (info, warning, failure) | Datamodel Object: Update"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ShowNotificationOnUefiUpdate",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.2605.0",
+    "publish": false,
+    "notes": "Allow showing system notifications during UEFI update (info, warning, failure) | Datamodel Object: Update"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "ShowNotificationOnUpdate",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.2605.0",
+    "publish": false,
+    "notes": "Allow showing system notifications during update (info, warning, failure) | Datamodel Object: Update"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "SysPartToggle",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.0.0",
+    "publish": false,
+    "notes": "Deactivates toggling the system partition during update when set to false (\"Speed Update\"), even on devices with >=16 GB of disk size | Datamodel Object: Update"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "UefiUpdateBatteryThreshold",
+    "default": 50,
+    "range": "0..100",
+    "sinceVersion": "7.2605.0",
+    "publish": false,
+    "notes": "Minimum battery charge allowed to perform UEFI update | Datamodel Object: Update"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "UpdateBatteryThreshold",
+    "default": 50,
+    "range": "0..100",
+    "sinceVersion": "7.2605.0",
+    "publish": false,
+    "notes": "Minimum battery charge allowed to perform update | Datamodel Object: Update"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "UpdateOnBootFormat",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "6.2209.0",
+    "publish": false,
+    "notes": "Scout setting: do a flash format if performing an update via boot"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "UpdateOnBootUserCanCancel",
+    "default": false,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "6.2209.0",
+    "publish": false,
+    "notes": "Scout setting: allow the user to cancel/postpone the update"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "UseHttp",
+    "default": true,
+    "range": [
+      true,
+      false,
+      "file"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Specifies whether the update is to be processed via HTTP, FTP or File."
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "user",
+    "default": "unset",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The user to be authorised at the server"
+  },
+  {
+    "section": "UpdateInfo",
+    "key": "UseUpdatePartition",
+    "default": "unset",
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": "7.0.0",
+    "publish": false,
+    "notes": "All update packages are loaded. Internal parameter during update. **Removed in eLux 7**"
+  },
+  {
+    "section": "UpdateWatcher",
+    "key": "FreespaceThresholdMb",
+    "default": 100,
+    "range": "int in MB",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Threshold in Megabyte"
+  },
+  {
+    "section": "UpdateWatcher",
+    "key": "FreespaceThresholdPercent",
+    "default": 10,
+    "range": "int in percent",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Threshold in percentage of partition"
+  },
+  {
+    "section": "UpdateWatcher",
+    "key": "RemoveOldFiles",
+    "default": true,
+    "range": [
+      true,
+      false
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Defines whether UpdateWatcher is on/off"
+  },
+  {
+    "section": "UpdateWatcher",
+    "key": "SleepTimer",
+    "default": 30,
+    "range": "int in seconds",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "If continuous file I/O happens, sleeps 30 seconds before check threshold again"
+  },
+  {
+    "section": "USB",
+    "key": "numbered_reports",
+    "default": "unset",
+    "range": "bool",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "we have a patched usbmouse, if called with param: numbered_reports=1, it will skip over an initial input-ID when reading data from the device."
+  },
+  {
+    "section": "USB",
+    "key": "usehid",
+    "default": "true (since usb-5.9)",
+    "range": "bool",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "since BaseOS NG 1.19-2 whether to load hid or (usbkbd,usbmouse) kernel modules to support the USB input devices."
+  },
+  {
+    "section": "VirtualKeyboard",
+    "key": "Layout",
+    "default": "Compact-Elux",
+    "range": "Compact-Elux,Full Keyboard-Elux",
+    "sinceVersion": "7.2603.0",
+    "publish": false,
+    "notes": "the layout for onboard keybord"
+  },
+  {
+    "section": "VirtualKeyboard",
+    "key": "Theme",
+    "default": "elux-dark",
+    "range": [
+      "elux-dark",
+      "elux-light"
+    ],
+    "sinceVersion": "7.2603.0",
+    "publish": false,
+    "notes": "the theme for onboard keybord"
+  },
+  {
+    "section": "Xorg",
+    "key": "IgnoreUsbInput",
+    "default": "unset",
+    "range": "VendorID_1:ProdID_1,VendorID_2:ProdID_2",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "List of USB devices which should not be registered as input devices. Example: 0b0e:034c,047f:c01e. Important: Only use lowercase letters for hexadecimal values! You can replace individual characters by the wildcard character `?`. Example: 0b0e:???? filters all products of a specific vendor."
+  },
+  {
+    "section": "xscreensaver",
+    "key": "fade",
+    "default": true,
+    "range": "boolean",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "If true, the current contents of the screen will fade to black instead of simply winking out. Default fadeSeconds=3"
+  },
+  {
+    "section": "xscreensaver",
+    "key": "mode",
+    "default": "unset",
+    "range": [
+      "random",
+      "one",
+      "blank"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Controls the behavior of xscreensaver."
+  },
+  {
+    "section": "xscreensaver",
+    "key": "nice",
+    "default": 10,
+    "range": "integer",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "The sub-processes created by xscreensaver will be \"niced\" to this level. see: man nice(1)"
+  },
+  {
+    "section": "xscreensaver",
+    "key": "selected",
+    "default": "unset",
+    "range": "<any hack>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "if mode==one use this graphics-hack sub-process"
+  },
+  {
+    "section": "xscreensaver",
+    "key": "ShouldShowUserName",
+    "default": false,
+    "range": "boolean",
+    "sinceVersion": "7.2603",
+    "publish": false,
+    "notes": "Specifies whether the logged-in user name is displayed on the screensaver lock screen or the testLiteral"
+  },
+  {
+    "section": "xscreensaver",
+    "key": "textFile",
+    "default": "/setup/xscreensaver/textfile.txt",
+    "range": "path",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Print the contents of the given file."
+  },
+  {
+    "section": "xscreensaver",
+    "key": "textLiteral",
+    "default": "I love eLux",
+    "range": "string",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Print the given string."
+  },
+  {
+    "section": "xscreensaver",
+    "key": "textMode",
+    "default": "literal",
+    "range": [
+      "date",
+      "file",
+      "program",
+      "literal",
+      "url"
+    ],
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Controls the behavior of xscreensaver-text."
+  },
+  {
+    "section": "xscreensaver",
+    "key": "XSlockTimeout",
+    "default": "0:00:00",
+    "range": "<HH:MM:SS>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "If locking is enabled, this controls the length of the \"grace period\" between when the screensaver activates, and when the screen becomes locked."
+  },
+  {
+    "section": "xscreensaver_dialog",
+    "key": "MessageEnabled",
+    "default": true,
+    "range": "<true>,<false>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Enable/Disable 'leave message' button in ucscreensaver lock dialog"
+  },
+  {
+    "section": "xscreensaver_dialog",
+    "key": "ShowSysCommandButtons",
+    "default": false,
+    "range": "<true>,<false>",
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "\"Enable/Disable 'trigger system action' button\" in ucscreensaver lock dialog to provide buttons for logoff, restart and shutdown"
+  },
+  {
+    "section": "xscreensaver_html5",
+    "key": "Uri",
+    "default": "<empty>",
+    "range": null,
+    "sinceVersion": null,
+    "publish": false,
+    "notes": "Uri Screensaver should show (http(s):// or File://)"
+  }
+]

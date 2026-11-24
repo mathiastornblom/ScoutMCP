@@ -8,7 +8,14 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
-import { ok, fail, type McpToolResult } from '../types.js';
+import { ok, fail, type McpToolResult, type ToolContext } from '../types.js';
+import { confirmDestructiveAction } from '../elicitation.js';
+import {
+  checkMutationAllowed,
+  checkPrivateWriteAllowedInProduction,
+  isDryRunSkip,
+  GuardrailError,
+} from '../safety/guardrails.js';
 
 // ── Logging helpers ───────────────────────────────────────────────────────────
 
@@ -87,7 +94,7 @@ const adminManageSchema = z.object({
 
 type AdminManageInput = z.infer<typeof adminManageSchema>;
 
-async function adminManageExecute(raw: unknown): Promise<McpToolResult> {
+async function adminManageExecute(raw: unknown, ctx?: ToolContext): Promise<McpToolResult> {
   const input = adminManageSchema.parse(raw) as AdminManageInput;
   const client = getClient();
   const tool = 'admin_manage';
@@ -130,11 +137,21 @@ async function adminManageExecute(raw: unknown): Promise<McpToolResult> {
       }
 
       case 'update_rights': {
+        // Triggers a server-side rights refresh — ambiguous side effects, treat as
+        // mutating out of caution (per task instructions for this high-risk file).
+        const modeCheck = checkMutationAllowed('admin_manage(update_rights)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
+        }
         const forceUpdate = input.force_update !== undefined ? input.force_update : true;
         const qs = `?forceUpdate=${encodeURIComponent(String(forceUpdate))}`;
         const path = `/api/v1/updateuserrights${qs}`;
         log(tool, 'GET', path);
-        const data = await client.rawRequest<unknown>('GET', path);
+        const data = await client.rawRequest<unknown>('GET', path, undefined, {
+          mutating: true,
+          opName: 'admin_manage(update_rights)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
@@ -142,6 +159,10 @@ async function adminManageExecute(raw: unknown): Promise<McpToolResult> {
       case 'add_admin': {
         if (!input.username) return fail('add_admin requires username');
         if (!input.password) return fail('add_admin requires password');
+        const modeCheck = checkMutationAllowed('admin_manage(add_admin)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, username: input.username, message: modeCheck.dryRunNotice });
+        }
         const body: Record<string, unknown> = {
           username: input.username,
           password: input.password,
@@ -152,13 +173,21 @@ async function adminManageExecute(raw: unknown): Promise<McpToolResult> {
         if (input.permission_ids !== undefined) body['permissionIds'] = input.permission_ids;
         const path = '/api/v1/admins';
         log(tool, 'POST', path, body);
-        const data = await client.rawRequest<unknown>('POST', path, body);
+        const data = await client.rawRequest<unknown>('POST', path, body, {
+          mutating: true,
+          opName: 'admin_manage(add_admin)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
 
       case 'update_admin': {
         if (input.admin_id === undefined) return fail('update_admin requires admin_id');
+        const modeCheck = checkMutationAllowed('admin_manage(update_admin)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, adminId: input.admin_id, message: modeCheck.dryRunNotice });
+        }
         const body: Record<string, unknown> = { id: input.admin_id };
         if (input.username !== undefined) body['username'] = input.username;
         if (input.password !== undefined) body['password'] = input.password;
@@ -168,22 +197,47 @@ async function adminManageExecute(raw: unknown): Promise<McpToolResult> {
         if (input.permission_ids !== undefined) body['permissionIds'] = input.permission_ids;
         const path = '/api/v1/admins';
         log(tool, 'PUT', path, body);
-        const data = await client.rawRequest<unknown>('PUT', path, body);
+        const data = await client.rawRequest<unknown>('PUT', path, body, {
+          mutating: true,
+          opName: 'admin_manage(update_admin)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
 
       case 'delete_admin': {
         if (input.admin_id === undefined) return fail('delete_admin requires admin_id');
-        if (!input.confirm) return fail('delete_admin requires confirm=true (destructive operation)');
+        const delOutcome = await confirmDestructiveAction(
+          { server: ctx?.server },
+          {
+            opName: 'admin_manage(delete_admin)',
+            summary: `Permanently delete admin account id ${input.admin_id}.`,
+            confirmFlag: input.confirm,
+          },
+        );
+        if (!delOutcome.proceed) return fail(`admin_manage blocked: ${delOutcome.reason}`);
+        checkPrivateWriteAllowedInProduction('admin_manage(delete_admin)');
+        const modeCheck = checkMutationAllowed('admin_manage(delete_admin)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, adminId: input.admin_id, message: modeCheck.dryRunNotice });
+        }
         const path = `/api/v1/admins?id=${encodeURIComponent(String(input.admin_id))}`;
         log(tool, 'DELETE', path);
-        const data = await client.rawRequest<unknown>('DELETE', path);
+        const data = await client.rawRequest<unknown>('DELETE', path, undefined, {
+          mutating: true,
+          opName: 'admin_manage(delete_admin)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
     }
   } catch (err) {
+    if (err instanceof GuardrailError) {
+      logErr(tool, err);
+      return fail(`admin_manage blocked: ${err.message}`);
+    }
     logErr(tool, err);
     return fail(`admin_manage failed: ${err instanceof Error ? err.message : String(err)}`);
   }

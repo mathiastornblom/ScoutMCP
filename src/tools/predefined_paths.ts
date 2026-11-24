@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
+import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 // ── Logging helpers ───────────────────────────────────────────────────────────
 
@@ -73,9 +74,15 @@ async function predefinedPathsExecute(raw: unknown): Promise<McpToolResult> {
       case 'add': {
         if (!input.paths || input.paths.length === 0)
           return fail('add requires at least one entry in paths');
+        const modeCheck = checkMutationAllowed('predefined_paths(add)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         const apiPath = '/api/v1/predefinedPaths/add';
         log(tool, 'POST', apiPath, input.paths);
-        const data = await client.rawRequest<unknown>('POST', apiPath, input.paths);
+        const data = await client.rawRequest<unknown>('POST', apiPath, input.paths, {
+          mutating: true,
+          opName: 'predefined_paths(add)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
@@ -83,15 +90,25 @@ async function predefinedPathsExecute(raw: unknown): Promise<McpToolResult> {
       case 'delete': {
         if (!input.entry_ids || input.entry_ids.length === 0)
           return fail('delete requires at least one entry in entry_ids');
+        const modeCheck = checkMutationAllowed('predefined_paths(delete)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         const body = input.entry_ids.map((id) => ({ EntryId: id }));
         const apiPath = '/api/v1/predefinedPaths/delete';
         log(tool, 'POST', apiPath, body);
-        const data = await client.rawRequest<unknown>('POST', apiPath, body);
+        const data = await client.rawRequest<unknown>('POST', apiPath, body, {
+          mutating: true,
+          opName: 'predefined_paths(delete)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
     }
   } catch (err) {
+    if (err instanceof GuardrailError) {
+      logErr(tool, err);
+      return fail(`predefined_paths blocked: ${err.message}`);
+    }
     logErr(tool, err);
     return fail(`predefined_paths failed: ${err instanceof Error ? err.message : String(err)}`);
   }

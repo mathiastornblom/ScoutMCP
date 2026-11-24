@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { resolveConfig } from '../session.js';
+import { detectCapabilities } from '../compat/detect.js';
 import { ok, fail, buildQuery, type McpToolResult, type HealthCheckResponse } from '../types.js';
 
 const inputSchema = z.object({
@@ -13,6 +14,10 @@ const inputSchema = z.object({
   scoutServer: z.boolean().optional().describe('Include Scout server info in healthcheck response'),
   scoutKeepAlive: z.boolean().optional().describe('Include keep-alive server info in healthcheck response'),
   scoutDatabase: z.boolean().optional().describe('Include database info in healthcheck response'),
+  capabilities: z
+    .boolean()
+    .optional()
+    .describe('Include detected Scout version and per-feature capability availability (default true)'),
 });
 
 type Input = z.infer<typeof inputSchema>;
@@ -41,9 +46,44 @@ async function execute(raw: unknown): Promise<McpToolResult> {
 
   try {
     const data = await client.request<HealthCheckResponse>('GET', `/api/v1/healthcheck${qs}`);
-    return ok(data);
+    const out: Record<string, unknown> = { ...data };
+    if (process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS === 'true') {
+      out.systemcheckElias = await fetchEliasSystemcheck();
+    }
+    if (input.capabilities !== false) {
+      // Never throws; version/capability detection is advisory and cannot fail the health check.
+      const report = await detectCapabilities(client);
+      out.scoutVersion = report.scoutVersion;
+      out.versionSource = report.versionSource;
+      out.versionConfidence = report.versionConfidence;
+      out.specVersion = report.specVersion;
+      out.capabilities = report.capabilities;
+      if (report.disagreements.length > 0) out.capabilityDisagreements = report.disagreements;
+    }
+    return ok(out);
   } catch (err) {
     return fail(`Health check failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+export interface EliasSystemcheck {
+  state: string;
+  error?: string;
+}
+
+/**
+ * PRIVATE endpoint GET /api/v1/systemcheck/elias (not in openapi.json); caller gates on
+ * SCOUT_ENABLE_PRIVATE_ENDPOINTS=true. Never throws: any failure or unexpected shape is
+ * reported as state 'unknown' so it cannot fail the surrounding health_check.
+ */
+export async function fetchEliasSystemcheck(): Promise<EliasSystemcheck> {
+  try {
+    const res = await getClient().rawRequest<unknown>('GET', '/api/v1/systemcheck/elias');
+    const state = res !== null && typeof res === 'object' ? (res as Record<string, unknown>)['state'] : undefined;
+    if (typeof state !== 'string') return { state: 'unknown', error: 'unexpected response shape' };
+    return { state };
+  } catch (err) {
+    return { state: 'unknown', error: err instanceof Error ? err.message : String(err) };
   }
 }
 

@@ -1,0 +1,8 @@
+{
+  "description": "Base and OU respond with empty fileEntries arrays",
+  "layers": [
+    { "level": "base", "response": { "message": "OK", "status": { "result": 0 }, "response": [] } },
+    { "level": "/Enterprise", "response": { "message": "OK", "status": { "result": 0 }, "response": [] } }
+  ],
+  "expected": { "entries": [], "warnings": [], "complete": true }
+}

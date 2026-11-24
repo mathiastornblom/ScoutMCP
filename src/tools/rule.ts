@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
+import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 const ruleManageSchema = z.object({
   action: z.enum([
@@ -35,49 +36,84 @@ async function ruleManageExecute(raw: unknown): Promise<McpToolResult> {
         return ok(data);
       }
       case 'create': {
-        const data = await client.request<unknown>('POST', '/api/v1/rules', input.body);
+        const modeCheck = checkMutationAllowed('rule_manage(create)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
+        const data = await client.request<unknown>('POST', '/api/v1/rules', input.body, {
+          mutating: true,
+          opName: 'rule_manage(create)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
       case 'update': {
         if (!input.ruleId) return fail('ruleId is required for action=update');
-        const data = await client.request<unknown>('PUT', `/api/v1/rules/${input.ruleId}`, input.body);
+        const modeCheck = checkMutationAllowed('rule_manage(update)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, ruleId: input.ruleId, message: modeCheck.dryRunNotice });
+        const data = await client.request<unknown>('PUT', `/api/v1/rules/${input.ruleId}`, input.body, {
+          mutating: true,
+          opName: 'rule_manage(update)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
       case 'delete': {
         if (!input.ruleId) return fail('ruleId is required for action=delete');
-        const data = await client.request<unknown>('DELETE', `/api/v1/rules/${input.ruleId}`);
+        const modeCheck = checkMutationAllowed('rule_manage(delete)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, ruleId: input.ruleId, message: modeCheck.dryRunNotice });
+        const data = await client.request<unknown>('DELETE', `/api/v1/rules/${input.ruleId}`, undefined, {
+          mutating: true,
+          opName: 'rule_manage(delete)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
       case 'validate': {
+        // validate is a read/check operation — does not mutate rule state.
         const data = await client.request<unknown>('POST', '/api/v1/rules/validate', input.body);
         return ok(data);
       }
       case 'link_label': {
         if (!input.ruleId) return fail('ruleId is required for action=link_label');
-        const data = await client.request<unknown>('POST', `/api/v1/rules/${input.ruleId}/labels`, input.body);
+        const modeCheck = checkMutationAllowed('rule_manage(link_label)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, ruleId: input.ruleId, message: modeCheck.dryRunNotice });
+        const data = await client.request<unknown>('POST', `/api/v1/rules/${input.ruleId}/labels`, input.body, {
+          mutating: true,
+          opName: 'rule_manage(link_label)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
       case 'update_label_priority': {
         if (!input.ruleId) return fail('ruleId is required for action=update_label_priority');
         if (!input.labelId) return fail('labelId is required for action=update_label_priority');
+        const modeCheck = checkMutationAllowed('rule_manage(update_label_priority)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, ruleId: input.ruleId, labelId: input.labelId, message: modeCheck.dryRunNotice });
         const data = await client.request<unknown>(
           'PUT',
           `/api/v1/rules/${input.ruleId}/labels/${input.labelId}`,
           input.body,
+          { mutating: true, opName: 'rule_manage(update_label_priority)' },
         );
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
       case 'unlink_label': {
         if (!input.ruleId) return fail('ruleId is required for action=unlink_label');
         if (!input.labelId) return fail('labelId is required for action=unlink_label');
+        const modeCheck = checkMutationAllowed('rule_manage(unlink_label)');
+        if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, ruleId: input.ruleId, labelId: input.labelId, message: modeCheck.dryRunNotice });
         const data = await client.request<unknown>(
           'DELETE',
           `/api/v1/rules/${input.ruleId}/labels/${input.labelId}`,
+          undefined,
+          { mutating: true, opName: 'rule_manage(unlink_label)' },
         );
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         return ok(data);
       }
     }
   } catch (err) {
+    if (err instanceof GuardrailError) return fail(`rule_manage blocked: ${err.message}`);
     return fail(`rule_manage failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

@@ -6,26 +6,10 @@ import { resolveOuRef } from '../resolver.js';
 import { enrich } from '../enricher.js';
 import { isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
+import { checkMutationAllowed, checkOuWriteAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
+import { extractSearchDevices } from '../devices.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
-
-type DeviceRecord = Record<string, unknown>;
-
-/** Extract the flat device array from a Scout search response. */
-function extractSearchDevices(raw: unknown): DeviceRecord[] {
-  if (!raw || typeof raw !== 'object') return [];
-  const r = raw as Record<string, unknown>;
-  const response = r['response'];
-  if (response && typeof response === 'object') {
-    const status = (response as Record<string, unknown>)['status'];
-    if (status && typeof status === 'object') {
-      const msg = (status as Record<string, unknown>)['msg'];
-      if (Array.isArray(msg)) return msg as DeviceRecord[];
-    }
-  }
-  if (Array.isArray(r)) return r as DeviceRecord[];
-  return [];
-}
 
 function assertTestScope(ouPath: string): string | null {
   if (process.env.SCOUT_ENV !== 'test') return null;
@@ -35,6 +19,37 @@ function assertTestScope(ouPath: string): string | null {
     return `Target OU "${ouPath}" is outside SCOUT_TEST_OU_PATH "${testRoot}". Blocked in test mode.`;
   }
   return null;
+}
+
+/**
+ * Resolves the OU path a device currently sits in, by fetching the device record (which
+ * carries an OUID field) and resolving that ID against the OU tree. Used by
+ * action=move to identify the *source* OU before issuing the move — moving a device OUT
+ * of a protected OU changes what config it inherits just as much as moving one IN, so the
+ * protected-OU gate (checkOuWriteAllowed) must see both sides of a move, not just the
+ * destination. Returns undefined (rather than throwing) if the device can't be resolved,
+ * so a not-found device surfaces its normal "device not found" error from the move call
+ * itself rather than a confusing failure from this pre-check.
+ */
+async function resolveCurrentDeviceOuPath(
+  client: ReturnType<typeof getClient>,
+  identifiers: { name?: string; mac?: string; id?: string; clientid?: string },
+): Promise<string | undefined> {
+  try {
+    const qs = buildQuery({
+      name: identifiers.name,
+      mac: identifiers.mac,
+      id: identifiers.id,
+      clientid: identifiers.clientid,
+    });
+    const data = await client.request<Record<string, unknown>>('GET', `/api/v1/device${qs}`);
+    const ouId = data?.['OUID'];
+    if (typeof ouId !== 'number') return undefined;
+    const match = await resolveOuRef(ouId);
+    return match.path;
+  } catch {
+    return undefined;
+  }
 }
 
 // ── device_get ────────────────────────────────────────────────────────────────
@@ -282,6 +297,9 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
   }
 
   try {
+    // Gate 1: mode tiers — all device_manage actions are mutating.
+    const modeCheck = checkMutationAllowed(`device_manage(${input.action})`);
+
     // Resolve destination OU: destouRef wins; otherwise explicit args with working OU fallback
     let resolvedDestPath: string | undefined;
     let resolvedDestId: number | undefined = input.destouid;
@@ -289,6 +307,7 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
     if (input.destouRef !== undefined) {
       const match = await resolveOuRef(input.destouRef);
       resolvedDestId = match.ouid;
+      resolvedDestPath = match.path;
     } else {
       resolvedDestPath =
         input.destoupath ?? ((input.action === 'add' || input.action === 'move') ? getWorkingOu()?.path : undefined);
@@ -303,6 +322,48 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
       }
     }
 
+    // Gate 6: protected/allowed OU lists. action=move changes which config an existing
+    // device inherits on BOTH ends of the move — moving a device out of a protected OU
+    // changes its effective config just as much as moving one in — so both the resolved
+    // destination and the device's current (source) OU are checked. Destination is
+    // checked unconditionally for add/move (a device's resolved destination matters even
+    // if the device doesn't exist yet, for add); the source is resolved by looking up the
+    // device's current OUID before the move executes.
+    if (input.action === 'move' || input.action === 'add') {
+      let destPathForGate = resolvedDestPath;
+      if (!destPathForGate && resolvedDestId !== undefined) {
+        // destouid was supplied without a path (no destouRef) — resolve it so the
+        // protected-OU gate can do its path-prefix match.
+        const match = await resolveOuRef(resolvedDestId);
+        destPathForGate = match.path;
+      }
+      if (destPathForGate) {
+        checkOuWriteAllowed({ targetPath: destPathForGate });
+      }
+    }
+    if (input.action === 'move') {
+      const sourcePath = await resolveCurrentDeviceOuPath(client, {
+        name: input.name,
+        mac: input.mac,
+        id: input.id,
+        clientid: input.clientid,
+      });
+      if (sourcePath) {
+        checkOuWriteAllowed({ targetPath: sourcePath });
+      }
+    }
+
+    if (!modeCheck.proceed) {
+      return ok({
+        status: 'dry_run',
+        action: input.action,
+        target: input.name ?? input.mac ?? input.id ?? input.clientid,
+        message: modeCheck.dryRunNotice,
+      });
+    }
+
+    let data: unknown;
+
     switch (input.action) {
       case 'add': {
         if (!input.newDeviceName) return fail('newDeviceName is required for action=add');
@@ -313,7 +374,11 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           name: input.newDeviceName,
           mac: input.newDeviceMac,
         });
-        const data = await client.request<unknown>('POST', `/api/v1/device${qs}`);
+        data = await client.request<unknown>('POST', `/api/v1/device${qs}`, undefined, {
+          mutating: true,
+          opName: 'device_manage(add)',
+        });
+        if (isDryRunSkip(data)) break;
         return ok(await enrich(data));
       }
 
@@ -326,7 +391,11 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           clientid: input.clientid,
           newname: input.newname,
         });
-        const data = await client.request<unknown>('PUT', `/api/v1/device${qs}`);
+        data = await client.request<unknown>('PUT', `/api/v1/device${qs}`, undefined, {
+          mutating: true,
+          opName: 'device_manage(rename)',
+        });
+        if (isDryRunSkip(data)) break;
         return ok(data);
       }
 
@@ -337,7 +406,11 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           id: input.id,
           clientid: input.clientid,
         });
-        const data = await client.request<unknown>('DELETE', `/api/v1/device${qs}`);
+        data = await client.request<unknown>('DELETE', `/api/v1/device${qs}`, undefined, {
+          mutating: true,
+          opName: 'device_manage(delete)',
+        });
+        if (isDryRunSkip(data)) break;
         return ok(data);
       }
 
@@ -350,11 +423,21 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           destoupath: resolvedDestPath,
           destouid: resolvedDestId,
         });
-        const data = await client.request<unknown>('PUT', `/api/v1/device/move${qs}`);
+        data = await client.request<unknown>('PUT', `/api/v1/device/move${qs}`, undefined, {
+          mutating: true,
+          opName: 'device_manage(move)',
+        });
+        if (isDryRunSkip(data)) break;
         return ok(await enrich(data));
       }
     }
+
+    if (isDryRunSkip(data)) {
+      return ok({ status: 'dry_run', action: input.action, message: data.notice });
+    }
+    return ok(data);
   } catch (err) {
+    if (err instanceof GuardrailError) return fail(`device_manage blocked: ${err.message}`);
     const baseMsg = `device_manage failed: ${err instanceof Error ? err.message : String(err)}`;
     if (isNotFound(err)) {
       const identifier = input.name ?? input.mac ?? input.id ?? input.clientid;
@@ -373,7 +456,8 @@ export const deviceManageTool = {
     'Add, rename, delete, or move devices in Scout Board. ' +
     'Use destouRef to specify the destination OU by name, partial name, path, or ID — no need to look up IDs first. ' +
     'DESTRUCTIVE: action=delete permanently removes a device from Scout Board. ' +
-    'In SCOUT_ENV=test mode, delete is blocked entirely; add and move are restricted to paths under SCOUT_TEST_OU_PATH.',
+    'In SCOUT_ENV=test mode, delete is blocked entirely; add and move are restricted to paths under SCOUT_TEST_OU_PATH. ' +
+    'Gated by SCOUT_MODE (read-only blocks all writes, dry-run plans without executing).',
   inputSchema: zodToJsonSchema(deviceManageSchema),
   execute: deviceManageExecute,
 };

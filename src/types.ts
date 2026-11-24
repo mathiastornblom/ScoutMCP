@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 
 // ── Common Zod primitives ─────────────────────────────────────────────────────
 
@@ -27,6 +28,43 @@ export interface HealthCheckResponse {
 export interface McpToolResult {
   content: Array<{ type: 'text'; text: string }>;
   isError?: boolean;
+}
+
+/**
+ * Per-call context passed to tool execute() functions, in addition to their parsed input.
+ * Optional on every tool's signature so existing tools that don't need it keep compiling
+ * unchanged — only tools that need elicitation or progress notifications read it.
+ *
+ *   - `server`: the live MCP Server instance. Used to check
+ *     `server.getClientCapabilities()?.elicitation` and to call `server.elicitInput(...)`
+ *     (see src/elicitation.ts) for real confirmation prompts.
+ *   - `progressToken`: taken from the originating request's `_meta.progressToken` (per the
+ *     MCP spec — see node_modules/@modelcontextprotocol/sdk/dist/esm/types.d.ts
+ *     `ProgressNotificationParamsSchema`). Present only if the calling client opted in to
+ *     progress notifications for this request; absent otherwise.
+ *   - `sendProgress`: convenience wrapper that sends a `notifications/progress` message tied
+ *     to `progressToken`, and is a no-op (resolves immediately, never throws) when no token
+ *     was supplied — see src/progress.ts.
+ */
+export interface ToolContext {
+  server?: Server;
+  progressToken?: string | number;
+  sendProgress?: (progress: number, total?: number, message?: string) => Promise<void>;
+}
+
+/**
+ * Structural type for the tool registry in index.ts. `execute`'s second parameter is
+ * optional so tools that don't need ctx (the vast majority) keep their existing
+ * `(raw: unknown) => Promise<McpToolResult>` signature and remain assignable here without
+ * modification — only tools that read ctx (elicitation, progress) declare it explicitly.
+ */
+export interface McpTool {
+  name: string;
+  description: string;
+  inputSchema: unknown;
+  /** Optional MCP tool annotations (e.g. readOnlyHint). */
+  annotations?: Record<string, boolean>;
+  execute: (raw: unknown, ctx?: ToolContext) => Promise<McpToolResult>;
 }
 
 export function ok(data: unknown): McpToolResult {

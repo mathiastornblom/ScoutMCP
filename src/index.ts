@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { startHttpTransport } from './http.js';
+import { resolveTransportMode, InvalidTransportError } from './transport.js';
 import {
   CallToolRequestSchema,
   CallToolResult,
@@ -12,9 +14,11 @@ import {
 import { listResources, listResourceTemplates, readResource } from './resources.js';
 
 import { fetch } from 'undici';
-import { setProgressReporter, clearProgressReporter } from './progress.js';
+import { setProgressReporter, clearProgressReporter, createProgressReporter } from './progress.js';
+import type { ToolContext, McpTool } from './types.js';
 import { loadSavedConfig, setSessionConfig, clearSessionConfig, resolveConfig } from './session.js';
 import { getClient } from './client.js';
+import { eliasTools } from './tools/elias.js';
 import { configureTool } from './tools/configure.js';
 import { contextTool } from './tools/context.js';
 import { healthCheckTool } from './tools/health.js';
@@ -23,6 +27,7 @@ import { deviceGetTool, deviceManageTool } from './tools/device.js';
 import { deviceCommandTool, deviceDiagnosticsTool } from './tools/command.js';
 import { appListTool, appManageTool } from './tools/application.js';
 import { configGetTool, configUpdateTool, configCompareTool } from './tools/config.js';
+import { configResolveTool } from './tools/config_resolve.js';
 import { labelManageTool } from './tools/label.js';
 import { ruleManageTool } from './tools/rule.js';
 import { scheduleManageTool } from './tools/schedule.js';
@@ -54,7 +59,7 @@ if (startupConfig) {
   try {
     await getClient().login();
     process.stderr.write(
-      `[scout-mcp] Authenticated — connected to ${startupConfig.baseUrl} as ${startupConfig.username}\n`,
+      `[scout-mcp] Authenticated — connected to ${startupConfig.baseUrl} as ${startupConfig.authMethod === 'citrix-cloud' ? `service principal ${startupConfig.ccClientId}` : startupConfig.username}\n`,
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -115,7 +120,7 @@ if (privateEndpointsEnabled) {
   process.stderr.write('[scout-mcp] Private endpoints enabled (SCOUT_ENABLE_PRIVATE_ENDPOINTS=true)\n');
 }
 
-const tools = [
+const tools: McpTool[] = [
   configureTool,
   contextTool,
   healthCheckTool,
@@ -130,6 +135,7 @@ const tools = [
   configGetTool,
   configUpdateTool,
   configCompareTool,
+  configResolveTool,
   labelManageTool,
   ruleManageTool,
   scheduleManageTool,
@@ -152,6 +158,7 @@ const tools = [
         adminManageTool,
         serverInstancesTool,
         dbCleanupTool,
+        ...eliasTools, // read-only ELIAS (Scout 2611+)
       ]
     : []),
 ];
@@ -166,14 +173,15 @@ const server = new Server(
 registerPrompts(server);
 
 server.setRequestHandler(ListToolsRequestSchema, () => ({
-  tools: tools.map(({ name, description, inputSchema }) => ({
+  tools: tools.map(({ name, description, inputSchema, annotations }) => ({
     name,
     description,
     inputSchema,
+    ...(annotations ? { annotations } : {}),
   })),
 }));
 
-server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
+server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<CallToolResult> => {
   const { name, arguments: args } = request.params;
   const tool = toolMap.get(name);
   if (!tool) {
@@ -183,18 +191,49 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
     };
   }
 
-  setProgressReporter({
-    async log(level, message) {
-      try {
+  // notifications/progress requires a progressToken from the originating request's _meta
+  // (per the MCP spec). If the caller didn't supply one, progressToken is undefined and
+  // sendProgress below is never invoked — createProgressReporter()'s report() degrades to a
+  // silent no-op in that case (see src/progress.ts).
+  const progressToken = request.params._meta?.progressToken;
+
+  setProgressReporter(
+    createProgressReporter({
+      log: async (level, message) => {
         await server.sendLoggingMessage({ level, data: message });
-      } catch {
-        // Best-effort: if the notification fails (transport not ready) continue silently
-      }
-    },
-  });
+      },
+      sendProgress:
+        progressToken !== undefined
+          ? async (progress, total, message) => {
+              await server.notification({
+                method: 'notifications/progress',
+                params: { progressToken, progress, total, message },
+              });
+            }
+          : undefined,
+    }),
+  );
+
+  const ctx: ToolContext = {
+    server,
+    progressToken,
+    sendProgress:
+      progressToken !== undefined
+        ? async (progress, total, message) => {
+            try {
+              await server.notification({
+                method: 'notifications/progress',
+                params: { progressToken, progress, total, message },
+              });
+            } catch {
+              // Best-effort: progress notifications must never fail the underlying operation.
+            }
+          }
+        : undefined,
+  };
 
   try {
-    const result = await tool.execute(args ?? {});
+    const result = await tool.execute(args ?? {}, ctx);
     return result as CallToolResult;
   } catch (err) {
     // Never forward stack traces or internal paths to the MCP client
@@ -219,5 +258,23 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   return { contents: [content] };
 });
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+// Transport selection — defaults to stdio, completely unchanged for existing users who
+// don't set SCOUT_TRANSPORT. SCOUT_TRANSPORT=http switches to the Streamable-HTTP
+// transport (src/http.ts), which adds its own OIDC bearer-auth gate and manages its own
+// per-session transport instances; it calls server.connect() itself per session, so we
+// must NOT call server.connect() with a StdioServerTransport in that branch.
+try {
+  const transportMode = resolveTransportMode(process.env.SCOUT_TRANSPORT);
+  if (transportMode === 'http') {
+    await startHttpTransport(server);
+  } else {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+  }
+} catch (err) {
+  if (err instanceof InvalidTransportError) {
+    process.stderr.write(`[scout-mcp] ${err.message}\n`);
+    process.exit(1);
+  }
+  throw err;
+}

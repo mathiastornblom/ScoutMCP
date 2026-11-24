@@ -8,11 +8,13 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "test": "tsx tests/integration.ts"
+    "test": "tsx tests/integration.ts",
+    "test:unit": "tsx tests/guardrails.test.ts && tsx tests/rsop.test.ts && tsx tests/validation.test.ts && tsx tests/rsop-readonly.test.ts && tsx tests/safety-round2.test.ts && tsx tests/protected-ou-wiring.test.ts && tsx tests/elicitation.test.ts && tsx tests/progress.test.ts && tsx tests/transport.test.ts && tsx tests/oidc-auth.test.ts && tsx tests/ccauth.test.ts && tsx tests/elias.test.ts && tsx tests/rsop-advanced.test.ts && tsx tests/preflight.test.ts && tsx tests/compat.test.ts && tsx tests/preflight-wiring.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "dotenv": "^16.0.0",
+    "jose": "^6.1.0",
     "undici": "^6.0.0",
     "zod": "^3.22.0",
     "zod-to-json-schema": "^3.22.0"

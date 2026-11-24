@@ -1,9 +1,12 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
-import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
+import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { resolveOuRef } from '../resolver.js';
 import { getProgressReporter } from '../progress.js';
+import { confirmDestructiveAction } from '../elicitation.js';
+import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
+import { checkOuRightPreflight, DEVICE_COMMAND_RIGHTS } from '../safety/preflight.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -47,15 +50,27 @@ const deviceCommandSchema = z.object({
 
 type DeviceCommandInput = z.infer<typeof deviceCommandSchema>;
 
-async function deviceCommandExecute(raw: unknown): Promise<McpToolResult> {
+async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpToolResult> {
   const input = deviceCommandSchema.parse(raw) as DeviceCommandInput;
 
-  // Security: require explicit confirmation for irreversible commands
-  if ((input.command === 'factoryreset' || input.command === 'halt') && input.confirm !== true) {
-    return fail(
-      `command=${input.command} is irreversible and requires confirm=true to proceed. ` +
-        'Set confirm: true only after verifying the target device.',
+  // Security: require explicit confirmation for irreversible commands. Real elicitation
+  // prompt if the client supports it, otherwise the confirm:true fallback.
+  if (input.command === 'factoryreset' || input.command === 'halt') {
+    const target =
+      input.target === 'device'
+        ? (input.name ?? input.mac ?? input.id ?? input.clientid ?? '(unspecified device)')
+        : `${input.target} scope`;
+    const outcome = await confirmDestructiveAction(
+      { server: ctx?.server },
+      {
+        opName: `device_command(${input.command})`,
+        summary: `Send irreversible command "${input.command}" to ${target}.`,
+        confirmFlag: input.confirm,
+      },
     );
+    if (!outcome.proceed) {
+      return fail(`device_command blocked: ${outcome.reason}`);
+    }
   }
 
   const client = getClient();
@@ -71,14 +86,54 @@ async function deviceCommandExecute(raw: unknown): Promise<McpToolResult> {
     let body = input.body;
 
     // Resolve ouRef and inject into body for target=ou
+    let preflightOuId: number | undefined;
+    let preflightOuLabel = 'ou';
     if (input.target === 'ou' && input.ouRef !== undefined) {
       const match = await resolveOuRef(input.ouRef);
       body = { ouId: match.ouid, ...body };
+      preflightOuId = match.ouid;
+      preflightOuLabel = match.path;
+    } else if (input.target === 'ou' && typeof body?.['ouId'] === 'number') {
+      preflightOuId = body['ouId'];
     }
 
-    const data = await client.request<unknown>('POST', `${path}${qs}`, body);
+    // Gate 1: mode tiers — every device_command invocation sends a command that
+    // changes device state (restart, halt, factoryreset, custom payloads, etc).
+    const modeCheck = checkMutationAllowed(`device_command(${input.command})`);
+    if (!modeCheck.proceed) {
+      return ok({
+        status: 'dry_run',
+        target: input.target,
+        command: input.command,
+        message: modeCheck.dryRunNotice,
+      });
+    }
+
+    // ourights preflight (UX aid only; explicit-false refuses, anything else proceeds).
+    // Only target=ou has a known OU id; other scopes are skipped. Runs after all gates above.
+    const neededRight = DEVICE_COMMAND_RIGHTS[input.command];
+    if (neededRight !== undefined) {
+      await checkOuRightPreflight({
+        opName: `device_command(${input.command})`,
+        target: `ou:${preflightOuLabel}`,
+        ouId: preflightOuId,
+        requiredRight: neededRight,
+      });
+    }
+
+    const data = await client.request<unknown>('POST', `${path}${qs}`, body, {
+      mutating: true,
+      opName: `device_command(${input.command})`,
+    });
+    if (isDryRunSkip(data)) {
+      return ok({ status: 'dry_run', target: input.target, command: input.command, message: data.notice });
+    }
     return ok(data);
   } catch (err) {
+    if (err instanceof GuardrailError) {
+      // Preflight audit-logs its own refusal.
+      return fail(`device_command blocked: ${err.message}`);
+    }
     return fail(`device_command failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
@@ -127,7 +182,7 @@ const deviceDiagnosticsSchema = z.object({
 
 type DeviceDiagnosticsInput = z.infer<typeof deviceDiagnosticsSchema>;
 
-async function deviceDiagnosticsExecute(raw: unknown): Promise<McpToolResult> {
+async function deviceDiagnosticsExecute(raw: unknown, _ctx?: ToolContext): Promise<McpToolResult> {
   const input = deviceDiagnosticsSchema.parse(raw) as DeviceDiagnosticsInput;
   const client = getClient();
   const qs = buildQuery({
@@ -165,6 +220,7 @@ async function deviceDiagnosticsExecute(raw: unknown): Promise<McpToolResult> {
 
         // Step 1: trigger
         await reporter.log('info', 'Triggering diagnostics collection…');
+        await reporter.report(0, maxPolls, 'Triggering diagnostics collection…');
         await client.request<unknown>('GET', `/api/v1/command/device/diagnostics${qs}`);
 
         // Step 2: poll until done or timed out
@@ -181,6 +237,7 @@ async function deviceDiagnosticsExecute(raw: unknown): Promise<McpToolResult> {
         for (let attempt = 1; attempt <= maxPolls; attempt++) {
           await sleep(intervalMs);
           await reporter.log('info', `Polling diagnostics — attempt ${attempt}/${maxPolls}…`);
+          await reporter.report(attempt, maxPolls, `Polling diagnostics — attempt ${attempt}/${maxPolls}`);
 
           const poll = await client.request<PollResp>(
             'GET',
@@ -205,6 +262,7 @@ async function deviceDiagnosticsExecute(raw: unknown): Promise<McpToolResult> {
           const clientIdentifier = resp?.clientIdentifier ?? input.clientid;
           const fileId = resp?.diagnosticsFileId;
           await reporter.log('info', statusMsg ? `  ${statusMsg}` : '  Diagnostics ready.');
+          await reporter.report(maxPolls, maxPolls, statusMsg || 'Diagnostics ready.');
 
           if (clientIdentifier && fileId !== undefined) {
             const baseUrl = process.env.SCOUT_BASE_URL?.replace(/\/$/, '');

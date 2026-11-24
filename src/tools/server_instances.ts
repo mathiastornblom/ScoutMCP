@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
+import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 // ── Logging helpers ───────────────────────────────────────────────────────────
 
@@ -77,10 +78,18 @@ async function serverInstancesExecute(raw: unknown): Promise<McpToolResult> {
 
       case 'delete': {
         if (input.entity_id === undefined) return fail('delete requires entity_id');
+        const modeCheck = checkMutationAllowed('server_instances(delete)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, entityId: input.entity_id, message: modeCheck.dryRunNotice });
+        }
         const body = { EntityID: input.entity_id };
         const path = '/api/v1/ui/instances';
         log(tool, 'DELETE', path, body);
-        const data = await client.rawRequest<unknown>('DELETE', path, body);
+        const data = await client.rawRequest<unknown>('DELETE', path, body, {
+          mutating: true,
+          opName: 'server_instances(delete)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
@@ -99,14 +108,26 @@ async function serverInstancesExecute(raw: unknown): Promise<McpToolResult> {
           return fail(
             'modify requires at least one of: cpu_threshold, license_threshold, ip_address, ip_name, use_balancer, instance_type',
           );
+        const modeCheck = checkMutationAllowed('server_instances(modify)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, entityId: input.entity_id, message: modeCheck.dryRunNotice });
+        }
         const path = '/api/v1/ui/instances';
         log(tool, 'PUT', path, body);
-        const data = await client.rawRequest<unknown>('PUT', path, body);
+        const data = await client.rawRequest<unknown>('PUT', path, body, {
+          mutating: true,
+          opName: 'server_instances(modify)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
     }
   } catch (err) {
+    if (err instanceof GuardrailError) {
+      logErr(tool, err);
+      return fail(`server_instances blocked: ${err.message}`);
+    }
     logErr(tool, err);
     return fail(`server_instances failed: ${err instanceof Error ? err.message : String(err)}`);
   }

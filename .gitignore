@@ -4,3 +4,5 @@ dist/
 diagnostics/
 *.zip
 .DS_Store
+/logs/
+KILL_SWITCH

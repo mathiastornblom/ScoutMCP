@@ -22,6 +22,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
+import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 // ── Logging helper ────────────────────────────────────────────────────────────
 
@@ -142,6 +143,7 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
       case 'set_settings': {
         if (input.ou_filter_type === undefined && input.ou_filter_ignore_default === undefined)
           return fail('set_settings requires at least one of: ou_filter_type, ou_filter_ignore_default');
+        const modeCheck = checkMutationAllowed('ou_filter_manage(set_settings)');
         // Both fields must be sent together — read current values and merge.
         log(tool, 'GET', '/api/v1/oufilter/settings');
         const current = await client.rawRequest<Array<{ OUFilterType: number; OUFilterIgnoreDefault: number }>>(
@@ -152,8 +154,15 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
           OUFilterType: input.ou_filter_type ?? existing.OUFilterType,
           OUFilterIgnoreDefault: input.ou_filter_ignore_default ?? Boolean(existing.OUFilterIgnoreDefault),
         };
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, wouldSet: body, message: modeCheck.dryRunNotice });
+        }
         log(tool, 'POST', '/api/v1/oufilter/setSettings', body);
-        const data = await client.rawRequest<unknown>('POST', '/api/v1/oufilter/setSettings', body);
+        const data = await client.rawRequest<unknown>('POST', '/api/v1/oufilter/setSettings', body, {
+          mutating: true,
+          opName: 'ou_filter_manage(set_settings)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
@@ -167,6 +176,10 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
               'Each add entry must include either subnet_address (subnet filter) ' +
               'or custom_filter (user-defined filter)',
             );
+        }
+        const modeCheck = checkMutationAllowed('ou_filter_manage(add)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         }
         const requestValues = input.entries.map((e) => {
           const entry: Record<string, unknown> = {};
@@ -186,7 +199,11 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
         });
         const body = { requestValues };
         log(tool, 'POST', '/api/v1/oufilter/add', body);
-        const data = await client.rawRequest<unknown>('POST', '/api/v1/oufilter/add', body);
+        const data = await client.rawRequest<unknown>('POST', '/api/v1/oufilter/add', body, {
+          mutating: true,
+          opName: 'ou_filter_manage(add)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
@@ -196,6 +213,10 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
           return fail('modify requires at least one entry in entries[]');
         const missingId = input.entries.find((e) => e.entry_id === undefined);
         if (missingId) return fail('Every entry in modify must include entry_id');
+        const modeCheck = checkMutationAllowed('ou_filter_manage(modify)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
+        }
         const requestValues = input.entries.map((e) => {
           const entry: Record<string, unknown> = { EntryId: e.entry_id };
           if (e.subnet_address !== undefined) {
@@ -212,7 +233,11 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
         });
         const body = { requestValues };
         log(tool, 'POST', '/api/v1/oufilter/modify', body);
-        const data = await client.rawRequest<unknown>('POST', '/api/v1/oufilter/modify', body);
+        const data = await client.rawRequest<unknown>('POST', '/api/v1/oufilter/modify', body, {
+          mutating: true,
+          opName: 'ou_filter_manage(modify)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
@@ -222,15 +247,27 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
           return fail('delete requires at least one entry in entries[]');
         const missingId = input.entries.find((e) => e.entry_id === undefined);
         if (missingId) return fail('Every entry in delete must include entry_id');
+        const modeCheck = checkMutationAllowed('ou_filter_manage(delete)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
+        }
         const requestValues = input.entries.map((e) => ({ EntryId: e.entry_id }));
         const body = { requestValues };
         log(tool, 'POST', '/api/v1/oufilter/delete', body);
-        const data = await client.rawRequest<unknown>('POST', '/api/v1/oufilter/delete', body);
+        const data = await client.rawRequest<unknown>('POST', '/api/v1/oufilter/delete', body, {
+          mutating: true,
+          opName: 'ou_filter_manage(delete)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
     }
   } catch (err) {
+    if (err instanceof GuardrailError) {
+      logErr(tool, err);
+      return fail(`ou_filter_manage blocked: ${err.message}`);
+    }
     logErr(tool, err);
     return fail(`ou_filter_manage failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -317,13 +354,25 @@ async function newDeviceOptionsExecute(raw: unknown): Promise<McpToolResult> {
           return fail(
             'set requires at least one of: accept_only_known_devices, default_ou, deactivate_new_devices, allow_dynamic_ou_change',
           );
+        const modeCheck = checkMutationAllowed('new_device_options(set)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, wouldSet: body, message: modeCheck.dryRunNotice });
+        }
         log(tool, 'POST', '/api/v1/NewDeviceOptions/set', body);
-        const data = await client.rawRequest<unknown>('POST', '/api/v1/NewDeviceOptions/set', body);
+        const data = await client.rawRequest<unknown>('POST', '/api/v1/NewDeviceOptions/set', body, {
+          mutating: true,
+          opName: 'new_device_options(set)',
+        });
+        if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
         logOk(tool);
         return ok(data);
       }
     }
   } catch (err) {
+    if (err instanceof GuardrailError) {
+      logErr(tool, err);
+      return fail(`new_device_options blocked: ${err.message}`);
+    }
     logErr(tool, err);
     return fail(`new_device_options failed: ${err instanceof Error ? err.message : String(err)}`);
   }

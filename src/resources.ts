@@ -7,6 +7,8 @@
  *
  * Concrete resources (always present):
  *   scout://ou-tree                    — full OU hierarchy snapshot
+ *   scout://schema/terminal-ini         — eLux terminal.ini config key schema (static, cacheable)
+ *   scout://schema/kioskmode-ini        — eLux kioskmode.ini config key schema (static, cacheable)
  *
  * Concrete resources (enumerated from live server when authenticated):
  *   scout://ou/<path>                  — single OU details (one per OU in tree)
@@ -16,6 +18,7 @@
  */
 
 import { getClient } from './client.js';
+import { loadEluxConfigSchema } from './schema/eluxConfig.js';
 
 // ── URI helpers ───────────────────────────────────────────────────────────────
 
@@ -23,6 +26,19 @@ export const URI_OU_TREE = 'scout://ou-tree';
 export const URI_OU_PREFIX = 'scout://ou/';
 export const URI_DEVICES_TEMPLATE = 'scout://devices/{+ouPath}';
 const URI_DEVICES_PREFIX = 'scout://devices/';
+export const URI_SCHEMA_TERMINAL_INI = 'scout://schema/terminal-ini';
+export const URI_SCHEMA_KIOSKMODE_INI = 'scout://schema/kioskmode-ini';
+
+/** kioskmode.ini section names per docs/reference/kioskmode-ini-source.md, used to split the
+ *  single generated elux-config.json between the two schema resources. */
+const KIOSKMODE_SECTIONS = new Set([
+  'Parameters',
+  'Theme',
+  'Store<1-N>',
+  'Environment_Store<1-N>',
+  'PassThroughCredentials',
+  'Browser<1-N>',
+]);
 
 /** Encodes an OU path for embedding in a URI (encodes each segment, preserves slashes). */
 function encodeOuPath(path: string): string {
@@ -81,9 +97,9 @@ export interface ResourceTemplateDescriptor {
 /**
  * Returns the list of available Scout Board resources.
  *
- * Always includes scout://ou-tree. When authenticated, also enumerates one
- * scout://ou/<path> resource per OU in the live server's tree — so the client
- * can browse individual OUs without any tool calls.
+ * Always includes scout://ou-tree and the two static eLux config schema resources. When
+ * authenticated, also enumerates one scout://ou/<path> resource per OU in the live server's
+ * tree — so the client can browse individual OUs without any tool calls.
  */
 export async function listResources(): Promise<ResourceDescriptor[]> {
   const resources: ResourceDescriptor[] = [
@@ -94,6 +110,25 @@ export async function listResources(): Promise<ResourceDescriptor[]> {
         'Full Scout Board OU hierarchy. ' +
         'Read this to discover all OU names, paths, and IDs in one request. ' +
         'Use the results to pass ouRef values to ou_get, ou_manage, device_command, etc.',
+      mimeType: 'application/json',
+    },
+    {
+      uri: URI_SCHEMA_TERMINAL_INI,
+      name: 'eLux terminal.ini Config Schema',
+      description:
+        'Static, cacheable schema of eLux terminal.ini config keys: section, key, default value, ' +
+        'allowed range/type, sinceVersion, and publish flag, derived from the official Unicon ' +
+        'terminal.ini reference documentation. Use this to validate config_update writes or to ' +
+        'compute isExplicitDefault during RSoP resolution.',
+      mimeType: 'application/json',
+    },
+    {
+      uri: URI_SCHEMA_KIOSKMODE_INI,
+      name: 'eLux kioskmode.ini Config Schema',
+      description:
+        'Static, cacheable schema of eLux kioskmode.ini config keys (Parameters, Theme, ' +
+        'Store<1-N>, Environment_Store<1-N>, PassThroughCredentials, Browser<1-N>), derived from ' +
+        'the official Unicon kioskmode.ini reference documentation.',
       mimeType: 'application/json',
     },
   ];
@@ -148,6 +183,18 @@ export interface ResourceContent {
  * Reads a Scout Board resource by URI. Throws on unrecognised URIs or API errors.
  */
 export async function readResource(uri: string): Promise<ResourceContent> {
+  // ── scout://schema/terminal-ini, scout://schema/kioskmode-ini ───────────
+  // Static, derived entirely from the checked-in schema/elux-config.json — no Scout
+  // server connection required, so these are handled before getClient() is called.
+  if (uri === URI_SCHEMA_TERMINAL_INI) {
+    const entries = loadEluxConfigSchema().filter((e) => !KIOSKMODE_SECTIONS.has(e.section));
+    return { uri, mimeType: 'application/json', text: JSON.stringify(entries) };
+  }
+  if (uri === URI_SCHEMA_KIOSKMODE_INI) {
+    const entries = loadEluxConfigSchema().filter((e) => KIOSKMODE_SECTIONS.has(e.section));
+    return { uri, mimeType: 'application/json', text: JSON.stringify(entries) };
+  }
+
   const client = getClient();
 
   // ── scout://ou-tree ──────────────────────────────────────────────────────
@@ -190,6 +237,7 @@ export async function readResource(uri: string): Promise<ResourceContent> {
 
   throw new Error(
     `Unknown Scout resource URI: "${uri}". ` +
-      `Available: ${URI_OU_TREE}, ${URI_OU_PREFIX}<ouPath>, ${URI_DEVICES_TEMPLATE}`,
+      `Available: ${URI_OU_TREE}, ${URI_OU_PREFIX}<ouPath>, ${URI_DEVICES_TEMPLATE}, ` +
+      `${URI_SCHEMA_TERMINAL_INI}, ${URI_SCHEMA_KIOSKMODE_INI}`,
   );
 }
