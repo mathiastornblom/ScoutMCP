@@ -50,6 +50,12 @@ const ELIAS_TOOLS = [
   'elias_certificate_list',
   'elias_certificate_get',
   'elias_upload_status',
+  'elias_container_get',
+  'elias_container_capabilities',
+  'elias_container_rules',
+  'elias_package_versions',
+  'elias_package_dependencies',
+  'elias_image_get',
 ];
 
 export const CAPABILITIES: readonly Capability[] = [

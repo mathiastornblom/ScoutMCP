@@ -20,6 +20,12 @@ import {
   eliasCertificateListTool,
   eliasCertificateGetTool,
   eliasUploadStatusTool,
+  eliasContainerGetTool,
+  eliasContainerCapabilitiesTool,
+  eliasContainerRulesTool,
+  eliasPackageVersionsTool,
+  eliasPackageDependenciesTool,
+  eliasImageGetTool,
   redactSecrets,
   capOutput,
   MAX_OUTPUT_CHARS,
@@ -76,12 +82,12 @@ async function main(): Promise<void> {
   process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS = 'true';
 
   await test('all tools are annotated readOnlyHint and GET-only', async () => {
-    assert(eliasTools.length === 9, 'nine tools');
+    assert(eliasTools.length === 15, 'fifteen tools');
     for (const t of eliasTools) assert(t.annotations?.readOnlyHint === true, `${t.name} readOnlyHint`);
     responder = () => [];
     for (const t of eliasTools) {
       calls = [];
-      await t.execute({ containerId: CID, uploadId: UP, signing: true });
+      await t.execute({ containerId: CID, uploadId: UP, signing: true, id: 'x.epm' });
       for (const c of calls) assert(c.method === 'GET', `${t.name} uses GET`);
     }
   });
@@ -362,6 +368,120 @@ async function main(): Promise<void> {
     assert(capOutput(small) === small, 'identity');
     const big = capOutput({ blob: 'x'.repeat(MAX_OUTPUT_CHARS * 2) }) as Record<string, unknown>;
     assert(big.truncated === true, 'dropped');
+  });
+
+  const UCID = CID.toUpperCase();
+  await test('container ids are upper-cased in every container path (incl. braces rejected)', async () => {
+    const lc = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const UC = lc.toUpperCase();
+    responder = () => [];
+    const cases: Array<[McpTool, unknown, string]> = [
+      [eliasContainerFilesTool, { containerId: lc }, `/api/v1/containers/${UC}/files`],
+      [eliasRightsTool, { containerId: lc }, `/api/v1/containers/${UC}/rights`],
+      [eliasPackageListTool, { containerId: lc }, `/api/v1/epms/getAll/${UC}`],
+      [eliasImageListTool, { containerId: lc }, `/api/v1/images/getAll/${UC}`],
+      [eliasCertificateListTool, { containerId: lc }, `/api/v1/certificates/getAll/${UC}`],
+      [eliasContainerGetTool, { containerId: lc }, `/api/v1/containers/${UC}`],
+      [eliasContainerRulesTool, { containerId: lc }, `/api/v1/containers/${UC}/rules`],
+      [eliasPackageVersionsTool, { containerId: lc, id: 'a-1.epm' }, `/api/v1/epms/${UC}/a-1.epm/versions`],
+      [eliasPackageDependenciesTool, { containerId: lc, id: 'a-1.epm' }, `/api/v1/epms/${UC}/a-1.epm/dependencies`],
+      [eliasImageGetTool, { containerId: lc, id: 'N.idf' }, `/api/v1/images/${UC}/N.idf`],
+    ];
+    for (const [t, a, p] of cases) {
+      await run(t, a);
+      assert(calls[0]?.path === p, `${t.name}: ${calls[0]?.path}`);
+    }
+    for (const t of [eliasContainerGetTool, eliasContainerFilesTool]) {
+      const r = await run(t, { containerId: `{${lc}}` });
+      assert(r.isError === true && calls.length === 0, 'braces rejected');
+    }
+  });
+
+  await test('new read tools: capabilities path, pagination, redaction, object passthrough', async () => {
+    responder = () => Array.from({ length: 10 }, (_, i) => ({ n: i, secret: 'hunter2' }));
+    const r = await run(eliasContainerCapabilitiesTool, { limit: 3 });
+    assert(calls[0].path === '/api/v1/containers/capabilities', 'path');
+    const o = JSON.parse(text(r));
+    assert(o.returned === 3 && o.total === 10 && !text(r).includes('hunter2'), text(r));
+    responder = () => ({ id: UCID, password: 'p4ss' });
+    const g = text(await run(eliasContainerGetTool, { containerId: CID }));
+    assert(g.includes(UCID) && !g.includes('p4ss'), g);
+  });
+
+  await test('new tools reject injection ids before any HTTP', async () => {
+    for (const v of evil) {
+      for (const [t, a] of [
+        [eliasPackageVersionsTool, { containerId: CID, id: v }],
+        [eliasPackageDependenciesTool, { containerId: CID, id: v }],
+        [eliasImageGetTool, { containerId: CID, id: v }],
+        [eliasContainerGetTool, { containerId: v }],
+        [eliasContainerRulesTool, { containerId: v }],
+      ] as Array<[McpTool, unknown]>) {
+        const r = await run(t, a);
+        assert(r.isError === true && calls.length === 0, `${t.name} accepted ${JSON.stringify(v).slice(0, 20)}`);
+      }
+    }
+  });
+
+  await test('new tools gated by private-endpoints flag', async () => {
+    process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS = 'false';
+    for (const t of [eliasContainerGetTool, eliasContainerCapabilitiesTool, eliasContainerRulesTool, eliasPackageVersionsTool, eliasPackageDependenciesTool, eliasImageGetTool]) {
+      const r = await run(t, { containerId: CID, id: 'a.epm' });
+      assert(r.isError === true && calls.length === 0, t.name);
+    }
+    process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS = 'true';
+  });
+
+  await test('403 no per-container grant -> explains UI-proxy grant, no workaround', async () => {
+    responder = () => {
+      throw new ScoutError('Insufficient permissions: the request carries no per-container grant', 403);
+    };
+    const t = text(await run(eliasContainerFilesTool, { containerId: CID }));
+    assert(t.includes('UI proxy') && t.includes('cookie') && t.includes('cannot create'), t);
+    assert(!t.includes('right denied'), t);
+  });
+
+  await test('403 grantKeyChanged: retried once (GET), success on retry', async () => {
+    let n = 0;
+    responder = () => {
+      if (n++ === 0) throw new ScoutError('grant key changed', 403, 'grantKeyChanged');
+      return [{ id: 'f' }];
+    };
+    const r = await run(eliasContainerFilesTool, { containerId: CID });
+    assert(r.isError !== true && calls.length === 2 && calls.every((c) => c.method === 'GET'), `${calls.length} ${text(r)}`);
+  });
+
+  await test('403 grantKeyChanged persistent: exactly one retry then clear error', async () => {
+    responder = () => {
+      throw new ScoutError('grant key changed', 403, 'grantKeyChanged');
+    };
+    const r = await run(eliasContainerFilesTool, { containerId: CID });
+    assert(calls.length === 2 && r.isError === true && text(r).includes('grantKeyChanged'), text(r));
+  });
+
+  await test('other 403 -> right denied naming view (415)', async () => {
+    responder = () => {
+      throw new ScoutError('nope', 403);
+    };
+    const t = text(await run(eliasImageGetTool, { containerId: CID, id: 'a.idf' }));
+    assert(t.includes('right denied') && t.includes('view (415)'), t);
+  });
+
+  await test('404 containerNotFound -> id-format message, no capability probe', async () => {
+    responder = () => {
+      throw new ScoutError('x', 404, 'containerNotFound');
+    };
+    const t = text(await run(eliasContainerGetTool, { containerId: CID }));
+    assert(t.includes('containerNotFound') && t.includes('UPPER CASE') && !t.includes('requires Scout'), t);
+    assert(calls.length === 1, 'no probe request');
+  });
+
+  await test('signing cert: containerNotFound is an error, never "none"', async () => {
+    responder = () => {
+      throw new ScoutError('x', 404, 'containerNotFound');
+    };
+    const r = await run(eliasCertificateGetTool, { containerId: CID, signing: true });
+    assert(r.isError === true && !text(r).includes('"none"') && calls.length === 1, text(r));
   });
 
   console.log(`\n${passed}/${passed + failed} passed`);

@@ -20,12 +20,16 @@ const TOKEN_RENEW_BEFORE_MS = 60_000;
 interface ApiError {
   code?: string | number;
   message?: string;
+  /** Machine-readable message id (e.g. ELIAS `grantKeyChanged`, `containerNotFound`). */
+  msgId?: string;
 }
 
 export class ScoutError extends Error {
   constructor(
     message: string,
     public readonly statusCode?: number,
+    /** Server-supplied msgId from the error body, when present (raw/private endpoints only). */
+    public readonly msgId?: string,
   ) {
     super(message);
     this.name = 'ScoutError';
@@ -335,7 +339,11 @@ export class ScoutClient {
         apiError?.message && apiError.message !== 'OK'
           ? apiError.message
           : `Request failed (HTTP ${res.status})`;
-      throw new ScoutError(msg, res.status);
+      throw new ScoutError(
+        msg,
+        res.status,
+        typeof apiError?.msgId === 'string' ? apiError.msgId.slice(0, 100) : undefined,
+      );
     }
 
     if (res.status === 204) return undefined as T;

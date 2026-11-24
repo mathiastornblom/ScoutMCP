@@ -15,7 +15,7 @@ a minimum release. Status values:
 
 | Capability id | Min Scout | Status | 2605 | 2609 | 2611 | Notes |
 |---------------|-----------|--------|------|------|------|-------|
-| `elias` | 2611 | har-only | ? | ? | expected | Private `/api/v1/systemcheck/elias` and friends; 9 read-only `elias_*` tools. README: "built into Scout Board 2611". The HAR host exposes it, but its own Scout version was not captured. |
+| `elias` | 2611 | har-only | ? | ? | expected | Private `/api/v1/systemcheck/elias` and friends; 15 read-only `elias_*` tools. README: "built into Scout Board 2611". The HAR host exposes it, but its own Scout version was not captured. |
 | `ourights-preflight` | - | har-only | ? | ? | ? | `GET /api/v1/ourights?ouId=` seen in the HAR. No source gives the release that introduced it. UX aid only; the preflight proceeds when the endpoint is missing or errors. |
 | `advanced-file-entries` | - | untested | ? | ? | ? | Public `/config/advanced/*/fileEntries` are in `openapi.json`; never exercised live. Only `config_resolve` consumes them. |
 | `ou-filter-and-or` | 2605 | verified-live | yes | ? | ? | README: AND/OR, bracket grouping and prefix matching "confirmed working against Scout 2605". Earlier releases not tested. |
@@ -29,7 +29,9 @@ verified, `?` = no evidence either way.
 
 - **2605**: user-defined OU filter syntax with AND/OR, bracket grouping and built-in prefix matching confirmed working (README).
 - **2609**: no Scout Board facts are sourced. (Devices in the HAR report eLux client OS `7.2609.x`; that is the client OS, not the Scout Board release.)
-- **2611**: ELIAS built into Scout Board (README).
+- **2611**: ELIAS built into Scout Board (README). The ELIAS OpenAPI (Scout 26.11, DBLayer 15.2611+) is consistent with this.
+
+Scout releases are versioned `YY.MM.patch` (e.g. `26.11.0` = `2611`). The public `openapi.json` `info.version` `25.11.0` is the release that spec was taken from (2511), not the version of any server under test; `src/compat/detect.ts` parses `YY.MM`.
 
 The `docs/reference/` tables cite `7.2603`, `7.2605` and similar; those are **eLux client OS**
 releases for terminal.ini settings and say nothing about the Scout Board server release.
