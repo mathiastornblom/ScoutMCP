@@ -246,7 +246,12 @@ async function systemSettingsExecute(raw: unknown): Promise<McpToolResult> {
         checkPrivateWriteAllowedInProduction('system_settings(set_recovery_settings)');
         const modeCheck = checkMutationAllowed('system_settings(set_recovery_settings)');
         if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
-        const path = '/api/v1/recoverySettings/set';
+        // POST /api/v1/recoverySettings (same path as GET). There is no `/set` suffix on this
+        // route (SBD-UI api/routes/v1/advancedOptions/recoverySettings/recoverySettings.route.ts:34-42).
+        // Body (Joi, api/validations/recoverySettings.validation.ts): OsToRecover ('eluxrp6'|'elux7'),
+        // Protocol ('ftp'|'http'), Server, Proxy, User, Path, File, UserMustConfirm (all required),
+        // Password (optional; omitted keeps the stored one, '' clears it).
+        const path = '/api/v1/recoverySettings';
         log(tool, 'POST', path, input.recovery_options);
         const data = await client.rawRequest<unknown>('POST', path, input.recovery_options, {
           mutating: true,
