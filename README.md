@@ -142,6 +142,8 @@ The container uses stdio. HTTP mode (`SCOUT_TRANSPORT=http`) additionally requir
 | `SCOUT_OIDC_ISSUER_URL` | http transport only | OIDC issuer URL (e.g. your Entra ID or Okta tenant). **Required** when `SCOUT_TRANSPORT=http` — the server refuses to start without it, since HTTP is a network-reachable surface. |
 | `SCOUT_OIDC_AUDIENCE` | http transport only | Expected `aud` claim on incoming bearer tokens. **Required** when `SCOUT_TRANSPORT=http`. |
 
+**OU path format.** Wherever an OU path appears (`SCOUT_PROTECTED_OUS`/`SCOUT_ALLOWED_OUS`, `ouPath`, `ou_manage` `path`/`parent_path`, resolver output) it is `/` followed by the OU names from the top-level OU down, joined by `/`, with no trailing slash: `/NorthCreek/Browser/Google-CEP`. Scout's `/ou/structure` returns no path field, so the server derives it from the tree (`src/ou_tree.ts`). There is no synthetic `/` root (top-level OUs are siblings) and OU names containing `/` are refused. If the tree cannot be parsed, every check that needs it refuses (fails closed).
+
 > **Note:** You can also configure credentials at runtime using the `scout_configure` tool — no `.env` file needed.
 
 > **Warning:** `SCOUT_IGNORE_TLS=true` disables certificate verification. Use only with self-signed certificates in controlled environments.

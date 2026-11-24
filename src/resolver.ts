@@ -2,12 +2,16 @@
  * OU name resolver — translates a free-form OU reference (name, partial name, full path,
  * or numeric ID) into a concrete { ouid, name, path } match.
  *
+ * The OU tree is parsed by the shared, fail-closed parser in src/ou_tree.ts (real
+ * `treeStructure` envelope; paths are derived as "/Top/Child/Leaf" - see its header for the
+ * exact format and the cumulative-DeviceCount note).
+ *
  * The cache is loaded once per process (lazy) and stays valid for CACHE_TTL_MS.
  * Call invalidateOuCache() after any ou_manage mutation so the next lookup re-fetches.
  */
 
 import { getClient } from './client.js';
-import { parseSearchDevices } from './devices.js';
+import { parseOuTree, ouChain, ouSubtree, type OuTree, type OuTreeNode } from './ou_tree.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -15,13 +19,6 @@ export interface OuMatch {
   ouid: number;
   name: string;
   path: string;
-}
-
-interface OuNode {
-  OUID: number;
-  OUName: string;
-  OUPath: string;
-  SubOUs?: OuNode[];
 }
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
@@ -36,21 +33,20 @@ export function invalidateOuCache(): void {
   cacheLoadedAt = 0;
 }
 
+/** Fetches and parses the live OU tree (uncached). Throws OuTreeParseError on any unexpected
+ *  shape — callers rely on this to fail closed (see src/ou_tree.ts). */
+async function fetchOuTree(): Promise<OuTree> {
+  const raw = await getClient().request<unknown>('GET', '/api/v1/ou/structure');
+  return parseOuTree(raw);
+}
+
+function toMatch(n: OuTreeNode): OuMatch {
+  return { ouid: n.ouid, name: n.name, path: n.path };
+}
+
 async function loadCache(): Promise<OuMatch[]> {
   if (cache && Date.now() - cacheLoadedAt < CACHE_TTL_MS) return cache;
-
-  const client = getClient();
-  const root = await client.request<OuNode>('GET', '/api/v1/ou/structure');
-
-  const flat: OuMatch[] = [];
-  function flatten(node: OuNode): void {
-    if (node.OUID !== undefined) {
-      flat.push({ ouid: node.OUID, name: node.OUName, path: node.OUPath });
-    }
-    if (Array.isArray(node.SubOUs)) node.SubOUs.forEach(flatten);
-  }
-  flatten(root);
-
+  const flat = (await fetchOuTree()).nodes.map(toMatch);
   cache = flat;
   cacheLoadedAt = Date.now();
   return flat;
@@ -67,8 +63,9 @@ async function loadCache(): Promise<OuMatch[]> {
  *   3. Exact name match (case-insensitive)
  *   4. Partial name contains match
  *
- * Throws a descriptive error with a candidate list on ambiguity, and a
- * "not found" suggestion on zero matches.
+ * Throws a descriptive error with a candidate list on ambiguity (two OUs with the same name
+ * at different depths are reported, never silently picked), and a "not found" suggestion on
+ * zero matches. An unreadable OU tree also throws (never "no match").
  */
 export async function resolveOuRef(ref: string | number): Promise<OuMatch> {
   // 1. Numeric ID
@@ -85,7 +82,8 @@ export async function resolveOuRef(ref: string | number): Promise<OuMatch> {
 
   // 2. Exact path
   if (s.startsWith('/')) {
-    const byPath = all.filter((o) => o.path.toLowerCase() === s.toLowerCase());
+    const want = s.length > 1 && s.endsWith('/') ? s.slice(0, -1) : s;
+    const byPath = all.filter((o) => o.path.toLowerCase() === want.toLowerCase());
     if (byPath.length === 1) return byPath[0];
     if (byPath.length > 1) return throwAmbiguous(s, byPath);
   }
@@ -106,113 +104,62 @@ export async function resolveOuRef(ref: string | number): Promise<OuMatch> {
 }
 
 /**
- * Returns the chain of OUs from root to the given OU (inclusive), in root→leaf order, by
- * walking the cached OU tree and recording parentage as it flattens. Used by the RSoP
- * engine (§2) to fetch each ancestor OU's config layer in precedence order.
+ * Returns the chain of OUs from the top-level OU to the given OU (inclusive), in root→leaf
+ * order, from a fresh read of the OU tree. Used by the RSoP engine (§2) to fetch each
+ * ancestor OU's config layer in precedence order.
  *
- * Falls back to a single-element chain [ou] if the tree has no parent info (e.g. ou is
- * itself the root) — never throws on a missing parent, since the root OU has none.
+ * Throws if the tree cannot be parsed or no longer contains the resolved OU — it never
+ * substitutes a guessed single-element chain, because a truncated chain would silently drop
+ * ancestor config layers from the effective-config computation.
  */
 export async function getOuChain(ouRef: string | number): Promise<OuMatch[]> {
   const target = await resolveOuRef(ouRef);
-  const client = getClient();
-  const root = await client.request<OuNode>('GET', '/api/v1/ou/structure');
-
-  const chain: OuMatch[] = [];
-  function findPathTo(node: OuNode, trail: OuMatch[]): boolean {
-    const here: OuMatch = { ouid: node.OUID, name: node.OUName, path: node.OUPath };
-    const nextTrail = [...trail, here];
-    if (node.OUID === target.ouid) {
-      chain.push(...nextTrail);
-      return true;
-    }
-    if (Array.isArray(node.SubOUs)) {
-      for (const child of node.SubOUs) {
-        if (findPathTo(child, nextTrail)) return true;
-      }
-    }
-    return false;
+  const chain = ouChain(await fetchOuTree(), target.ouid);
+  if (!chain) {
+    throw new Error(`OU ${target.ouid} ("${target.path}") is no longer present in the OU tree.`);
   }
-  findPathTo(root, []);
-
-  // If the walk failed to find the target (shouldn't happen since resolveOuRef already
-  // matched it against the same flattened cache), fall back to a single-element chain.
-  return chain.length > 0 ? chain : [target];
+  return chain.map(toMatch);
 }
 
-/** Recursively collects every OU in the subtree rooted at `ouid` (inclusive), by walking
- *  the cached OU tree structure directly rather than relying on includeSubOus — per known
- *  project behavior, the device/search `includeSubOus` flag does not reliably recurse, so
- *  fan-out is done manually here, one /device/search call per leaf/branch OU. */
-async function collectOuSubtree(ouid: number): Promise<OuMatch[]> {
-  const client = getClient();
-  const root = await client.request<OuNode>('GET', '/api/v1/ou/structure');
-
-  const collected: OuMatch[] = [];
-  function walk(node: OuNode, capture: boolean): void {
-    const isTarget = node.OUID === ouid;
-    const shouldCapture = capture || isTarget;
-    if (shouldCapture && node.OUID !== undefined) {
-      collected.push({ ouid: node.OUID, name: node.OUName, path: node.OUPath });
-    }
-    if (Array.isArray(node.SubOUs)) {
-      for (const child of node.SubOUs) walk(child, shouldCapture);
-    }
-  }
-  walk(root, false);
-  return collected;
+/** Every OU in the subtree rooted at `ouid` (inclusive), depth-first, from a fresh tree read.
+ *  Throws if the tree cannot be parsed or `ouid` is not in it. */
+export async function collectOuSubtree(ouid: number): Promise<OuMatch[]> {
+  const sub = ouSubtree(await fetchOuTree(), ouid);
+  if (!sub) throw new Error(`OU ${ouid} is not present in the OU tree.`);
+  return sub.map(toMatch);
 }
 
 /**
- * Counts the number of devices under an OU, including all sub-OUs, by walking the OU
- * subtree and issuing one `/api/v1/device/search` call per OU in it (in parallel), using
- * the `%` wildcard searchTerm convention (Scout's device search wildcard is `%`, not `*`)
- * to match every device in each OU. Used by config_update's Gate 3 (blast-radius) check
- * for target=ou writes, where a single OU-scope write inherits to every device under it.
+ * Counts the devices under an OU (including all sub-OUs) for config_update's Gate 3
+ * (blast-radius) check on target=ou writes, where one OU-scope write inherits to every
+ * device under it.
  *
- * FAILS CLOSED: if any sub-OU's device-search call errors, or returns a response that
- * doesn't parse as a valid device-search envelope (see parseSearchDevices in devices.ts),
- * the whole count throws rather than silently substituting 0 for that OU. A blast-radius
- * cap that undercounts on a transient failure is worse than one that refuses outright — it
- * would let a write through that should have been capped. checkBlastRadius's caller is
- * expected to treat a thrown error here as "refuse the operation", not "proceed assuming a
- * lower count than reality."
+ * Source: the `DeviceCount` of the target node in a FRESH /ou/structure read. On the real
+ * server that field is CUMULATIVE (already includes every descendant OU — see ou_tree.ts),
+ * so the target's own value is the answer; summing over the subtree would double count.
+ * (The former per-OU device-search fan-out is gone: it relied on the `ouId` search filter,
+ * which the server rejects with HTTP 400.)
  *
- * (Previously this was a best-effort count that treated per-OU errors as 0 devices,
- * documented as an intentionally-flagged fail-open tradeoff — that tradeoff is removed by
- * this change; see security-review.md for the round that closed it.)
+ * FAILS CLOSED: an unparseable tree, a target missing from the fresh tree, or a target node
+ * without a usable DeviceCount all throw rather than substituting 0. checkBlastRadius's caller
+ * treats a thrown error here as "refuse the operation", not "proceed assuming a lower count".
  */
 export async function countDevicesUnderOu(ouRef: string | number): Promise<number> {
   const target = await resolveOuRef(ouRef);
-  const subtree = await collectOuSubtree(target.ouid);
-  const client = getClient();
-
-  const counts = await Promise.all(
-    subtree.map(async (ou) => {
-      const qs = `?ouId=${encodeURIComponent(String(ou.ouid))}&searchTerm=${encodeURIComponent('%')}&limit=10000`;
-      let data: unknown;
-      try {
-        data = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
-      } catch (err) {
-        throw new Error(
-          `countDevicesUnderOu: device search failed for OU "${ou.path}" (id ${ou.ouid}): ` +
-            `${err instanceof Error ? err.message : String(err)}. Refusing to undercount — ` +
-            'the blast-radius check cannot proceed without a reliable count.',
-        );
-      }
-      const parsed = parseSearchDevices(data);
-      if (!parsed.ok) {
-        throw new Error(
-          `countDevicesUnderOu: could not parse device search response for OU "${ou.path}" ` +
-            `(id ${ou.ouid}): ${parsed.reason}. Refusing to undercount — the blast-radius check ` +
-            'cannot proceed without a reliable count.',
-        );
-      }
-      return parsed.devices.length;
-    }),
-  );
-
-  return counts.reduce((sum, c) => sum + c, 0);
+  const node = (await fetchOuTree()).byId.get(target.ouid);
+  if (!node) {
+    throw new Error(
+      `countDevicesUnderOu: OU ${target.ouid} ("${target.path}") is not present in the OU tree. ` +
+        'Refusing to guess a device count.',
+    );
+  }
+  if (node.deviceCount === undefined) {
+    throw new Error(
+      `countDevicesUnderOu: OU "${node.path}" (id ${node.ouid}) has no usable DeviceCount in the OU ` +
+        'tree. Refusing to undercount — the blast-radius check cannot proceed without a reliable count.',
+    );
+  }
+  return node.deviceCount;
 }
 
 function throwAmbiguous(ref: string, candidates: OuMatch[]): never {

@@ -17,9 +17,13 @@ setSessionConfig({ baseUrl: 'https://fake-scout-board.invalid:22160', username: 
 process.env.SCOUT_AUDIT_LOG_PATH = join(mkdtempSync(join(tmpdir(), 'scout-pfw-')), 'audit.log');
 process.env.SCOUT_KILL_SWITCH_FILE = join(tmpdir(), 'scout-pfw-no-kill-switch');
 
+// Real /ou/structure envelope (see tests/fixtures/ou-structure-live.json): paths are derived, not served.
 const STRUCT = {
-  OUID: 1, OUName: 'Enterprise', OUPath: '/Enterprise',
-  SubOUs: [{ OUID: 7, OUName: 'Lab', OUPath: '/Enterprise/Lab', SubOUs: [] }],
+  code: 200, message: 'OK',
+  response: { status: { result: 0, msg: { treeStructure: [
+    { OUID: 1, Name: 'Enterprise', count: 0, DeviceCount: 0, ParentID: -1, UseParent: 1,
+      children: [{ OUID: 7, Name: 'Lab', count: 0, DeviceCount: 0, ParentID: 1, UseParent: 0, children: [] }] },
+  ] } } },
 };
 
 let failed = 0;
