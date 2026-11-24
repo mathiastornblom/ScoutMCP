@@ -295,6 +295,25 @@ Confirmed working against Scout 2605:
 
 ---
 
+## ELIAS tools (read-only phase, Scout 2611+)
+
+ELIAS is built into Scout Board 2611 and served on the same host under `/api/v1/...` (no `/rest` prefix); it is not in `openapi.json`. These tools are **private endpoints**: they exist only when `SCOUT_ENABLE_PRIVATE_ENDPOINTS=true` and need Scout 2611 or later. This phase is strictly **read-only** (GET only).
+
+| Tool | Endpoint(s) |
+|------|-------------|
+| `elias_health` | `GET /systemcheck/elias` |
+| `elias_container_list` | `GET /containers` |
+| `elias_container_files` | `GET /containers/{id}/files` |
+| `elias_rights` | `GET /containers/rights`, `GET /containers/{id}/rights` |
+| `elias_package_list` | `GET /epms/getAll/{id}`; with `name`: `GET /epms/{id}/{name}.epm/fpms` |
+| `elias_image_list` | `GET /images/getAll/{id}` |
+| `elias_certificate_list` / `elias_certificate_get` | `GET /certificates/getAll/{id}`, `/certificates/{id}/{certId}`, `/certificates/signing/{id}` |
+| `elias_upload_status` | `GET /files/upload/{id}/status` |
+
+Safeguards: container/certificate/upload ids must be GUIDs and package names match a strict charset (no `..`, `/`, `%`, `?`, `#`); every segment is `encodeURIComponent`-encoded into a fixed path template. Lists use a minimal projection with `limit`/`offset` (default 50) and a 100 KB output cap. Certificates are metadata-only (PEM only via `includePem` for `CRT` public certs, never for the signing certificate); all responses pass through a recursive redaction filter for private-key/secret-looking fields. A 404 on the signing certificate is reported as `{"signingCertificate":"none"}`. Server text is untrusted data.
+
+Not implemented (later, Security-gated phase): container import/delete, image delete/save, upload init/complete, solver solve/generateRules, lock set/release. `POST /images/{id}/{name}.idf/idf` (IDF text export) is also left out: the HAR shows a POST with body `{}` returning text/plain but cannot prove it has no side effects, and `rawRequest()` parses JSON only.
+
 ## Response enrichment
 
 Tool responses that contain numeric OUID fields (e.g. `device_get`, `device_manage`) are automatically annotated with human-readable `_OUIDName` and `_OUIDPath` siblings, so the AI has full context without a follow-up `ou_get` call:

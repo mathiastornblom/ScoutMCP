@@ -62,6 +62,8 @@ export interface McpTool {
   name: string;
   description: string;
   inputSchema: unknown;
+  /** Optional MCP tool annotations (e.g. readOnlyHint). */
+  annotations?: Record<string, boolean>;
   execute: (raw: unknown, ctx?: ToolContext) => Promise<McpToolResult>;
 }
 
