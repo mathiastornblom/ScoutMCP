@@ -221,9 +221,9 @@ A note on actor identity in the audit log: this server runs as a single stdio MC
 On every MCP reconnect (each `docker run` is a fresh startup) the server checks the latest GitHub release and logs to stderr:
 
 ```
-[scout-mcp] Version v1.5.1 is up to date.
+[scout-mcp] Version v1.6.0 is up to date.
 # or:
-[scout-mcp] Update available: v1.5.1 → v1.6.0. Rebuild the Docker image to get the latest version.
+[scout-mcp] Update available: v1.6.0 → v1.7.0. Rebuild the Docker image to get the latest version.
 ```
 
 No action is taken automatically — the check is informational only.
@@ -244,7 +244,7 @@ Scout MCP exposes browsable MCP Resources so AI clients can read Scout Board con
 
 ---
 
-## Available Tools (22 public + 11 private)
+## Available Tools (24 default; 51 with `SCOUT_ENABLE_PRIVATE_ENDPOINTS=true`, of which 16 are `elias_*` read-only tools)
 
 ### Core tools
 
@@ -360,7 +360,7 @@ ELIAS is built into Scout Board 2611 and served on the same host under `/api/v1/
 
 Safeguards: container/certificate/upload ids must be GUIDs and package names match a strict charset (no `..`, `/`, `%`, `?`, `#`); every segment is `encodeURIComponent`-encoded into a fixed path template. Lists use a minimal projection with `limit`/`offset` (default 50) and a 100 KB output cap. Certificates are metadata-only (PEM only via `includePem` for `CRT` public certs, never for the signing certificate); all responses pass through a recursive redaction filter for private-key/secret-looking fields. A 404 on the signing certificate is reported as `{"signingCertificate":"none"}`. Server text is untrusted data. Container ids are upper-cased before use (DBLayer only accepts the spelling `GET /containers` lists). Container-scoped calls need a per-container grant that the Scout Board proxy mints for any authenticated caller. Note: on CCAUTH installs Bearer-only calls outside `/rest` get a JSON 401, and on OIDC installs the `oidcToken` cookie is also required, so ELIAS/private tools may not work there. See [docs/reference/elias-api-notes.md](docs/reference/elias-api-notes.md) for rights, grant behaviour and what is deliberately not exposed.
 
-Not implemented (later, Security-gated phase): container import/delete, image delete/save, upload init/complete, solver solve/generateRules, lock set/release. `POST /images/{id}/{name}.idf/idf` (IDF text export) is also left out: the HAR shows a POST with body `{}` returning text/plain but cannot prove it has no side effects, and `rawRequest()` parses JSON only.
+Not implemented (later, Security-gated phase): container import/delete, image delete/save, upload init/complete, solver solve/generateRules, lock set/release. The write-phase foundation (closed operation table, unforgeable single-use mutation token, gate pipeline G0-G18, write-ahead audit, fixture scrubber) is merged but **registers no write tool**: `elias_container_create` stays unregistered until its request body is captured live and recorded as `verified-live`. Signing, certificate import/restore/delete and sign operations are permanently excluded. Design and review: `.agents/design-elias-write-phase.md`, `.agents/design-review-elias-write-phase.md`. `POST /images/{id}/{name}.idf/idf` (IDF text export) is also left out: the HAR shows a POST with body `{}` returning text/plain but cannot prove it has no side effects, and `rawRequest()` parses JSON only.
 
 ## Scout version compatibility
 
