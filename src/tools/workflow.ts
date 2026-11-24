@@ -20,7 +20,7 @@ import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { confirmDestructiveAction, supportsElicitation } from '../elicitation.js';
 import { resolveOuRef, invalidateOuCache, assertOuPathUnchanged } from '../resolver.js';
-import { gateOuWrite, gateOuSubtree, subOusRequested, stripOuBodyKeys } from '../safety/ou_gate.js';
+import { gateOuWrite, gateOuSubtree, subOusRequested, sanitizeOuBody } from '../safety/ou_gate.js';
 import {
   checkMutationAllowed,
   checkBlastRadius,
@@ -551,9 +551,10 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
     // from a fresh tree (path/id must agree), gate it - and, with includeSubOus, every sub-OU - on
     // the RESOLVED path (SCOUT_ENV=test scope, SCOUT_PROTECTED_OUS / SCOUT_ALLOWED_OUS), and
     // search by that canonical path only.
+    const cmdBody = sanitizeOuBody(input.commandBody, { generic: true });
     const srcRoot = await gateOuWrite(
       `bulk_command(${input.command})`,
-      [input.sourceOuPath, input.sourceOuId],
+      [input.sourceOuPath, input.sourceOuId, ...cmdBody.ouRefs],
       'source OU',
       { requiredMessage: 'sourceOuPath or sourceOuId is required' },
     );
@@ -660,7 +661,7 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
         const result = await client.request<unknown>(
           'POST',
           `/api/v1/command/device/${input.command}${cmdQs}`,
-          input.commandBody === undefined ? undefined : stripOuBodyKeys(input.commandBody),
+          input.commandBody === undefined ? undefined : cmdBody.body,
           { mutating: true, opName: `bulk_command(${input.command})` },
         );
         if (isDryRunSkip(result)) continue;

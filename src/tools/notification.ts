@@ -3,7 +3,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
-import { gateOuWrite, gateOuSubtree, bodyValuesFor, bodySubOusRequested, stripOuBodyKeys } from '../safety/ou_gate.js';
+import { gateOuWrite, gateOuSubtree, sanitizeOuBody } from '../safety/ou_gate.js';
 import { assertOuPathUnchanged, type OuMatch } from '../resolver.js';
 
 const notificationManageSchema = z.object({
@@ -54,14 +54,13 @@ async function notificationManageExecute(raw: unknown): Promise<McpToolResult> {
     let ou: OuMatch | undefined;
     let body = input.body;
     if (input.target === 'ou') {
-      ou = await gateOuWrite(opName, [input.ouPath, input.ouId], 'target OU', {
+      const sb = sanitizeOuBody(input.body, { generic: true });
+      ou = await gateOuWrite(opName, [input.ouPath, input.ouId, ...sb.ouRefs], 'target OU', {
         requiredMessage: 'target=ou requires ouPath or ouId; refusing rather than leaving the OU to the server.',
       });
       if (!ou) throw new Error('target OU unresolved');
-      const hasSubOusKey = bodyValuesFor(input.body, 'includesubous').length > 0;
-      const subOus = bodySubOusRequested(input.body);
-      if (subOus) await gateOuSubtree(opName, ou);
-      body = { ...stripOuBodyKeys(input.body), ...(hasSubOusKey ? { includeSubOus: subOus } : {}) };
+      if (sb.subOusRequested) await gateOuSubtree(opName, ou);
+      body = { ...sb.body, ...(sb.hasSubOusKey ? { includeSubOus: sb.subOusRequested } : {}) };
       qs = buildQuery({ id: ou.ouid });
     }
 

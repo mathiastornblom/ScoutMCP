@@ -3,7 +3,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
-import { gateOuWrite } from '../safety/ou_gate.js';
+import { gateOuWrite, sanitizeOuBody } from '../safety/ou_gate.js';
 import { assertOuPathUnchanged, type OuMatch } from '../resolver.js';
 
 // ── app_list ──────────────────────────────────────────────────────────────────
@@ -72,14 +72,17 @@ async function appManageExecute(raw: unknown): Promise<McpToolResult> {
         const modeCheck = checkMutationAllowed(opName);
         // scope=ou writes into one OU: resolve/gate it and send only its id. scope=base is global
         // (not OU-scoped) and sends no OU at all.
-        const ou = input.scope === 'ou' ? await gateApplicationOu(opName, input, 'target OU') : undefined;
+        // The application definition is forwarded, but with every OU-ish key removed (a key naming a
+        // different OU than the gated one is refused); `id`/`path` stay (possible app fields).
+        const sb = input.scope === 'ou' ? sanitizeOuBody(input.body, { generic: false }) : undefined;
+        const ou = input.scope === 'ou' ? await gateApplicationOu(opName, input, 'target OU', false, sb?.ouRefs) : undefined;
         if (!modeCheck.proceed) return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         if (ou) await assertOuPathUnchanged(ou.ouid, ou.path);
         const qs = ou ? buildQuery({ id: ou.ouid }) : '';
         const data = await client.request<unknown>(
           'POST',
           `/api/v1/applications/${input.scope}/${input.applicationType}${qs}`,
-          input.body,
+          sb ? sb.body : input.body,
           { mutating: true, opName },
         );
         if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
@@ -159,8 +162,8 @@ async function appManageExecute(raw: unknown): Promise<McpToolResult> {
 }
 
 /** Resolves/gates the OU named by ouPath/ouId (must agree); refuses (audited) when neither is given. */
-async function gateApplicationOu(opName: string, input: AppManageInput, label: string, resolveOnly = false): Promise<OuMatch> {
-  const ou = await gateOuWrite(opName, [input.ouPath, input.ouId], label, {
+async function gateApplicationOu(opName: string, input: AppManageInput, label: string, resolveOnly = false, extraRefs: Array<string | number> = []): Promise<OuMatch> {
+  const ou = await gateOuWrite(opName, [input.ouPath, input.ouId, ...extraRefs], label, {
     skipProtectedCheck: resolveOnly,
     requiredMessage: `ouPath or ouId is required (${label}); refusing rather than leaving the OU to the server.`,
   });

@@ -486,26 +486,64 @@ await test('F6 repro: IncludeSubOus / includesubous / INCLUDESUBOUS with ouRef=8
     await refused(`notification ${k}`, () => notificationManageTool.execute({ action: 'set', target: 'ou', type: 'delivery', ouId: 8, body: { [k]: 'yes' } }));
   }
 });
-await test('F6 repro: body {OUID:9} / ouid / ouPATH with ouRef=17 -> refused (disagree); other OU-ish keys dropped, only canonical ouId sent', async () => {
+await test('F6/F9: body OU keys naming a DIFFERENT OU than the gated one -> refused (device_command, notification); agreeing ones dropped', async () => {
   for (const extra of [{ OUID: 9 }, { ouid: 9 }, { ouPATH: CL }, { Dest_OU_Id: 9, destOuId: 9, TargetOu: 9, GroupID: 9, Path: CL, id: 9, OU: 9 }]) {
     reset(); writeMode(); setCl();
-    const r = await deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '17', body: { keep: 1, ...extra } });
-    const b = writes[0]?.body as Record<string, unknown> | undefined;
-    if ('OUID' in extra || 'ouid' in extra || 'ouPATH' in extra) {
-      assert(r.isError === true && writes.length === 0, `${JSON.stringify(extra)} disagreeing ref refused: ${text(r)}`);
-    } else {
-      assert(!r.isError && JSON.stringify(b) === '{"keep":1,"ouId":17}', `${JSON.stringify(extra)}: ${JSON.stringify(b)}`);
-    }
+    await refused(`device_command ${JSON.stringify(extra)}`, () => deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '17', body: { keep: 1, ...extra } }));
+    await refused(`notification ${JSON.stringify(extra)}`, () => notificationManageTool.execute({ action: 'set', target: 'ou', type: 'delivery', ouId: 17, body: { keep: 1, ...extra } }));
+  }
+  // same OU (17 = /NorthCreek/Customers/DNIe) under many spellings: dropped, only the canonical id is sent
+  const agree = { Dest_OU_Id: 17, destOuId: '17', TargetOu: 17, GroupID: 17, Path: '/northcreek/customers/dnie', id: 17, OU: 17, OUID: 17 };
+  reset(); writeMode(); setCl();
+  const r = await deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '17', body: { keep: 1, ...agree } });
+  assert(!r.isError && JSON.stringify(writes[0]?.body) === '{"keep":1,"ouId":17}', `${text(r)} ${JSON.stringify(writes[0]?.body)}`);
+  reset(); writeMode(); setCl();
+  const n = await notificationManageTool.execute({ action: 'set', target: 'ou', type: 'delivery', ouId: 17, body: { keep: 1, ...agree } });
+  assert(!n.isError && JSON.stringify(writes[0]?.body) === '{"keep":1}', `${text(n)} ${JSON.stringify(writes[0]?.body)}`);
+});
+await test('F6: bulk_command strips OU-ish keys from commandBody; a key naming another OU is refused', async () => {
+  reset(); writeMode(); setCl();
+  const r = await bulkCommandTool.execute({ sourceOuPath: '/NorthCreek/Imprivata', searchTerm: '*', command: 'restart', confirm: true, commandBody: { keep: 1, OUID: 5, IncludeSubOus: true, ou_path: '/northcreek/imprivata' } });
+  assert(!r.isError && JSON.stringify(writes[0]?.body) === '{"keep":1}', JSON.stringify(writes[0]?.body));
+  reset(); writeMode(); setCl();
+  await refused('other OU', () => bulkCommandTool.execute({ sourceOuPath: '/NorthCreek/Imprivata', searchTerm: '*', command: 'restart', confirm: true, commandBody: { OUID: 9 } }));
+});
+
+console.log('\nSEC F8/F9: app_manage create body + robust key normaliser');
+await test('F8 repro: app_manage create scope=ou ouId=17 body {ouId:9, OU:9, includeSubOus:true} -> refused (names OU 9); agreeing keys dropped', async () => {
+  reset(); writeMode(); setCl();
+  await refused('F8 exact repro', () => appManageTool.execute({ action: 'create', scope: 'ou', applicationType: 'citrix', ouId: 17, body: { ouId: 9, OU: 9, includeSubOus: true } }));
+  reset(); writeMode(); setCl();
+  const r = await appManageTool.execute({ action: 'create', scope: 'ou', applicationType: 'citrix', ouId: 17, body: { name: 'app', ouId: 17, OU: '17', includeSubOus: true, path: 'C:\\x', id: 3, nested: { OUID: 17 } } });
+  assert(!r.isError && sent() === 'POST /api/v1/applications/ou/citrix?id=17', `${sent()} ${text(r)}`);
+  assert(JSON.stringify(writes[0]!.body) === '{"name":"app","path":"C:\\\\x","id":3,"nested":{}}', JSON.stringify(writes[0]!.body));
+});
+await test('F9: key variants (tab, zero-width, NBSP, fullwidth, ou.id, ou[id], ouIds, parentOuId, sourceOuId, targetOUId, organizationalUnit, nested, arrays) naming another OU are refused', async () => {
+  const keys = ['\tOUID', 'ou\u200bId', 'ou\u00a0id', '\uff4f\uff55\uff49\uff44', 'ou.id', 'ou[id]', 'ouIds', 'parentOuId', 'sourceOuId', 'targetOUId', 'organizationalUnit', 'organizationalUnitId', 'Ou_Path', 'destinationOu'];
+  for (const k of keys) {
+    const v = k.toLowerCase().includes('path') ? CL : 9;
     reset(); writeMode(); setCl();
-    const n = await notificationManageTool.execute({ action: 'set', target: 'ou', type: 'delivery', ouId: 17, body: { keep: 1, ...extra } });
-    assert(!n.isError && JSON.stringify(writes[0]?.body) === '{"keep":1}', `notification ${JSON.stringify(extra)}: ${JSON.stringify(writes[0]?.body)}`);
+    await refused(`command ${JSON.stringify(k)}`, () => deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '17', body: { [k]: v } }));
+    await refused(`notification ${JSON.stringify(k)}`, () => notificationManageTool.execute({ action: 'set', target: 'ou', type: 'delivery', ouId: 17, body: { [k]: v } }));
+    await refused(`app create ${JSON.stringify(k)}`, () => appManageTool.execute({ action: 'create', scope: 'ou', applicationType: 'x', ouId: 17, body: { [k]: v } }));
+  }
+  reset(); writeMode(); setCl();
+  await refused('nested object', () => deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '17', body: { a: { b: { ouId: 9 } } } }));
+  await refused('array of objects', () => deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '17', body: { list: [{ targetOu: 9 }] } }));
+  await refused('array value', () => deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '17', body: { ouIds: [17, 9] } }));
+  await refused('unknown OU value fails closed', () => deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '17', body: { ouName: 'does-not-exist' } }));
+});
+await test('F9: variants naming the SAME OU are dropped; prototype keys dropped; includeSubOus variants (zero-width/fullwidth) still gate', async () => {
+  reset(); writeMode(); setCl();
+  const body = JSON.parse('{"keep":1,"__proto__":{"ouId":9},"constructor":{"x":1},"ou.id":17,"ou[id]":17,"parentOuId":17}');
+  const r = await deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '17', body });
+  assert(!r.isError && JSON.stringify(writes[0]?.body) === '{"keep":1,"ouId":17}', `${text(r)} ${JSON.stringify(writes[0]?.body)}`);
+  for (const k of ['include\u200bSubOus', '\uff29ncludeSubOus', 'include.sub.ous', 'INCLUDE_SUB_OUS']) {
+    reset(); writeMode(); setCl();
+    await refused(`subtree ${JSON.stringify(k)}`, () => deviceCommandTool.execute({ target: 'ou', command: 'restart', ouRef: '8', body: { [k]: true } }));
   }
 });
-await test('F6: bulk_command strips OU-ish keys from the forwarded commandBody', async () => {
-  reset(); writeMode(); setCl();
-  const r = await bulkCommandTool.execute({ sourceOuPath: '/NorthCreek/Imprivata', searchTerm: '*', command: 'restart', confirm: true, commandBody: { keep: 1, OUID: 9, IncludeSubOus: true, ou_path: CL } });
-  assert(!r.isError && JSON.stringify(writes[0]?.body) === '{"keep":1}', JSON.stringify(writes[0]?.body));
-});
+
 await test('F7: config_update on an ANCESTOR of a protected OU refused (id 8, grandparent by path); sibling allowed; allow-list ancestor refused', async () => {
   const cfg2 = (extra: Record<string, unknown>) => ({ target: 'ou', section: 'network', body: {}, confirm: true, skipValidation: true, ...extra });
   reset(); writeMode(); setCl();
