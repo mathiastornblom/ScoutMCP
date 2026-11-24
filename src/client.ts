@@ -325,7 +325,7 @@ export class ScoutClient {
     throw new ScoutError(
       msg,
       401,
-      typeof apiError?.msgId === 'string' ? apiError.msgId.slice(0, 100) : undefined,
+      typeof apiError?.msgId === 'string' ? sanitizeServerText(apiError.msgId, 100) : undefined,
     );
   }
 
@@ -411,7 +411,7 @@ export class ScoutClient {
       throw new ScoutError(
         msg,
         res.status,
-        typeof apiError?.msgId === 'string' ? apiError.msgId.slice(0, 100) : undefined,
+        typeof apiError?.msgId === 'string' ? sanitizeServerText(apiError.msgId, 100) : undefined,
       );
     }
 

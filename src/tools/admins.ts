@@ -90,10 +90,11 @@ const adminManageSchema = z.object({
     .max(256)
     .optional()
     .describe('Directory principal name to register as admin (add_admin) — becomes body.Name. Admins are directory users/groups; there is no password.'),
-  username: z.string().optional().describe('DEPRECATED alias for name (add_admin).'),
+  username: z.string().max(256).optional().describe('DEPRECATED alias for name (add_admin).'),
   full_access: z.boolean().optional().describe('add_admin: grant full access (body.fullAccess). Privilege escalation — confirm required.'),
   duplicate_from: z
     .string()
+    .max(256)
     .optional()
     .describe('add_admin: copy the rights of this existing admin (body.toBeDuplicatedAdmin)'),
   admin_id: z
@@ -122,6 +123,14 @@ const adminManageSchema = z.object({
 type AdminManageInput = z.infer<typeof adminManageSchema>;
 
 const WRITE_ACTIONS = new Set(['add_admin', 'update_admin', 'delete_admin']);
+
+/** Render rights entries as capped `Id=Value` pairs (first 30, then `+N more`). No secrets are involved. */
+export function describeRights(label: string, entries: Array<{ Id: number; Value: number | string }> | undefined): string {
+  if (!entries || entries.length === 0) return `${label}: none`;
+  const shown = entries.slice(0, 30).map((e) => `${e.Id}=${e.Value}`).join(',');
+  const more = entries.length > 30 ? ` +${entries.length - 30} more` : '';
+  return `${label}: [${shown}${more}]`;
+}
 
 /** Audit one privileged admin write (result of the attempt), in addition to the gate's own entries. */
 function auditAdminWrite(
@@ -205,6 +214,10 @@ async function adminManageExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
       }
 
       case 'update_rights': {
+        // Private (/api/v1) GET, route is `authenticated('authorize')` only (SBD-UI routeDeclarations.ts:799-800):
+        // it re-reads the CALLER's own rights into the server's per-session cache and writes nothing
+        // persistent, so it is deliberately NOT behind the production private-write gate (that gate is for
+        // data-changing high-risk endpoints). The mode gate still applies.
         // Triggers a server-side rights refresh — ambiguous side effects, treat as
         // mutating out of caution (per task instructions for this high-risk file).
         const modeCheck = checkMutationAllowed('admin_manage(update_rights)');
@@ -227,6 +240,15 @@ async function adminManageExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
       case 'add_admin': {
         const name = input.name ?? input.username;
         if (!name) return fail('add_admin requires name (the directory principal to register)');
+        // Gates BEFORE the prompt: never ask a human to confirm something that will be refused.
+        checkPrivateWriteAllowedInProduction('admin_manage(add_admin)');
+        const modeCheck = checkMutationAllowed('admin_manage(add_admin)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, name, message: modeCheck.dryRunNotice });
+        }
+        const addDetail =
+          `fullAccess=${input.full_access === true}` +
+          `${input.duplicate_from ? `, duplicateFrom="${input.duplicate_from}"` : ''}`;
         const outcome = await confirmDestructiveAction(
           { server: ctx?.server },
           {
@@ -234,16 +256,11 @@ async function adminManageExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
             summary:
               `Register "${name}" as a Scout Board administrator` +
               `${input.full_access ? ' WITH FULL ACCESS' : ''}` +
-              `${input.duplicate_from ? ` copying the rights of "${input.duplicate_from}"` : ''}.`,
+              `${input.duplicate_from ? ` copying the rights of "${input.duplicate_from}"` : ''} (${addDetail}).`,
             confirmFlag: input.confirm,
           },
         );
         if (!outcome.proceed) return fail(`admin_manage blocked: ${outcome.reason}`);
-        checkPrivateWriteAllowedInProduction('admin_manage(add_admin)');
-        const modeCheck = checkMutationAllowed('admin_manage(add_admin)');
-        if (!modeCheck.proceed) {
-          return ok({ status: 'dry_run', action: input.action, name, message: modeCheck.dryRunNotice });
-        }
         const body: Record<string, unknown> = { Name: name };
         if (input.full_access !== undefined) body['fullAccess'] = input.full_access;
         if (input.duplicate_from !== undefined) body['toBeDuplicatedAdmin'] = input.duplicate_from;
@@ -255,11 +272,11 @@ async function adminManageExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
             opName: 'admin_manage(add_admin)',
           });
           if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
-          auditAdminWrite('add_admin', name, 'allowed', input.full_access ? 'fullAccess=true' : undefined);
+          auditAdminWrite('add_admin', name, 'allowed', addDetail);
           logOk(tool);
           return ok(data);
         } catch (e) {
-          auditAdminWrite('add_admin', name, 'error', e instanceof Error ? e.message : String(e));
+          auditAdminWrite('add_admin', name, 'error', `${addDetail}; ${e instanceof Error ? e.message : String(e)}`);
           throw e;
         }
       }
@@ -274,23 +291,26 @@ async function adminManageExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
         ) {
           return fail('update_admin requires at least one of root_ou, root_ou_fmd, menu_rights, base_rights');
         }
-        const outcome = await confirmDestructiveAction(
-          { server: ctx?.server },
-          {
-            opName: 'admin_manage(update_admin)',
-            summary:
-              `Modify the main entry of administrator id ${input.admin_id}` +
-              ` (root OU: ${input.root_ou !== undefined || input.root_ou_fmd !== undefined ? 'changed' : 'unchanged'}, ` +
-              `menu rights: ${input.menu_rights?.length ?? 0}, base rights: ${input.base_rights?.length ?? 0} entries).`,
-            confirmFlag: input.confirm,
-          },
-        );
-        if (!outcome.proceed) return fail(`admin_manage blocked: ${outcome.reason}`);
         checkPrivateWriteAllowedInProduction('admin_manage(update_admin)');
         const modeCheck = checkMutationAllowed('admin_manage(update_admin)');
         if (!modeCheck.proceed) {
           return ok({ status: 'dry_run', action: input.action, adminId: input.admin_id, message: modeCheck.dryRunNotice });
         }
+        const updDetail = [
+          `RootOu=${input.root_ou ?? 'unchanged'}`,
+          `RootOUFMD=${input.root_ou_fmd ?? 'unchanged'}`,
+          describeRights('menuRights', input.menu_rights),
+          describeRights('baseRights', input.base_rights),
+        ].join('; ');
+        const outcome = await confirmDestructiveAction(
+          { server: ctx?.server },
+          {
+            opName: 'admin_manage(update_admin)',
+            summary: `Modify the main entry of administrator id ${input.admin_id}: ${updDetail}.`,
+            confirmFlag: input.confirm,
+          },
+        );
+        if (!outcome.proceed) return fail(`admin_manage blocked: ${outcome.reason}`);
         const body: Record<string, unknown> = { AdministratorID: input.admin_id };
         if (input.root_ou !== undefined) body['RootOu'] = input.root_ou;
         if (input.root_ou_fmd !== undefined) body['RootOUFMD'] = input.root_ou_fmd;
@@ -304,17 +324,22 @@ async function adminManageExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
             opName: 'admin_manage(update_admin)',
           });
           if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
-          auditAdminWrite('update_admin', `adminId=${input.admin_id}`, 'allowed');
+          auditAdminWrite('update_admin', `adminId=${input.admin_id}`, 'allowed', updDetail);
           logOk(tool);
           return ok(data);
         } catch (e) {
-          auditAdminWrite('update_admin', `adminId=${input.admin_id}`, 'error', e instanceof Error ? e.message : String(e));
+          auditAdminWrite('update_admin', `adminId=${input.admin_id}`, 'error', `${updDetail}; ${e instanceof Error ? e.message : String(e)}`);
           throw e;
         }
       }
 
       case 'delete_admin': {
         if (!input.admin_name) return fail('delete_admin requires admin_name (the server deletes by name, not id)');
+        checkPrivateWriteAllowedInProduction('admin_manage(delete_admin)');
+        const modeCheck = checkMutationAllowed('admin_manage(delete_admin)');
+        if (!modeCheck.proceed) {
+          return ok({ status: 'dry_run', action: input.action, adminName: input.admin_name, message: modeCheck.dryRunNotice });
+        }
         const delOutcome = await confirmDestructiveAction(
           { server: ctx?.server },
           {
@@ -324,11 +349,6 @@ async function adminManageExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
           },
         );
         if (!delOutcome.proceed) return fail(`admin_manage blocked: ${delOutcome.reason}`);
-        checkPrivateWriteAllowedInProduction('admin_manage(delete_admin)');
-        const modeCheck = checkMutationAllowed('admin_manage(delete_admin)');
-        if (!modeCheck.proceed) {
-          return ok({ status: 'dry_run', action: input.action, adminName: input.admin_name, message: modeCheck.dryRunNotice });
-        }
         const path = `/api/v1/admins?adminName=${encodeURIComponent(input.admin_name)}`;
         log(tool, 'DELETE', path);
         try {
@@ -337,7 +357,7 @@ async function adminManageExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
             opName: 'admin_manage(delete_admin)',
           });
           if (isDryRunSkip(data)) return ok({ status: 'dry_run', action: input.action, message: data.notice });
-          auditAdminWrite('delete_admin', input.admin_name, 'allowed');
+          auditAdminWrite('delete_admin', input.admin_name, 'allowed', `adminName="${input.admin_name}"`);
           logOk(tool);
           return ok(data);
         } catch (e) {

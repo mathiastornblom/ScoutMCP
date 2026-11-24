@@ -387,6 +387,54 @@ async function main(): Promise<void> {
     assert(parseCleanupFilter('[]', { requireRange: false }).length === 0, 'list may be empty');
   });
 
+  await test('parseCleanupFilter: from/to formats, ordering and plausibility', () => {
+    const now = 1_800_000_000; // fixed clock
+    const p = (f: unknown, t: unknown) => parseCleanupFilter(JSON.stringify([{ id: 0, from: f, to: t }]), { requireRange: true }, now);
+    const e = p('2020-01-01', '2020-01-01T10:00:00Z')[0]!;
+    assert(e.from === 1577836800 && e.to === 1577872800, JSON.stringify(e));
+    assert(p('2020-01-01T00:00:00', '2020-01-02T00:00:00+01:00')[0]!.from === 1577836800, 'zone-less date-time is UTC');
+    assert(p(1577836800, 1609459200)[0]!.to === 1609459200, 'numeric epoch seconds accepted (server contract)');
+    assert(p('2020-01-01', '2020-01-01')[0]!.from === p('2020-01-01', '2020-01-01')[0]!.to, 'from == to allowed');
+    const bad: Array<[unknown, unknown, string]> = [
+      ['0', '1700000000', 'string zero'],
+      ['99999999999', '99999999999', 'string huge'],
+      [0, 1700000000, 'numeric 0'],
+      [1, 1700000000, 'numeric 1'],
+      [1577836800, 99999999999, 'numeric huge'],
+      ['2021-01-01', '2020-01-01', 'from > to'],
+      ['2020-13-45', '2021-01-01', 'unparseable'],
+      ['yesterday', '2021-01-01', 'free text'],
+      ['1999-12-31', '2021-01-01', 'before 2000'],
+      ['2020-01-01', '2999-01-01', 'far future'],
+      [1.5, 1700000000, 'non-integer'],
+      [null, 1700000000, 'null'],
+    ];
+    for (const [f, t, why] of bad) {
+      let threw = false;
+      try {
+        p(f, t);
+      } catch {
+        threw = true;
+      }
+      assert(threw, `should reject ${why}`);
+    }
+  });
+
+  await test('db_cleanup tool rejects "0" / "99999999999" before any gate or HTTP', async () => {
+    reset();
+    for (const f of ['[{"id":0,"from":"0","to":"99999999999"}]', '[{"id":0,"from":0,"to":99999999999}]']) {
+      const r = await dbCleanupTool.execute({ action: 'delete', filter: f, confirm: true });
+      assert(r.isError === true, `rejected ${f}`);
+    }
+    assert(recorded.length === 0, 'nothing sent');
+  });
+
+  await test('db_cleanup list normalises ISO dates to epoch seconds in the query', async () => {
+    reset();
+    await dbCleanupTool.execute({ action: 'list', filter: '[{"id":2,"from":"2020-01-01","to":"2021-01-01"}]' });
+    assert(decodeURIComponent(recorded[0]!.query) === '?filter=[{"id":2,"from":1577836800,"to":1609459200}]', recorded[0]!.query);
+  });
+
   await test('delete -> POST /api/v1/dbCleanUp with {filter:[{id,from,to}]}', async () => {
     reset();
     const r = await dbCleanupTool.execute({ action: 'delete', filter: RANGE, confirm: true });
@@ -394,7 +442,7 @@ async function main(): Promise<void> {
     const rec = recorded[0]!;
     assert(rec.method === 'POST' && rec.path === '/api/v1/dbCleanUp', `${rec.method} ${rec.path}`);
     const b = JSON.parse(rec.body) as { filter: Array<{ id: number; from: string; to: string }> };
-    assert(b.filter.length === 1 && b.filter[0]!.id === 0 && b.filter[0]!.from === '2020-01-01', rec.body);
+    assert(b.filter.length === 1 && b.filter[0]!.id === 0 && b.filter[0]!.from === 1577836800 && b.filter[0]!.to === 1609459200, rec.body);
   });
 
   await test('delete: empty filter / unbounded range / no confirm are refused (no HTTP)', async () => {
@@ -428,6 +476,7 @@ async function main(): Promise<void> {
     const r1 = await dbCleanupTool.execute({ action: 'delete', filter: AUDIT, confirm: true });
     assert(r1.isError === true && text(r1).includes('confirm_audit_purge'), text(r1));
     assert(recorded.length === 0, 'nothing sent without the extra flag');
+    assert(auditLines().some((l) => l['gate'] === 'audit-purge' && String(l['detail']).includes('confirm_audit_purge missing')), 'missing-flag refusal audited');
     const r2 = await dbCleanupTool.execute({ action: 'delete', filter: AUDIT, confirm: true, confirm_audit_purge: true });
     assert(!r2.isError && recorded.length === 1, text(r2));
     assert(auditLines().some((l) => l['opName'] === 'db_cleanup(delete)' && String(l['detail']).includes('ADMIN_LOGS')), 'purge audited');
@@ -436,7 +485,7 @@ async function main(): Promise<void> {
 
   await test('ADMIN_LOGS in a mixed filter is refused too; other gates unchanged (read-only/prod)', async () => {
     reset();
-    const mixed = '[{"id":0,"from":"a","to":"b"},{"id":1,"from":"a","to":"b"}]';
+    const mixed = '[{"id":0,"from":"2020-01-01","to":"2021-01-01"},{"id":1,"from":"2020-01-01","to":"2021-01-01"}]';
     const r = await dbCleanupTool.execute({ action: 'delete', filter: mixed, confirm: true, confirm_audit_purge: true });
     assert(r.isError === true, 'mixed refused');
     process.env.SCOUT_MODE = 'read-only';
@@ -541,6 +590,122 @@ async function main(): Promise<void> {
     const r2 = await deviceManageTool.execute({ action: 'delete', id: '6' });
     assert(!r2.isError && text(r2).includes('mcpWarning'), text(r2));
     assert(auditLines().some((l) => l['opName'] === 'device_manage(delete)' && String(l['detail']).includes('unconfirmed') || String(l['detail']).includes('partial/unconfirmed')), 'audit entry');
+  });
+
+
+  console.log('\nSecurity/QA follow-ups');
+  const fakeServer = (answer: boolean) => {
+    const calls: string[] = [];
+    return {
+      calls,
+      server: {
+        getClientCapabilities: () => ({ elicitation: {} }),
+        elicitInput: async (req: { message: string }) => {
+          calls.push(req.message);
+          return { action: 'accept', content: { confirmed: answer } };
+        },
+      },
+    };
+  };
+
+  await test('admin gates run BEFORE the confirm prompt (production gate, read-only), prompt shown only when allowed', async () => {
+    reset();
+    const f = fakeServer(true);
+    delete process.env.SCOUT_ALLOW_PRIVATE_WRITES_IN_PRODUCTION;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ctx = { server: f.server } as any;
+    const r1 = await adminManageTool.execute({ action: 'delete_admin', admin_name: 'x' }, ctx);
+    assert(r1.isError === true && f.calls.length === 0, 'production gate refuses without prompting');
+    process.env.SCOUT_ALLOW_PRIVATE_WRITES_IN_PRODUCTION = 'true';
+    process.env.SCOUT_MODE = 'read-only';
+    const r2 = await adminManageTool.execute({ action: 'add_admin', name: 'x' }, ctx);
+    assert(r2.isError === true && f.calls.length === 0, 'read-only refuses without prompting');
+    process.env.SCOUT_MODE = 'dry-run';
+    const r3 = await adminManageTool.execute({ action: 'update_admin', admin_id: 1, root_ou: 1 }, ctx);
+    assert(!r3.isError && f.calls.length === 0 && recorded.length === 0, 'dry-run does not prompt');
+    process.env.SCOUT_MODE = 'write';
+    const r4 = await adminManageTool.execute({ action: 'delete_admin', admin_name: 'x' }, ctx);
+    assert(!r4.isError && f.calls.length === 1 && recorded.length === 1, 'allowed: prompted once, then the call is made');
+  });
+
+  await test('declined confirmation sends nothing', async () => {
+    reset();
+    const f = fakeServer(false);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = await adminManageTool.execute({ action: 'delete_admin', admin_name: 'x' }, { server: f.server } as any);
+    assert(r.isError === true && f.calls.length === 1 && recorded.length === 0, 'declined');
+  });
+
+  await test('update_admin prompt and audit show RootOu and capped Id=Value pairs; add/delete show name/flags', async () => {
+    reset();
+    const f = fakeServer(true);
+    const rights = Array.from({ length: 35 }, (_, i) => ({ Id: 100 + i, Value: 1 as const }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ctx = { server: f.server } as any;
+    await adminManageTool.execute({ action: 'update_admin', admin_id: 7, root_ou: 3, root_ou_fmd: 4, menu_rights: rights, base_rights: [{ Id: 5, Value: '0' }] }, ctx);
+    const msg = f.calls[0]!;
+    assert(msg.includes('RootOu=3') && msg.includes('RootOUFMD=4'), msg);
+    assert(msg.includes('100=1') && msg.includes('129=1') && !msg.includes('130=1') && msg.includes('+5 more'), msg);
+    assert(msg.includes('baseRights: [5=0]'), msg);
+    const a = auditLines().filter((l) => l['opName'] === 'admin_manage(update_admin)').pop()!;
+    assert(String(a['detail']).includes('RootOu=3') && String(a['detail']).includes('+5 more') && String(a['detail']).includes('5=0'), String(a['detail']));
+    await adminManageTool.execute({ action: 'add_admin', name: 'DOM\\eve', full_access: true, duplicate_from: 'alice' }, ctx);
+    assert(f.calls[1]!.includes('fullAccess=true') && f.calls[1]!.includes('alice'), f.calls[1]!);
+    const a2 = auditLines().filter((l) => l['opName'] === 'admin_manage(add_admin)').pop()!;
+    assert(String(a2['detail']).includes('fullAccess=true') && String(a2['detail']).includes('duplicateFrom="alice"'), String(a2['detail']));
+    await adminManageTool.execute({ action: 'delete_admin', admin_name: 'bob' }, ctx);
+    assert(f.calls[2]!.includes('"bob"'), f.calls[2]!);
+    assert(String(auditLines().filter((l) => l['opName'] === 'admin_manage(delete_admin)').pop()!['detail']).includes('bob'), 'delete audit detail');
+  });
+
+  await test('username alias and duplicate_from are capped at 256 chars', async () => {
+    reset();
+    let threw = 0;
+    for (const a of [{ username: 'u'.repeat(257) }, { name: 'ok', duplicate_from: 'd'.repeat(257) }]) {
+      try {
+        await adminManageTool.execute({ action: 'add_admin', confirm: true, ...a });
+      } catch {
+        threw += 1;
+      }
+    }
+    assert(threw === 2 && recorded.length === 0, 'both rejected by schema');
+  });
+
+  await test('update_rights stays mode-gated only (private GET that refreshes the caller own cache): works in write without the production flag', async () => {
+    reset();
+    delete process.env.SCOUT_ALLOW_PRIVATE_WRITES_IN_PRODUCTION;
+    const r = await adminManageTool.execute({ action: 'update_rights' });
+    assert(!r.isError && recorded[0]!.method === 'GET' && recorded[0]!.path === '/api/v1/updateuserrights', text(r));
+    process.env.SCOUT_MODE = 'read-only';
+    reset();
+    const r2 = await adminManageTool.execute({ action: 'update_rights' });
+    assert(r2.isError === true && recorded.length === 0, 'read-only still blocks');
+    process.env.SCOUT_MODE = 'write';
+    process.env.SCOUT_ALLOW_PRIVATE_WRITES_IN_PRODUCTION = 'true';
+  });
+
+  await test('msgId from the server is control-char stripped and capped', async () => {
+    reset();
+    apiReply = () => ({ status: 400, body: { message: 'bad', msgId: 'a\nb\u0000c' + 'x'.repeat(200) } });
+    const c = newClient();
+    await c.login();
+    let err: unknown;
+    try {
+      await c.rawRequest('GET', '/api/v1/x');
+    } catch (e) {
+      err = e;
+    }
+    const id = (err as ScoutError).msgId ?? '';
+    // eslint-disable-next-line no-control-regex
+    assert(!/[\u0000-\u001f]/.test(id) && id.length <= 101 && id.startsWith('a b c'), JSON.stringify(id));
+  });
+
+  await test('204 / empty-body device delete+move: no spurious unconfirmed warning', async () => {
+    reset();
+    assert(assessDeviceWriteResult(undefined, ['5']).confirmed, 'undefined body confirmed');
+    apiReply = () => ({ status: 204, body: '' });
+    const r = await deviceManageTool.execute({ action: 'delete', id: '9' });
+    assert(!r.isError && !text(r).includes('mcpWarning'), text(r));
   });
 
   server.close();

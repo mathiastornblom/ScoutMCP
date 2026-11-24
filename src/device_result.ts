@@ -29,6 +29,8 @@ function toIdList(v: unknown): string[] | undefined {
 }
 
 export function assessDeviceWriteResult(data: unknown, requestedIds: string[] = []): DeviceWriteAssessment {
+  // 204 / empty body: the HTTP success status is the confirmation; nothing to compare, so no warning.
+  if (data === undefined || data === null || data === '') return { confirmed: true, droppedIds: [], affectedIds: [] };
   const d = (data !== null && typeof data === 'object' ? data : {}) as Record<string, unknown>;
   const resp = (d['response'] !== null && typeof d['response'] === 'object' ? d['response'] : {}) as Record<
     string,
