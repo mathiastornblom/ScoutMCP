@@ -211,8 +211,12 @@ async function main(): Promise<void> {
     const pathMismatch = await thrown(c.rawRequest('POST', IMPORT, { name: 'x' }, { mutationToken: t3 }));
     assert(isGate(pathMismatch, 'mutation-token') && sent === 1, 'concrete path binding (F4)');
     const t4 = mintMutationToken({ proceed: true }, { ...binding(), opId: 'op-4' });
-    const variant = await c.rawRequest('POST', '/API/V1/Containers/Import/', { name: 'x' }, { mutationToken: t4 });
-    assert(variant !== undefined && sent === 2, 'the same normalised request is the same request');
+    // N1 (replaces the F4 assertion that a spelling variant "is the same request"): a variant is
+    // REFUSED, never normalised-then-sent-raw, so the validated string is the sent string.
+    const variant = await thrown(c.rawRequest('POST', '/API/V1/Containers/Import/', { name: 'x' }, { mutationToken: t4 }));
+    assert(isGate(variant, 'mutation-token') && sent === 1, 'a spelling variant is refused before any send');
+    const canonical = await c.rawRequest('POST', IMPORT, { name: 'x' }, { mutationToken: mintMutationToken({ proceed: true }, { ...binding(), opId: 'op-5' }) });
+    assert(canonical !== undefined && sent === 2, 'the canonical spelling is sent');
   });
 
   console.log('QA B3: the per-key mutex keeps exclusion after a waiter times out');
@@ -285,9 +289,13 @@ async function main(): Promise<void> {
     for (const p of ['/api/v1/ou/assignDevices', '/api/v1/design/x', '/api/v1/admins/resign', '/api/v1/oufilter/add']) assert(!isTierCPath('POST', p), p);
   });
   await test('import-path variants normalise to the op (so they need a token); query/odd forms are not the op', () => {
-    for (const p of ['/api/v1/containers/import/', '/API/V1/Containers/Import', '/api/v1//containers/import', '/api/v1/containers/%69mport']) {
+    for (const p of ['/api/v1/containers/import/', '/API/V1/Containers/Import', '/api/v1/containers/%69mport']) {
       const c = classifyRequest('POST', p);
       assert(c.kind === 'op' && c.op.key === 'containers.import', `${p} -> ${c.kind}`);
+    }
+    // N1: '//' and a missing leading '/' are structural, so they are rejected rather than collapsed to the op.
+    for (const p of ['/api/v1//containers/import', 'api/v1/containers/import', '//api/v1/containers/import']) {
+      assert(classifyRequest('POST', p).kind === 'rejected', `${p} must be rejected`);
     }
     for (const p of ['/api/v1/containers/import?x=1', '/api/v1/containers/import?']) {
       assert(classifyRequest('POST', p).kind === 'unknown' || classifyRequest('POST', p).kind === 'op', p);

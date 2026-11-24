@@ -77,6 +77,25 @@ function omitKey(k: string): boolean {
   return w.some((x) => ['key', 'keys', 'sign', 'signed', 'auth', 'pwd', 'pw'].includes(x));
 }
 
+const KEY_GUID = /^\{?[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}?$/;
+/** Plain field-name shape: identifier, at most one digit run of <=2 digits (`x509`-style names are omitted elsewhere). */
+const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,40}$/;
+/** Objects with this many keys are dictionaries (id/name -> value), never fixed records. */
+const DICTIONARY_KEYS = 20;
+
+/**
+ * N7: response/request OBJECT KEYS that carry data (GUIDs, numbers, container/image names, anything
+ * not a plain field name, or every key of a large dictionary) become placeholders so a real id or name
+ * never lands in a fixture through a map-style response.
+ */
+export function keyPlaceholder(k: string, dictionary: boolean): string | null {
+  if (KEY_GUID.test(k)) return '{guid}';
+  if (/^\d+$/.test(k)) return '{int}';
+  if (dictionary) return '{key}';
+  if (!FIELD_NAME.test(k) || (k.match(/\d+/g) ?? []).some((d) => d.length > 2) || (k.match(/\d+/g) ?? []).length > 1) return '{key}';
+  return null;
+}
+
 function shapeOf(v: unknown, counter: { omitted: number }, depth = 0): unknown {
   if (depth > 8) return 'object';
   if (v === null) return 'null';
@@ -90,12 +109,17 @@ function shapeOf(v: unknown, counter: { omitted: number }, depth = 0): unknown {
       return 'boolean';
     case 'object': {
       const out: Record<string, unknown> = {};
-      for (const k of Object.keys(v as Record<string, unknown>).sort()) {
+      const keys = Object.keys(v as Record<string, unknown>).sort();
+      const dictionary = keys.length >= DICTIONARY_KEYS;
+      for (const k of keys) {
         if (omitKey(k) || k.length > 64) {
           counter.omitted += 1;
           continue;
         }
-        out[k] = shapeOf((v as Record<string, unknown>)[k], counter, depth + 1);
+        const ph = keyPlaceholder(k, dictionary);
+        const outKey = ph ?? k;
+        if (Object.prototype.hasOwnProperty.call(out, outKey)) continue; // placeholder collision: first shape wins
+        out[outKey] = shapeOf((v as Record<string, unknown>)[k], counter, depth + 1);
       }
       return out;
     }

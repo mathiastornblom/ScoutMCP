@@ -29,6 +29,7 @@ import {
   eliasMyRolesTool,
   redactSecrets,
   capOutput,
+  shapeRules,
   MAX_OUTPUT_CHARS,
 } from '../src/tools/elias.js';
 import type { McpTool } from '../src/types.js';
@@ -373,6 +374,76 @@ async function main(): Promise<void> {
     assert(capOutput(small) === small, 'identity');
     const big = capOutput({ blob: 'x'.repeat(MAX_OUTPUT_CHARS * 2) }) as Record<string, unknown>;
     assert(big.truncated === true, 'dropped');
+  });
+
+  // ── Graceful truncation (live Scout 26.11: elias_container_rules returned >100000 chars and was dropped) ──
+  const fatRules = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `rule-${i}`,
+      type: ['dependency', 'conflict', 'selection'][i % 3],
+      category: i % 2 === 0 ? 'base' : 'extension',
+      text: `rule ${i} ` + 'x'.repeat(400),
+      conditions: Array.from({ length: 30 }, (_, j) => ({ a: 'y'.repeat(100), j })),
+    }));
+
+  await test('elias_container_rules: >100KB payload gives a summary + first page, never "dropped"', async () => {
+    responder = () => fatRules(2000);
+    assert(JSON.stringify(fatRules(2000)).length > 100_000, 'synthetic payload is over the cap');
+    const t = text(await run(eliasContainerRulesTool, { containerId: CID }));
+    assert(t.length <= MAX_OUTPUT_CHARS, `len ${t.length}`);
+    assert(!t.includes('was dropped'), 'not dropped');
+    const o = JSON.parse(t);
+    assert(o.total === 2000 && o.returned === 50 && o.offset === 0 && o.truncated === true, `paging ${JSON.stringify([o.total, o.returned, o.truncated])}`);
+    assert(o.summary.byType.dependency === 667 && o.summary.byType.conflict === 667 && o.summary.byType.selection === 666, JSON.stringify(o.summary.byType));
+    assert(o.summary.byCategory.base === 1000 && o.summary.byCategory.extension === 1000, 'category counts');
+    assert(o.items[0].text.length < 400 && o.items[0].text.includes('chars]'), 'per-rule text is truncated with a marker');
+    assert(Array.isArray(o.items[0].conditions) && o.items[0].conditions.length <= 6, 'nested arrays are bounded');
+  });
+
+  await test('elias_container_rules: limit/offset paginate and textMaxChars widens text', async () => {
+    responder = () => fatRules(2000);
+    const o = JSON.parse(text(await run(eliasContainerRulesTool, { containerId: CID, limit: 5, offset: 1995, textMaxChars: 1000 })));
+    assert(o.total === 2000 && o.returned === 5 && o.truncated === false && o.items[0].id === 'rule-1995', 'last page');
+    assert(!String(o.items[0].text).includes('chars]'), 'text under textMaxChars is kept whole');
+  });
+
+  await test('elias_container_rules: {response:[...]} envelope works and secrets are still redacted', async () => {
+    responder = () => ({ response: [{ id: '1', type: 'a', text: 't', apiKey: 'k-live' }] });
+    const t = text(await run(eliasContainerRulesTool, { containerId: CID }));
+    assert(!t.includes('k-live') && JSON.parse(t).total === 1, t);
+    responder = () => ({ nope: 1 });
+    const bad = await run(eliasContainerRulesTool, { containerId: CID });
+    assert(bad.isError === true, 'non-list is an error, not total 0');
+  });
+
+  await test('shapeRules: summary keys are optional (no type/category fields)', () => {
+    const o = shapeRules([{ a: 1 }, { a: 2 }], 10, 0, 100);
+    assert(o.total === 2 && o.summary.byType === undefined && o.summary.byCategory === undefined, 'no crash');
+  });
+
+  await test('capOutput: a >100KB non-list object yields well-formed JSON with truncated, totals and data (not dropped)', () => {
+    const huge = { id: 'x', blob: 'z'.repeat(MAX_OUTPUT_CHARS * 3), rows: Array.from({ length: 5000 }, (_, i) => ({ i, v: 'q'.repeat(50) })) };
+    const out = capOutput(huge) as Record<string, unknown>;
+    const s = JSON.stringify(out, null, 2);
+    assert(s.length <= MAX_OUTPUT_CHARS, `len ${s.length}`);
+    assert(out.truncated === true && typeof out.originalChars === 'number' && out.originalChars > MAX_OUTPUT_CHARS, 'marker + total');
+    const data = out.data as Record<string, unknown>;
+    assert(data !== undefined && data.id === 'x' && String(data.blob).includes('chars]') && JSON.parse(s) !== null, 'content is kept, shortened');
+    assert(!s.includes('was dropped'), 'not dropped');
+  });
+
+  await test('capOutput: a list whose non-item fields are huge still returns well-formed capped JSON', () => {
+    const out = capOutput({ items: [{ a: 1 }], total: 1, note: 'n'.repeat(MAX_OUTPUT_CHARS * 2) });
+    const s = JSON.stringify(out, null, 2);
+    assert(s.length <= MAX_OUTPUT_CHARS && (out as Record<string, unknown>).truncated === true, `len ${s.length}`);
+  });
+
+  await test('every generic read tool is capped gracefully (container_get with a >100KB object)', async () => {
+    responder = () => ({ id: CID, description: 'd'.repeat(MAX_OUTPUT_CHARS * 2), rules: fatRules(500) });
+    const t = text(await run(eliasContainerGetTool, { containerId: CID }));
+    assert(t.length <= MAX_OUTPUT_CHARS, `len ${t.length}`);
+    const o = JSON.parse(t);
+    assert(o.truncated === true && o.data && o.data.id === CID, 'truncated marker and kept id');
   });
 
   const UCID = CID.toUpperCase();

@@ -58,6 +58,7 @@ export interface AuditFs {
   mkdirSync: typeof nodeFs.mkdirSync;
   openSync: typeof nodeFs.openSync;
   writeSync: typeof nodeFs.writeSync;
+  readSync: typeof nodeFs.readSync;
   fsyncSync: typeof nodeFs.fsyncSync;
   fchmodSync: typeof nodeFs.fchmodSync;
   closeSync: typeof nodeFs.closeSync;
@@ -70,6 +71,7 @@ const realFs: AuditFs = {
   mkdirSync: nodeFs.mkdirSync,
   openSync: nodeFs.openSync,
   writeSync: nodeFs.writeSync,
+  readSync: nodeFs.readSync,
   fsyncSync: nodeFs.fsyncSync,
   fchmodSync: nodeFs.fchmodSync,
   closeSync: nodeFs.closeSync,
@@ -103,10 +105,13 @@ function appendRow(row: EliasAuditRow | Record<string, unknown>): void {
   const path = getAuditLogPath();
   const dir = dirname(path);
   if (dir && dir !== '.' && !fsImpl.existsSync(dir)) fsImpl.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const line = JSON.stringify({ timestamp: new Date().toISOString(), actor: actor(), pid: process.pid, ...row }) + '\n';
+  let line = JSON.stringify({ timestamp: new Date().toISOString(), actor: actor(), pid: process.pid, ...row }) + '\n';
   const existed = fsImpl.existsSync(path);
-  const fd = fsImpl.openSync(path, 'a', 0o600);
+  const fd = fsImpl.openSync(path, 'a+', 0o600);
   try {
+    // N5: a previous write may have died mid-row. If the file does not end in a newline, start this
+    // row on a fresh line (one single write, so the guard and the row are never separated).
+    if (existed && lastByteIsNotNewline(fd, path)) line = '\n' + line;
     try {
       fsImpl.fchmodSync(fd, 0o600);
     } catch {
@@ -130,6 +135,19 @@ function appendRow(row: EliasAuditRow | Record<string, unknown>): void {
     fsImpl.closeSync(fd);
   }
   if (!existed && dir) syncDirectory(dir);
+}
+
+/** True when the file is non-empty and its last byte is not '\n'. Unreadable -> assume a newline is needed. */
+function lastByteIsNotNewline(fd: number, path: string): boolean {
+  try {
+    const size = fsImpl.statSync(path).size;
+    if (size === 0) return false;
+    const b = Buffer.alloc(1);
+    const n = fsImpl.readSync(fd, b, 0, 1, size - 1);
+    return n === 1 ? b[0] !== 0x0a : true;
+  } catch {
+    return true;
+  }
 }
 
 /** Best effort: make the new directory entry durable after the file was created (F7). */
