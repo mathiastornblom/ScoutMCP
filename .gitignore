@@ -6,3 +6,5 @@ diagnostics/
 .DS_Store
 /logs/
 KILL_SWITCH
+*.har
+*.har.json
