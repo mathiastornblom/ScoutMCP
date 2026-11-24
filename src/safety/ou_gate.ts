@@ -15,7 +15,9 @@
  * written OU are the same by construction.
  */
 
-import { resolveWriteTarget, collectOuSubtree, type OuMatch } from '../resolver.js';
+import { resolveWriteTarget, collectOuSubtree, resolveOuIdsFresh, type OuMatch } from '../resolver.js';
+import { readDeviceOuId, readDeviceOuIds, type DeviceRecord } from '../devices.js';
+import { buildQuery } from '../types.js';
 import { canonicalizeOuPath, OuPathError } from '../ou_path.js';
 import {
   auditLog,
@@ -239,4 +241,75 @@ export function sanitizeOuBody(raw: Record<string, unknown> | undefined, opts: B
     collect(value);
   }) as Record<string, unknown>;
   return { body, ouRefs, subOusRequested: subOus, hasSubOusKey: hasKey };
+}
+
+/**
+ * Maps device rows to their CURRENT (source) OUs: reads each row's OU id strictly (OUID and/or
+ * GroupID, integers, agreeing; rows of one result must share a shape) and confirms every id exists
+ * in a FRESH parsed OU tree. Any failure is audit-logged and throws GuardrailError
+ * 'unresolvable-source-ou' - an unknown source OU is never treated as unprotected. Returns one
+ * OuMatch per input row, in order.
+ */
+export async function resolveDeviceSourceOus(opName: string, target: string, devices: DeviceRecord[]): Promise<OuMatch[]> {
+  const refuse = (detail: string): never => {
+    auditLog({ opName, target, result: 'refused', gate: 'unresolvable-source-ou', detail });
+    throw new GuardrailError(
+      `Could not determine the source OU of ${devices.length === 1 ? 'the device' : 'the matched device(s)'} (${detail}). ` +
+        'Refusing: the protected-OU check cannot run against an unknown source OU.',
+      'unresolvable-source-ou',
+    );
+  };
+  const read = devices.length === 1 ? readDeviceOuId(devices[0]) : readDeviceOuIds(devices);
+  if (!read.ok) return refuse(read.reason);
+  const ids = 'ids' in read ? read.ids : [read.id];
+  try {
+    return await resolveOuIdsFresh(ids);
+  } catch (err) {
+    return refuse(err instanceof Error ? err.message : String(err));
+  }
+}
+
+/** Applies the protected/allowed lists and SCOUT_ENV=test scope to each distinct source OU. */
+export function gateSourceOus(opName: string, sources: OuMatch[]): void {
+  const seen = new Set<number>();
+  for (const ou of sources) {
+    if (seen.has(ou.ouid)) continue;
+    seen.add(ou.ouid);
+    const scopeErr = testScopeViolation(ou.path, 'Source OU');
+    if (scopeErr) refuseOuWrite(opName, ou.path, scopeErr, 'test-scope');
+    checkOuWriteAllowed({ targetPath: ou.path });
+  }
+}
+
+/** True when any source-OU check can matter (lists configured or SCOUT_ENV=test). */
+export function sourceOuChecksActive(): boolean {
+  return ouListsConfigured() || process.env.SCOUT_ENV === 'test';
+}
+
+/**
+ * Looks up ONE device (GET /api/v1/device) and gates its current OU. Used by single-device writes
+ * (device_manage move, device_command / notification_manage target=device). Fails closed.
+ */
+export async function gateSingleDeviceSource(
+  client: { request<T>(method: string, path: string, ...rest: unknown[]): Promise<T> },
+  opName: string,
+  identifiers: { name?: string; mac?: string; id?: string; clientid?: string },
+): Promise<OuMatch> {
+  const target = identifiers.name ?? identifiers.mac ?? identifiers.id ?? identifiers.clientid ?? 'unknown';
+  let data: unknown;
+  try {
+    const qs = buildQuery({ name: identifiers.name, mac: identifiers.mac, id: identifiers.id, clientid: identifiers.clientid });
+    data = await client.request<unknown>('GET', `/api/v1/device${qs}`);
+  } catch (err) {
+    auditLog({ opName, target, result: 'refused', gate: 'unresolvable-source-ou', detail: `device lookup failed: ${err instanceof Error ? err.message : String(err)}` });
+    throw new GuardrailError(
+      `Could not determine the source OU of the device (device lookup failed: ${err instanceof Error ? err.message : String(err)}). ` +
+        'Refusing: the protected-OU check cannot run against an unknown source OU.',
+      'unresolvable-source-ou',
+    );
+  }
+  const rec = data && typeof data === 'object' && !Array.isArray(data) ? (data as DeviceRecord) : {};
+  const [ou] = await resolveDeviceSourceOus(opName, target, [rec]);
+  gateSourceOus(opName, [ou]);
+  return ou;
 }

@@ -376,8 +376,8 @@ await test('move_devices_by_filter: protected destination (id / variants / disag
 await test('move_devices_by_filter: destination renamed mid-run -> remaining batches are NOT moved (re-asserted per batch)', async () => {
   reset(); writeMode();
   devices = Array.from({ length: 60 }, (_, i) => ({ Name: `thin${String(i).padStart(2, '0')}`, OUID: 10 }));
-  // tree reads: dest gate(1), source gate(2), pre-loop assert(3), batch 2 (4), batch 3 (5 = first renamed read)
-  tree = (n) => (n <= 4 ? LIVE : renamed('Imprivata', 'Moved'));
+  // tree reads: dest gate(1), source gate(2), fresh source-device OU read(3), pre-loop assert(4), batch 2 (5), batch 3 (6 = first renamed read)
+  tree = (n) => (n <= 5 ? LIVE : renamed('Imprivata', 'Moved'));
   const r = await moveDevicesByFilterTool.execute(mv({ destOuPath: '/NorthCreek/Imprivata', limit: 60, overrideBlastRadius: true }));
   const moves = writes.filter((w) => w.path.startsWith('/api/v1/device/move'));
   assert(!r.isError && /"status": "aborted"/.test(text(r)), text(r));

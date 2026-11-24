@@ -3,7 +3,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
-import { gateOuWrite, gateOuSubtree, sanitizeOuBody } from '../safety/ou_gate.js';
+import { gateOuWrite, gateOuSubtree, sanitizeOuBody, gateSingleDeviceSource, sourceOuChecksActive } from '../safety/ou_gate.js';
 import { assertOuPathUnchanged, type OuMatch } from '../resolver.js';
 
 const notificationManageSchema = z.object({
@@ -62,6 +62,13 @@ async function notificationManageExecute(raw: unknown): Promise<McpToolResult> {
       if (sb.subOusRequested) await gateOuSubtree(opName, ou);
       body = { ...sb.body, ...(sb.hasSubOusKey ? { includeSubOus: sb.subOusRequested } : {}) };
       qs = buildQuery({ id: ou.ouid });
+    }
+
+    // target=device: gate the device's current OU (see device_command); devicelist/ddg stay a known gap.
+    if (input.target === 'device' && sourceOuChecksActive()) {
+      await gateSingleDeviceSource(client, opName, {
+        name: input.name, mac: input.mac, id: input.id, clientid: input.clientid,
+      });
     }
 
     if (!modeCheck.proceed) {

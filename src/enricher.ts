@@ -76,6 +76,17 @@ function annotate(data: unknown, map: Map<number, OuEntry>): unknown {
       // Recurse into nested objects/arrays
       out[key] = annotate(val, map);
 
+      // Device-search rows carry only GroupID (= the device's direct OU id, live-verified): annotate it
+      // too, but only on objects that look like device rows (GroupID may mean something else elsewhere).
+      if (key === 'GroupID' && typeof val === 'number' && Number.isInteger(val) &&
+          ('DeviceID' in src || 'ClientIdentifier' in src)) {
+        const entry = map.get(val);
+        if (entry) {
+          out['_GroupIDName'] = entry.name;
+          out['_GroupIDPath'] = entry.path;
+        }
+      }
+
       // After copying, inject _ouName / _ouPath sibling if this is an OUID field
       if (OUID_KEYS.includes(key) && typeof val === 'number') {
         const entry = map.get(val);

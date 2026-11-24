@@ -32,6 +32,9 @@
  * entry dated 2026-06-22) for the full writeup of how this produced a fail-open gap in
  * move_devices_by_filter's protected-OU check.
  *
+ * LIVE UPDATE (Scout 26.11.0): the real server returns `msg` as a LIST of rows
+ * ({ClientIdentifier, DeviceID, GroupID, IP_Address, Mac_Address, Name}); both shapes are parsed here.
+ *
  * This module is now the single source of truth for parsing that response. Both device.ts
  * and workflow.ts call `extractSearchDevices()` from here.
  */
@@ -80,16 +83,27 @@ export function parseSearchDevices(raw: unknown): ParseSearchDevicesResult {
     return { ok: false, reason: 'response.response.status was missing or not an object' };
   }
   const msg = (status as Record<string, unknown>)['msg'];
-  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) {
-    return { ok: false, reason: 'response.response.status.msg was missing or not an object' };
+  // Shape A (live, Scout 26.11.0): msg is a LIST of device rows. Shape B (openapi.json example):
+  // msg is { visibleDevices: [...], hiddenDevices: n }. Anything else is refused, never "empty".
+  let rows: unknown;
+  let hiddenDevices = 0;
+  if (Array.isArray(msg)) {
+    rows = msg;
+  } else if (msg && typeof msg === 'object') {
+    rows = (msg as Record<string, unknown>)['visibleDevices'];
+    if (!Array.isArray(rows)) {
+      return { ok: false, reason: 'response.response.status.msg.visibleDevices was missing or not an array' };
+    }
+    const hiddenRaw = (msg as Record<string, unknown>)['hiddenDevices'];
+    hiddenDevices = typeof hiddenRaw === 'number' ? hiddenRaw : 0;
+  } else {
+    return { ok: false, reason: 'response.response.status.msg was neither a device list nor a {visibleDevices} object' };
   }
-  const visibleDevices = (msg as Record<string, unknown>)['visibleDevices'];
-  if (!Array.isArray(visibleDevices)) {
-    return { ok: false, reason: 'response.response.status.msg.visibleDevices was missing or not an array' };
+  const list = rows as unknown[];
+  if (list.some((d) => !d || typeof d !== 'object' || Array.isArray(d))) {
+    return { ok: false, reason: 'a device row was not a JSON object' };
   }
-  const hiddenRaw = (msg as Record<string, unknown>)['hiddenDevices'];
-  const hiddenDevices = typeof hiddenRaw === 'number' ? hiddenRaw : 0;
-  return { ok: true, devices: visibleDevices as DeviceRecord[], hiddenDevices };
+  return { ok: true, devices: list as DeviceRecord[], hiddenDevices };
 }
 
 /** Reads a device record's display name, trying the field names Scout is known to use. */
@@ -97,16 +111,69 @@ export function deviceName(d: DeviceRecord): string | undefined {
   return (d['Name'] ?? d['DeviceName'] ?? d['name']) as string | undefined;
 }
 
+const OUID_KEYS = ['OUID', 'ouId', 'OuId'] as const;
+
+export type DeviceOuIdResult = { ok: true; id: number } | { ok: false; reason: string };
+
+function strictOuId(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : undefined;
+}
+
 /**
- * Reads a device record's current OU id, if present. The documented `/api/v1/device/search`
- * example does not include an OU id field on each device record at all (the example only
- * shows ClientIdentifier/Name) — so, unlike the single-device `/api/v1/device` GET (which
- * reliably returns OUID — see config_resolve.ts, enricher.ts, resolver.ts), search results
- * cannot be assumed to carry a per-device OU id. Callers MUST treat "no id on any matched
- * device" as a reason to fail closed, not as "zero source OUs to check" — see
- * `resolveDistinctSourceOuPathsOrThrow` below.
+ * Reads a device record's DIRECT OU id. Live evidence (Scout 26.11.0, GET /api/v1/device/search):
+ * rows are {ClientIdentifier, DeviceID, GroupID, IP_Address, Mac_Address, Name} and `GroupID` equals
+ * the device's own OU id (verified 6/6 against /api/v1/ou/structure ids; a parent OU has no devices
+ * directly because DeviceCount is cumulative). Single-device records carry `OUID`.
+ *
+ * Strict and fail-closed: every present id key (OUID/ouId/OuId/GroupID) must be a non-negative
+ * integer number (no strings, floats, negatives), and all present keys must agree. This function
+ * only validates the VALUE; callers must additionally confirm the id exists in a FRESH parsed OU
+ * tree (see resolveDeviceSourceOus in safety/ou_gate.ts) before trusting it.
  */
+export function readDeviceOuId(d: DeviceRecord): DeviceOuIdResult {
+  const found: Array<[string, unknown]> = [];
+  for (const k of [...OUID_KEYS, 'GroupID']) {
+    if (Object.prototype.hasOwnProperty.call(d, k) && d[k] !== undefined) found.push([k, d[k]]);
+  }
+  if (found.length === 0) return { ok: false, reason: 'device record has no OUID/GroupID field' };
+  const ids: number[] = [];
+  for (const [k, v] of found) {
+    const n = strictOuId(v);
+    if (n === undefined) return { ok: false, reason: `${k} is not a non-negative integer (${JSON.stringify(v)})` };
+    ids.push(n);
+  }
+  if (new Set(ids).size > 1) {
+    return { ok: false, reason: `OU id fields disagree (${found.map(([k, v]) => `${k}=${String(v)}`).join(', ')})` };
+  }
+  return { ok: true, id: ids[0] };
+}
+
+/** Which OU-id keys a row carries, as a stable signature (rows of one search must share it). */
+function ouIdShape(d: DeviceRecord): string {
+  return [...OUID_KEYS, 'GroupID'].filter((k) => Object.prototype.hasOwnProperty.call(d, k)).join('+');
+}
+
+/**
+ * Reads the OU id of every row of one search result. Refuses (ok:false) when any row is invalid or
+ * when rows disagree on which id fields they carry (a mixed-shape result is not trusted).
+ */
+export function readDeviceOuIds(devices: DeviceRecord[]): { ok: true; ids: number[] } | { ok: false; reason: string } {
+  if (devices.length === 0) return { ok: true, ids: [] };
+  const shape = ouIdShape(devices[0]);
+  const ids: number[] = [];
+  for (let i = 0; i < devices.length; i++) {
+    if (ouIdShape(devices[i]) !== shape) {
+      return { ok: false, reason: `device rows disagree on shape (row 1 has [${shape}], row ${i + 1} has [${ouIdShape(devices[i])}])` };
+    }
+    const r = readDeviceOuId(devices[i]);
+    if (!r.ok) return { ok: false, reason: `row ${i + 1}: ${r.reason}` };
+    ids.push(r.id);
+  }
+  return { ok: true, ids };
+}
+
+/** Value-validated OU id of a record, or undefined (kept for callers that only need a hint). */
 export function deviceOuId(d: DeviceRecord): number | undefined {
-  const raw = d['OUID'] ?? d['ouId'] ?? d['OuId'];
-  return typeof raw === 'number' ? raw : undefined;
+  const r = readDeviceOuId(d);
+  return r.ok ? r.id : undefined;
 }

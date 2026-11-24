@@ -139,7 +139,11 @@ await test('source in protected OU (OUID 10 = AD) -> refused, no move', async ()
   assert(r.isError === true && writes.length === 0, 'refused');
 });
 const refusals: Array<[string, () => void]> = [
-  ['record without OUID (only GroupID)', () => { deviceRecord = { Name: 'thin01', GroupID: 10 }; }],
+  // Was 'record without OUID (only GroupID)'; GroupID is now accepted as the device's OU id (live-verified), so
+  // the refusal cases are: GroupID not in tree / non-integer GroupID / no id field at all.
+  ['record with only a GroupID that is not in the tree', () => { deviceRecord = { Name: 'thin01', GroupID: 999 }; }],
+  ['record with a non-integer GroupID', () => { deviceRecord = { Name: 'thin01', GroupID: '10' }; }],
+  ['record without any OU id field', () => { deviceRecord = { Name: 'thin01' }; }],
   ['raw envelope instead of record', () => { deviceRecord = { code: 200, response: { status: { msg: {} } } }; }],
   ['OUID not a number', () => { deviceRecord = { OUID: '10' }; }],
   ['OUID not in tree', () => { deviceRecord = { OUID: 999 }; }],

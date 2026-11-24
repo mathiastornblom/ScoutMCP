@@ -1,0 +1,17 @@
+{
+  "code": 200,
+  "message": "OK",
+  "response": {
+    "status": {
+      "result": 0,
+      "msg": [
+        { "ClientIdentifier": "00000000-0000-4000-8000-000000000001", "DeviceID": 1001, "GroupID": 10, "IP_Address": "192.0.2.11", "Mac_Address": "02:00:00:00:00:01", "Name": "synth-ad-01" },
+        { "ClientIdentifier": "00000000-0000-4000-8000-000000000002", "DeviceID": 1002, "GroupID": 11, "IP_Address": "192.0.2.12", "Mac_Address": "02:00:00:00:00:02", "Name": "synth-vdi-01" },
+        { "ClientIdentifier": "00000000-0000-4000-8000-000000000003", "DeviceID": 1003, "GroupID": 16, "IP_Address": "192.0.2.13", "Mac_Address": "02:00:00:00:00:03", "Name": "synth-cep-01" },
+        { "ClientIdentifier": "00000000-0000-4000-8000-000000000004", "DeviceID": 1004, "GroupID": 9, "IP_Address": "192.0.2.14", "Mac_Address": "02:00:00:00:00:04", "Name": "synth-clalit-01" },
+        { "ClientIdentifier": "00000000-0000-4000-8000-000000000005", "DeviceID": 1005, "GroupID": 17, "IP_Address": "192.0.2.15", "Mac_Address": "02:00:00:00:00:05", "Name": "synth-dnie-01" },
+        { "ClientIdentifier": "00000000-0000-4000-8000-000000000006", "DeviceID": 1006, "GroupID": 5, "IP_Address": "192.0.2.16", "Mac_Address": "02:00:00:00:00:06", "Name": "synth-impr-01" }
+      ]
+    }
+  }
+}

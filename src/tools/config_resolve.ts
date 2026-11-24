@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
+import { readDeviceOuId } from '../devices.js';
 import { resolveOuRef, getOuChain } from '../resolver.js';
 import { loadEluxConfigSchema } from '../schema/eluxConfig.js';
 import {
@@ -205,12 +206,18 @@ export async function resolveTargetRef(target: 'device' | 'ou', ref: string): Pr
   const dev = normalizeConfigPayload(data) as Record<string, unknown>;
 
   const ouPath = String(dev['OUPath'] ?? dev['ouPath'] ?? '');
-  const ouId = Number(dev['OUID'] ?? dev['ouId'] ?? NaN);
-  if (!ouPath && isNaN(ouId)) {
-    throw new Error(`Could not determine OU for device "${ref}" — device record had no OUPath/OUID field.`);
+  let resolvedOu: Awaited<ReturnType<typeof resolveOuRef>>;
+  if (ouPath) {
+    resolvedOu = await resolveOuRef(ouPath);
+  } else {
+    // OUID and/or GroupID (the device's direct OU id; live-verified on search rows), validated as a
+    // strict integer and then resolved against the OU tree (an id not in the tree throws).
+    const id = readDeviceOuId(dev);
+    if (!id.ok) {
+      throw new Error(`Could not determine OU for device "${ref}" - ${id.reason} (and no OUPath).`);
+    }
+    resolvedOu = await resolveOuRef(id.id);
   }
-
-  const resolvedOu = ouPath ? await resolveOuRef(ouPath) : await resolveOuRef(ouId);
 
   return {
     target: 'device',
