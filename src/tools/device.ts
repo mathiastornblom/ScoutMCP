@@ -3,7 +3,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { resolveOuRef, invalidateOuCache, resolveOuForWriteGate, assertOuPathUnchanged, type OuMatch } from '../resolver.js';
-import { gateOuWrite, testScopeViolation, refuseOuWrite } from '../safety/ou_gate.js';
+import { gateOuWrite, gateSingleDeviceSource, sourceOuChecksActive } from '../safety/ou_gate.js';
 import { enrich } from '../enricher.js';
 import { isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
@@ -12,59 +12,6 @@ import { assessDeviceWriteResult } from '../device_result.js';
 import { extractSearchDevices } from '../devices.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
-
-/**
- * Resolves the OU path a device currently sits in, by fetching the single-device record and
- * resolving its OU id against a FRESH OU tree. Used by action=move to identify the *source* OU
- * before issuing the move: moving a device OUT of a protected OU changes what config it inherits
- * just as much as moving one in, so the protected-OU gate must see both sides.
- *
- * FAILS CLOSED: every failure (request error, device not found, record without a numeric
- * OUID, OU id not in the tree, tree unparseable) throws a GuardrailError - the move is refused.
- * There is no "undefined" return and no swallowing catch: an unknown source OU is not "unprotected".
- * Only the OUID field is accepted; GroupID (seen on /api/v1/devices rows) is NOT assumed to be
- * the OU id without live proof, so if the single-device record lacks OUID the move is refused.
- */
-async function resolveCurrentDeviceOuPath(
-  client: ReturnType<typeof getClient>,
-  identifiers: { name?: string; mac?: string; id?: string; clientid?: string },
-): Promise<string> {
-  const refuse = (detail: string): never => {
-    auditLog({
-      opName: 'device_manage(move)',
-      target: identifiers.name ?? identifiers.mac ?? identifiers.id ?? identifiers.clientid ?? 'unknown',
-      result: 'refused',
-      gate: 'unresolvable-source-ou',
-      detail,
-    });
-    throw new GuardrailError(
-      `Could not determine the source OU of the device (${detail}). Refusing to move: the protected-OU ` +
-        'check cannot run against an unknown source OU.',
-      'unresolvable-source-ou',
-    );
-  };
-  let data: Record<string, unknown> | undefined;
-  try {
-    const qs = buildQuery({
-      name: identifiers.name,
-      mac: identifiers.mac,
-      id: identifiers.id,
-      clientid: identifiers.clientid,
-    });
-    data = await client.request<Record<string, unknown>>('GET', `/api/v1/device${qs}`);
-  } catch (err) {
-    return refuse(`device lookup failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  const ouId = data?.['OUID'];
-  if (typeof ouId !== 'number' || !Number.isInteger(ouId)) {
-    return refuse('device record has no numeric OUID field');
-  }
-  try {
-    return (await resolveOuForWriteGate(ouId)).path;
-  } catch (err) {
-    return refuse(`OU ${ouId} could not be resolved: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
 
 // ── device_get ────────────────────────────────────────────────────────────────
 
@@ -372,16 +319,24 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
       );
       resolvedDestId = destMatch?.ouid;
     }
-    if (input.action === 'move') {
-      const sourcePath = await resolveCurrentDeviceOuPath(client, {
+    if ((input.action === 'rename' || input.action === 'delete') && sourceOuChecksActive()) {
+      // The device's own OU must pass the protected/allowed lists and test scope; unresolvable refuses.
+      await gateSingleDeviceSource(client, `device_manage(${input.action})`, {
         name: input.name,
         mac: input.mac,
         id: input.id,
         clientid: input.clientid,
       });
-      checkOuWriteAllowed({ targetPath: sourcePath });
-      const srcScope = testScopeViolation(sourcePath, 'Source OU');
-      if (srcScope) refuseOuWrite('device_manage(move)', sourcePath, srcScope, 'test-scope');
+    }
+    if (input.action === 'move') {
+      // Source OU from the device record (OUID and/or GroupID, validated and confirmed against a
+      // FRESH OU tree); every failure refuses (audited), then protected/allowed + test scope.
+      await gateSingleDeviceSource(client, 'device_manage(move)', {
+        name: input.name,
+        mac: input.mac,
+        id: input.id,
+        clientid: input.clientid,
+      });
     }
 
     if (!modeCheck.proceed) {

@@ -20,7 +20,7 @@ import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { confirmDestructiveAction, supportsElicitation } from '../elicitation.js';
 import { resolveOuRef, invalidateOuCache, assertOuPathUnchanged } from '../resolver.js';
-import { gateOuWrite, gateOuSubtree, subOusRequested, sanitizeOuBody } from '../safety/ou_gate.js';
+import { gateOuWrite, gateOuSubtree, subOusRequested, sanitizeOuBody, resolveDeviceSourceOus, gateSourceOus, sourceOuChecksActive } from '../safety/ou_gate.js';
 import {
   checkMutationAllowed,
   checkBlastRadius,
@@ -29,7 +29,7 @@ import {
   GuardrailError,
   auditLog,
 } from '../safety/guardrails.js';
-import { parseSearchDevices, extractSearchDevices, deviceName, deviceOuId, type DeviceRecord } from '../devices.js';
+import { parseSearchDevices, deviceName, type DeviceRecord } from '../devices.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -42,11 +42,11 @@ const MAX_BULK = 500;
  * devices matched" would mean a safety gate downstream silently runs against an empty set
  * instead of refusing — see resolveDistinctSourceOuPathsOrThrow below for why that matters.
  */
-function extractDevicesOrThrow(raw: unknown): DeviceRecord[] {
+function extractDevicesOrThrow(raw: unknown, opName = 'move_devices_by_filter'): DeviceRecord[] {
   const parsed = parseSearchDevices(raw);
   if (!parsed.ok) {
     auditLog({
-      opName: 'move_devices_by_filter',
+      opName,
       target: 'unknown',
       result: 'refused',
       gate: 'unresolvable-source-ou',
@@ -84,49 +84,10 @@ function extractDevicesOrThrow(raw: unknown): DeviceRecord[] {
  * would be a narrower version of the same fail-open bug.
  */
 async function resolveDistinctSourceOuPathsOrThrow(devices: DeviceRecord[]): Promise<string[]> {
-  const idsByDevice = devices.map(deviceOuId);
-  const unresolvedCount = idsByDevice.filter((id) => id === undefined).length;
-  if (unresolvedCount > 0) {
-    auditLog({
-      opName: 'move_devices_by_filter',
-      target: 'unknown',
-      result: 'refused',
-      gate: 'unresolvable-source-ou',
-      detail: `${unresolvedCount} of ${devices.length} matched device(s) had no resolvable OU id`,
-    });
-    throw new GuardrailError(
-      `Could not determine the source OU for ${unresolvedCount} of ${devices.length} matched device(s) ` +
-        '(no OUID/ouId field on the device-search record). Refusing to proceed: the protected-OU ' +
-        'check cannot run against an unresolvable source OU, and proceeding anyway would move ' +
-        'devices with zero source-side protected-OU checks.',
-      'unresolvable-source-ou',
-    );
-  }
-
-  const ids = Array.from(new Set(idsByDevice.filter((id): id is number => id !== undefined)));
-  const paths = await Promise.all(
-    ids.map(async (id) => {
-      try {
-        const match = await resolveOuRef(id);
-        return match.path;
-      } catch (err) {
-        auditLog({
-          opName: 'move_devices_by_filter',
-          target: `ouid:${id}`,
-          result: 'refused',
-          gate: 'unresolvable-source-ou',
-          detail: `OU id ${id} found on a matched device could not be resolved against the OU tree: ` +
-            `${err instanceof Error ? err.message : String(err)}`,
-        });
-        throw new GuardrailError(
-          `Could not resolve OU id ${id} (found on a matched device) against the OU tree: ` +
-            `${err instanceof Error ? err.message : String(err)}. Refusing to proceed.`,
-          'unresolvable-source-ou',
-        );
-      }
-    }),
-  );
-  return Array.from(new Set(paths));
+  // Reads OUID and/or GroupID per row (strict ints, agreeing, uniform shape) and requires every id
+  // to exist in a FRESH OU tree; any failure is audited and throws 'unresolvable-source-ou'.
+  const sources = await resolveDeviceSourceOus('move_devices_by_filter', 'unknown', devices);
+  return Array.from(new Set(sources.map((m) => m.path)));
 }
 
 // ── onboard_branch ────────────────────────────────────────────────────────────
@@ -388,7 +349,7 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
     // search root the caller passed in is not necessarily the OU any individual matched device
     // actually lives in. Fail closed: resolveDistinctSourceOuPathsOrThrow throws (rather than
     // returning []) if any matched device's source OU can't be determined — see its doc comment.
-    // The device GroupID is NOT assumed to be an OU id; only an explicit OUID counts.
+    // The id comes from the row's GroupID (live: the device's direct OU) and/or OUID, validated.
     const sourcePaths = await resolveDistinctSourceOuPathsOrThrow(devices);
     for (const sourcePath of sourcePaths) {
       checkOuWriteAllowed({ targetPath: sourcePath });
@@ -569,11 +530,9 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
       limit: input.limit ?? 100,
     });
     const searchResp = await client.request<unknown>('GET', `/api/v1/device/search${qs}`);
-    // bulk_command has no per-device source-OU check (it sends device commands, not OU
-    // moves), so an unparseable response degrading to "no devices matched" is acceptable
-    // here — unlike move_devices_by_filter, nothing downstream silently skips a safety gate
-    // because of it.
-    const devices = extractSearchDevices(searchResp);
+    // Strict parse: an unparseable / unknown-shape response must REFUSE (audited), never read as
+    // "no devices matched" (the per-device source gate below depends on this list).
+    const devices = extractDevicesOrThrow(searchResp, `bulk_command(${input.command})`);
 
     if (devices.length === 0) {
       return ok({ status: 'ok', matched: 0, commanded: 0, message: 'No devices matched.' });
@@ -606,6 +565,15 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
 
     // Gate 3: blast-radius cap, now that the device count is resolved.
     checkBlastRadius({ affectedCount: devices.length, overrideBlastRadius: input.overrideBlastRadius });
+
+    // Per-device source check (defence in depth beyond the gated root/subtree): when a list or
+    // SCOUT_ENV=test is active, every matched device's own OU must resolve and pass the gates.
+    if (sourceOuChecksActive()) {
+      gateSourceOus(
+        `bulk_command(${input.command})`,
+        await resolveDeviceSourceOus(`bulk_command(${input.command})`, srcRoot.path, devices),
+      );
+    }
 
     const modeCheck = baseModeCheck;
     if (!modeCheck.proceed) {

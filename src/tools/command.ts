@@ -3,7 +3,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { assertOuPathUnchanged, type OuMatch } from '../resolver.js';
-import { gateOuWrite, gateOuSubtree, sanitizeOuBody } from '../safety/ou_gate.js';
+import { gateOuWrite, gateOuSubtree, sanitizeOuBody, gateSingleDeviceSource, sourceOuChecksActive } from '../safety/ou_gate.js';
 import { getProgressReporter } from '../progress.js';
 import { confirmDestructiveAction } from '../elicitation.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -92,6 +92,16 @@ async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<Mc
       // canonical resolved ouId and a normalised boolean includeSubOus are sent.
       body = { ...sb.body, ouId: ou.ouid, ...(sb.hasSubOusKey ? { includeSubOus: sb.subOusRequested } : {}) };
       qs = buildQuery({ id: ou.ouid });
+    }
+
+    // target=device: map the device to its current OU (OUID/GroupID, confirmed against a fresh tree)
+    // and apply the protected/allowed lists + test scope. Only when a list or SCOUT_ENV=test is
+    // active (otherwise no gate could fire); then any failure to determine the OU refuses.
+    // devicelist/ddg still cannot be tied to one OU (README known gaps).
+    if (input.target === 'device' && sourceOuChecksActive()) {
+      await gateSingleDeviceSource(client, opName, {
+        name: input.name, mac: input.mac, id: input.id, clientid: input.clientid,
+      });
     }
 
     if (!modeCheck.proceed) {

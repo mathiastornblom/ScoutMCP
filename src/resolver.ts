@@ -189,6 +189,20 @@ export async function resolveOuForWriteGate(ref: string | number): Promise<OuMat
 }
 
 /**
+ * Resolves OU ids (taken from device records) against ONE fresh tree read. Every id must exist in
+ * the tree; otherwise this throws (no partial results). Returns matches in input order.
+ */
+export async function resolveOuIdsFresh(ids: number[]): Promise<OuMatch[]> {
+  invalidateOuCache();
+  const all = await loadCache();
+  return ids.map((id) => {
+    const hit = all.find((o) => o.ouid === id);
+    if (!hit) throw new Error(`OU id ${id} is not present in the OU tree.`);
+    return hit;
+  });
+}
+
+/**
  * Resolves every supplied reference (fresh tree) and requires they all name the SAME OU.
  * Returns that OU, or undefined if no reference was supplied. Callers gate on the returned
  * canonical path AND must send only `{id: match.ouid}` to the server, so the OU that was gated
