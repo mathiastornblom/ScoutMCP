@@ -372,6 +372,16 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
       return ok({ status: 'ok', matched: 0, moved: 0, message: 'No devices matched the search criteria.' });
     }
 
+    // Gate 6 (sources) - runs right after the strict search parse and BEFORE the dry-run preview, the
+    // confirm/elicitation prompt and the blast-radius step, so a device in a protected/disallowed OU is
+    // never previewed as wouldMove and never prompted: a bulk move can touch many distinct source OUs at once (recursively if
+    // includeSubOus=true) — every one of those is checked, not just the search root, because the
+    // search root the caller passed in is not necessarily the OU any individual matched device
+    // actually lives in. Fail closed: resolveDistinctSourceOuPathsOrThrow throws (rather than
+    // returning []) if any matched device's source OU can't be determined — see its doc comment.
+    // The id comes from the row's GroupID (live: the device's direct OU) and/or OUID, validated.
+    gateSourceOus('move_devices_by_filter', await resolveDeviceSourceOus('move_devices_by_filter', srcRoot.path, devices));
+
     if (isDryRun) {
       return ok({
         status: 'dry_run',
@@ -398,17 +408,6 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
 
     // Gate 3: blast-radius cap, now that the device count is resolved.
     checkBlastRadius({ affectedCount: devices.length, overrideBlastRadius: input.overrideBlastRadius });
-
-    // Gate 6 (sources): a bulk move can touch many distinct source OUs at once (recursively if
-    // includeSubOus=true) — every one of those is checked, not just the search root, because the
-    // search root the caller passed in is not necessarily the OU any individual matched device
-    // actually lives in. Fail closed: resolveDistinctSourceOuPathsOrThrow throws (rather than
-    // returning []) if any matched device's source OU can't be determined — see its doc comment.
-    // The id comes from the row's GroupID (live: the device's direct OU) and/or OUID, validated.
-    const sourcePaths = await resolveDistinctSourceOuPathsOrThrow(devices);
-    for (const sourcePath of sourcePaths) {
-      checkOuWriteAllowed({ targetPath: sourcePath });
-    }
 
     if (!modeCheck.proceed) {
       return ok({
@@ -586,6 +585,15 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
       return ok({ status: 'ok', matched: 0, commanded: 0, message: 'No devices matched.' });
     }
 
+    // Per-device source check, BEFORE the dry-run preview and the confirm prompt (defence in depth beyond the gated root/subtree): when a list or
+    // SCOUT_ENV=test is active, every matched device's own OU must resolve and pass the gates.
+    if (sourceOuChecksActive()) {
+      gateSourceOus(
+        `bulk_command(${input.command})`,
+        await resolveDeviceSourceOus(`bulk_command(${input.command})`, srcRoot.path, devices),
+      );
+    }
+
     if (isDryRun) {
       return ok({
         status: 'dry_run',
@@ -613,15 +621,6 @@ async function bulkCommandExecute(raw: unknown, ctx?: ToolContext): Promise<McpT
 
     // Gate 3: blast-radius cap, now that the device count is resolved.
     checkBlastRadius({ affectedCount: devices.length, overrideBlastRadius: input.overrideBlastRadius });
-
-    // Per-device source check (defence in depth beyond the gated root/subtree): when a list or
-    // SCOUT_ENV=test is active, every matched device's own OU must resolve and pass the gates.
-    if (sourceOuChecksActive()) {
-      gateSourceOus(
-        `bulk_command(${input.command})`,
-        await resolveDeviceSourceOus(`bulk_command(${input.command})`, srcRoot.path, devices),
-      );
-    }
 
     const modeCheck = baseModeCheck;
     if (!modeCheck.proceed) {

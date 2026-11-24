@@ -225,5 +225,42 @@ await test('move_devices_by_filter fan-out: row in a protected descendant -> ref
   await refused('protected row', () => moveDevicesByFilterTool.execute({ sourceOuPath: '/NorthCreek/SmartCard', searchTerm: '*', includeSubOus: true, destOuPath: '/NorthCreek/Imprivata', confirm: true }), /protected/i);
 });
 
+// ── gate order: per-device source gate BEFORE preview / prompt ────────────────
+console.log('\nsource gate runs before the dry-run preview and the confirm prompt');
+const mkServer = (prompts: string[]) => ({ getClientCapabilities: () => ({ elicitation: {} }), elicitInput: async (req: { message: string }) => { prompts.push(req.message); return { action: 'accept', content: { confirmed: true } }; } });
+const protRows = (): unknown => legacyEnvelope([{ Name: 'p', DeviceID: 9, GroupID: 10 }]);
+const mvIn = { sourceOuPath: '/NorthCreek/AD', searchTerm: '%', destOuPath: '/NorthCreek/Customers/DNIe' };
+await test('move dryRun=true with a device in a protected OU -> refused (audited), no wouldMove preview', async () => {
+  reset(); process.env.SCOUT_PROTECTED_OUS = '/NorthCreek/AD'; searchBody = protRows();
+  await refused('dry-run protected', () => moveDevicesByFilterTool.execute({ ...mvIn, dryRun: true, confirm: true }), /protected/i);
+});
+await test('move: confirm prompt never shown for a refused source; mode=dry-run also refuses', async () => {
+  const prompts: string[] = [];
+  reset(); process.env.SCOUT_PROTECTED_OUS = '/NorthCreek/AD'; searchBody = protRows();
+  await refused('prompted move', () => moveDevicesByFilterTool.execute({ ...mvIn }, { server: mkServer(prompts) } as never), /protected/i);
+  process.env.SCOUT_MODE = 'dry-run';
+  await refused('mode dry-run', () => moveDevicesByFilterTool.execute({ ...mvIn, confirm: true }), /protected/i);
+  assert(prompts.length === 0, `no prompt: ${prompts.join('|')}`);
+});
+await test('move: allowed source still previews (dryRun) and prompts', async () => {
+  const prompts: string[] = [];
+  reset(); process.env.SCOUT_PROTECTED_OUS = '/NorthCreek/AD'; searchBody = legacyEnvelope([{ Name: 'ok', DeviceID: 5, GroupID: 5 }]);
+  const r = await moveDevicesByFilterTool.execute({ ...mvIn, sourceOuPath: '/NorthCreek/Imprivata', dryRun: true });
+  assert(!r.isError && /wouldMove/.test(text(r)) && writes.length === 0, text(r));
+  const r2 = await moveDevicesByFilterTool.execute({ ...mvIn, sourceOuPath: '/NorthCreek/Imprivata' }, { server: mkServer(prompts) } as never);
+  assert(!r2.isError && prompts.length === 1 && writes.length === 1, `${prompts.length} ${writes.join('|')} ${text(r2)}`);
+});
+await test('bulk_command dryRun / prompt with a device in a protected OU -> refused first; allowed still previews', async () => {
+  const prompts: string[] = [];
+  const b = { sourceOuPath: '/NorthCreek', searchTerm: '%', command: 'restart' };
+  reset(); process.env.SCOUT_PROTECTED_OUS = '/NorthCreek/AD'; searchBody = protRows();
+  await refused('bulk dry-run', () => bulkCommandTool.execute({ ...b, dryRun: true }), /source OU|protected/i);
+  await refused('bulk prompt', () => bulkCommandTool.execute({ ...b }, { server: mkServer(prompts) } as never), /source OU|protected/i);
+  assert(prompts.length === 0, 'no prompt');
+  reset(); process.env.SCOUT_PROTECTED_OUS = '/NorthCreek/AD'; searchBody = legacyEnvelope([{ Name: 'ok', DeviceID: 5, GroupID: 5 }]);
+  const r = await bulkCommandTool.execute({ ...b, dryRun: true });
+  assert(!r.isError && /wouldTarget/.test(text(r)), text(r));
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed (${passed + failed} total)`);
 process.exit(failed > 0 ? 1 : 0);
