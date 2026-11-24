@@ -75,7 +75,7 @@ export const CAPABILITIES: readonly Capability[] = [
     description: 'Public /config/advanced/{base,ou,device}/fileEntries endpoints (advanced file entries)',
     minScoutVersion: null,
     probe: { method: 'GET', path: '/api/v1/config/advanced/base/fileEntries', kind: 'public' },
-    dependentTools: ['config_get', 'config_update'],
+    dependentTools: ['config_resolve'],
     status: 'untested',
   },
   {

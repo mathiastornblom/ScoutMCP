@@ -78,6 +78,13 @@ test('malformed result is never silently complete', () => {
   assert(!r.complete && r.warnings.length === 4, 'complete=false with 4 warnings');
 });
 
+test('zero-width characters are stripped from File and Section too (same fold identity)', () => {
+  const { layer } = parseAdvancedFileEntries('base', {
+    response: [{ File: 'sys\u200Btem.ini', Section: 'Ne\u200Dt', Key: 'K', Value: 'v' }],
+  });
+  assert(layer.entries[0]!.file === 'system.ini' && layer.entries[0]!.section === 'Net', 'stripped');
+});
+
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\nResults: ${results.length - failed} passed, ${failed} failed (${results.length} total)`);
 process.exit(failed > 0 ? 1 : 0);

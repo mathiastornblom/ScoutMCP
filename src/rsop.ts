@@ -287,8 +287,8 @@ export function parseAdvancedFileEntries(
     }
     layer.entries.push({
       ...(typeof r['EntryId'] === 'number' ? { entryId: r['EntryId'] } : {}),
-      file: r['File'] as string,
-      section: r['Section'] as string,
+      file: (r['File'] as string).replace(ZERO_WIDTH, ''),
+      section: (r['Section'] as string).replace(ZERO_WIDTH, ''),
       key,
       value: r['Value'] as string,
       ...(typeof r['Source'] === 'string' ? { source: r['Source'] } : {}),

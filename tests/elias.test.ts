@@ -192,13 +192,61 @@ async function main(): Promise<void> {
     assert(!text(r3).includes('BEGIN'), 'non-CRT never');
   });
 
-  await test('signing cert: 404 -> none (not an error)', async () => {
-    responder = () => {
+  await test('signing cert: 404 + container confirmed via list -> none', async () => {
+    responder = (path) => {
+      if (path === '/api/v1/containers') return [{ id: CID.toUpperCase(), name: 'c' }];
       throw new ScoutError('No signing certificate', 404);
     };
     const r = await run(eliasCertificateGetTool, { containerId: CID, signing: true });
     assert(r.isError !== true && JSON.parse(text(r)).signingCertificate === 'none', text(r));
-    assert(calls[0].path === `/api/v1/certificates/signing/${CID}`, 'path');
+  });
+  await test('signing cert: 404 + container absent from list -> error, not none', async () => {
+    responder = (path) => {
+      if (path === '/api/v1/containers') return [{ id: 'other' }];
+      throw new ScoutError('nf', 404);
+    };
+    const r = await run(eliasCertificateGetTool, { containerId: CID, signing: true });
+    assert(r.isError === true && !text(r).includes('"none"'), text(r));
+  });
+  await test('signing cert: 404 + list unusable -> none-or-container-not-found + warning', async () => {
+    responder = () => {
+      throw new ScoutError('nf', 404);
+    };
+    const r = await run(eliasCertificateGetTool, { containerId: CID, signing: true });
+    const o = JSON.parse(text(r));
+    assert(o.signingCertificate === 'none-or-container-not-found' && typeof o.warning === 'string', text(r));
+  });
+  await test('list tools: non-array 200 body is an error, {response:[..]} wrapper accepted', async () => {
+    responder = () => ({ error: 'x' });
+    const r = await run(eliasContainerListTool, {});
+    assert(r.isError === true && text(r).includes('unexpected response shape'), text(r));
+    responder = () => null;
+    assert((await run(eliasContainerListTool, {})).isError === true, 'null body');
+    responder = () => ({ response: [{ id: CID, name: 'a' }] });
+    const o = JSON.parse(text(await run(eliasContainerListTool, {})));
+    assert(o.total === 1, 'wrapper');
+  });
+  await test('redaction: normalised/substring keys, case-insensitive, nested, arrays', async () => {
+    const o = JSON.stringify(
+      redactSecrets({
+        privateKeyPem: 'v1', 'private-key': 'v2', clientSecret: 'v3', apiKey: 'v4', token: 'v5', accessToken: 'v6',
+        PKCS12: 'v7', keyPem: 'v8', Pass_Phrase: 'v9', credentials: 'v10', 'Private Key PEM': 'v11',
+        deep: [{ a: { PrivateKey: 'v12' } }],
+      }),
+    );
+    assert(!/v\d/.test(o), o);
+  });
+  await test('redaction: PEM variants and base64 blobs in key-ish fields; filenames kept', async () => {
+    const blob = 'MIIJ' + 'A'.repeat(300);
+    const o = redactSecrets({
+      a: '-----BEGIN  PRIVATE   KEY-----\nxx', b: '-----BEGIN PGP PRIVATE KEY BLOCK-----', c: '-----begin\nrsa private\nkey-----',
+      keystoreData: blob, keyData: blob,
+      data: blob, // not key-ish: kept (documented limit)
+      fileName: 'sign.pfx', desc: 'public cert', pem: '-----BEGIN CERTIFICATE-----\nabc',
+    }) as Record<string, unknown>;
+    for (const k of ['a', 'b', 'c', 'keystoreData', 'keyData']) assert(o[k] === '[REDACTED]', `${k} not redacted`);
+    assert(o.fileName === 'sign.pfx' && o.desc === 'public cert' && String(o.pem).includes('CERTIFICATE'), 'over-redaction');
+    assert(o.data === blob, 'non key-ish blob kept');
   });
 
   await test('signing cert 200 is metadata-only even with includePem', async () => {

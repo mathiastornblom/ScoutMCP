@@ -55,20 +55,46 @@ const OffsetField = z.number().int().min(0).default(0).describe('Items to skip (
 /** Hard cap on serialized tool output (Security B1: HAR responses are 100-400 KB). */
 export const MAX_OUTPUT_CHARS = 100_000;
 
-const SECRET_KEY_RE = /^(privateKey|private_key|key|password|passphrase|secret|pfx|p12)$/i;
-const SECRET_VALUE_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|ENCRYPTED PRIVATE KEY|PKCS ?#?12|\bPFX\b/i;
+/**
+ * Key-name matching is on the NORMALISED key (lower-cased, `-`, `_` and whitespace removed), by
+ * substring, so `privateKeyPem`, `private-key`, `Client_Secret`, `apiKey`, `accessToken`,
+ * `pkcs12`, `keyPem` are all caught. A bare `pem` key is deliberately NOT matched (public cert
+ * PEM is returned on request via includePem); `pem` + `private` in one key is.
+ * Filenames are never matched: only key names and PEM/DER content shapes.
+ */
+const SECRET_KEY_SUBSTRINGS =
+  /privatekey|privkey|keypem|pkcs12|pfx|p12|secret|token|passw|passphrase|apikey|credential|keystore/;
+const KEYISH_KEY = /key|keystore|pkcs|p12|pfx|blob/;
+/** PEM private-key block header, tolerant of any whitespace run and PGP "... KEY BLOCK". */
+const PEM_PRIVATE_RE = /-----\s*BEGIN\s+(?:[A-Z0-9]+\s+)*PRIVATE\s+KEY(?:\s+BLOCK)?\s*-----/i;
+/** Literal PKCS#12 marker text (kept from the original filter). Filenames like x.pfx are NOT matched. */
+const PKCS12_WORD_RE = /\bPKCS\s*#?\s*12\b/i;
+/** Long base64 (with optional line breaks) = a key/keystore blob when it sits in a key-ish field. */
+const BASE64_BLOB_RE = /^[A-Za-z0-9+/=\s_-]{128,}$/;
+
+function normKey(k: string): string {
+  return k.toLowerCase().replace(/[\s_-]+/g, '');
+}
+
+function isSecretKey(k: string): boolean {
+  const n = normKey(k);
+  return n === 'key' || n === 'secret' || SECRET_KEY_SUBSTRINGS.test(n) || (n.includes('pem') && n.includes('private'));
+}
 
 /** Recursively redacts key/secret-looking fields and private-key/PKCS#12-looking values. */
-export function redactSecrets(v: unknown): unknown {
-  if (Array.isArray(v)) return v.map(redactSecrets);
+export function redactSecrets(v: unknown, parentKey = ''): unknown {
+  if (Array.isArray(v)) return v.map((x) => redactSecrets(x, parentKey));
   if (v !== null && typeof v === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-      out[k] = SECRET_KEY_RE.test(k) ? '[REDACTED]' : redactSecrets(val);
+      out[k] = isSecretKey(k) ? '[REDACTED]' : redactSecrets(val, k);
     }
     return out;
   }
-  if (typeof v === 'string' && SECRET_VALUE_RE.test(v)) return '[REDACTED]';
+  if (typeof v === 'string') {
+    if (PEM_PRIVATE_RE.test(v) || PKCS12_WORD_RE.test(v)) return '[REDACTED]';
+    if (parentKey && KEYISH_KEY.test(normKey(parentKey)) && BASE64_BLOB_RE.test(v)) return '[REDACTED]';
+  }
   return v;
 }
 
@@ -149,7 +175,15 @@ async function get<T>(tool: string, path: string): Promise<T> {
   return getClient().rawRequest<T>('GET', path);
 }
 
-const asArray = (v: unknown): Rec[] => (Array.isArray(v) ? (v as Rec[]) : []);
+/**
+ * List bodies must be a JSON array, or the public-API envelope `{response: [...]}`. Anything else
+ * (error envelope, HTML-turned-object, null) is an error: never report `total: 0` for it.
+ */
+const asArray = (v: unknown): Rec[] => {
+  if (Array.isArray(v)) return v as Rec[];
+  if (v !== null && typeof v === 'object' && Array.isArray((v as Rec).response)) return (v as Rec).response as Rec[];
+  throw new Error('unexpected response shape (expected a JSON array)');
+};
 const pick = (o: Rec, keys: string[]): Rec => {
   const out: Rec = {};
   for (const k of keys) if (o[k] !== undefined) out[k] = o[k];
@@ -371,7 +405,7 @@ export const eliasCertificateGetTool: McpTool = {
     TOOL_TAG +
     "Get one certificate (GET /api/v1/certificates/{id}/{certId}) or, with signing=true, the container's " +
     'signing certificate, metadata only (GET /api/v1/certificates/signing/{id}). If no signing certificate is set the ' +
-    'server answers 404; this tool then reports {signingCertificate:"none"} instead of an error.',
+    'server answers 404; this tool then reports {signingCertificate:"none"} if the container exists (checked via the container list), otherwise an error or "none-or-container-not-found".',
   annotations: READ_ONLY,
   inputSchema: zodToJsonSchema(certGetObject),
   execute: wrap('elias_certificate_get', async (raw) => {
@@ -387,8 +421,22 @@ export const eliasCertificateGetTool: McpTool = {
         const c = await get<Rec>('elias_certificate_get', `/api/v1/certificates/signing/${cid}`);
         return { signingCertificate: certSummary(c) }; // metadata-only until Security reviews a live 200 sample
       } catch (err) {
-        if (err instanceof ScoutError && err.statusCode === 404) return { signingCertificate: 'none' };
-        throw err;
+        if (!(err instanceof ScoutError && err.statusCode === 404)) throw err;
+        // 404 is ambiguous: "no signing cert" vs "no such container" vs "ELIAS absent".
+        // Only claim `none` when the container list proves the container exists.
+        let known: boolean | null = null;
+        try {
+          const list = asArray(await get<unknown>('elias_certificate_get', '/api/v1/containers'));
+          known = list.some((c) => typeof c.id === 'string' && c.id.toLowerCase() === containerId.toLowerCase());
+        } catch {
+          known = null;
+        }
+        if (known === true) return { signingCertificate: 'none' };
+        if (known === false) throw new ScoutError(`container ${containerId} not found`, 404);
+        return {
+          signingCertificate: 'none-or-container-not-found',
+          warning: 'HTTP 404 and the container list could not confirm the container exists; verify containerId.',
+        };
       }
     }
     const c = await get<Rec>('elias_certificate_get', `/api/v1/certificates/${cid}/${seg(EliasGuid, certificateId)}`);

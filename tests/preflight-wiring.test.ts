@@ -117,5 +117,11 @@ await test('config_update(ou): ourights 500 / garbage -> proceeds', async () => 
   assert(!r.isError && s.writes.length === 1, 'garbage proceeds');
 });
 
+await test('config_update(ou): dry-run does not call ourights', async () => {
+  env('dry-run'); const s = patch(async () => ({ setup: false }));
+  const r = await configUpdateTool.execute(cfg);
+  assert(!r.isError && s.writes.length === 0 && s.rights.length === 0, `dry-run skips ourights: ${r.content[0]!.text}`);
+});
+
 console.log(`\n${passed}/${passed + failed} passed`);
 process.exit(failed ? 1 : 0);

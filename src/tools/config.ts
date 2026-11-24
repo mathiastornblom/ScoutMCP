@@ -185,12 +185,15 @@ async function configUpdateExecute(raw: unknown, ctx?: ToolContext): Promise<Mcp
       // ourights preflight (UX aid only; explicit-false refuses, anything else proceeds).
       // Placed after validation + OU resolution and before the confirm prompt so the user
       // is never asked to confirm something the server already says is forbidden (Security B2).
-      await checkOuRightPreflight({
-        opName: 'config_update',
-        target: `ou:${resolvedOuPath}`,
-        ouId: resolvedOuId,
-        requiredRight: CONFIG_UPDATE_RIGHT,
-      });
+      // Skipped in dry-run, like device_command and ou_manage (nothing is written anyway).
+      if (modeCheck.proceed) {
+        await checkOuRightPreflight({
+          opName: 'config_update',
+          target: `ou:${resolvedOuPath}`,
+          ouId: resolvedOuId,
+          requiredRight: CONFIG_UPDATE_RIGHT,
+        });
+      }
     }
 
     // Gate 3 (closing the previously documented gap): target=ou writes inherit to every

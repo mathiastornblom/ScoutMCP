@@ -115,6 +115,8 @@ export function interpretProbe(
 ): { state: AvailabilityState; reason: string } {
   if (outcome.ok) return { state: 'available', reason: 'probe returned 2xx' };
   const err = outcome.error;
+  // res.json() on a 200 with a non-JSON body throws SyntaxError: the route exists.
+  if (err instanceof SyntaxError) return { state: 'available', reason: 'HTTP 200 with non-JSON body' };
   if (err instanceof ScoutError && err.statusCode !== undefined) {
     const sc = err.statusCode;
     if (sc === 404) return { state: 'unavailable', reason: 'HTTP 404' };
@@ -169,26 +171,59 @@ async function runProbe(
 
 // ── Version detection ─────────────────────────────────────────────────────────
 
-/** Depth-limited scan for a string/number value under a key named like "version". */
-export function findVersionField(v: unknown, depth = 0): string | null {
-  if (depth > 6 || v === null || typeof v !== 'object') return null;
+/** Accepts only short, plain version strings (server-controlled text must not reach tool output). */
+export function sanitizeVersion(v: unknown): string | null {
+  if (typeof v !== 'string' && typeof v !== 'number') return null;
+  const s = String(v);
+  return s.length >= 1 && s.length <= 32 && /^[0-9A-Za-z._+-]+$/.test(s) ? s : null;
+}
+
+/** Case-insensitive own-property lookup on a plain object. */
+function getKey(o: unknown, name: string): unknown {
+  if (o === null || typeof o !== 'object' || Array.isArray(o)) return undefined;
+  const k = Object.keys(o).find((x) => x.toLowerCase() === name.toLowerCase());
+  return k === undefined ? undefined : (o as Record<string, unknown>)[k];
+}
+
+/**
+ * Known locations of the Scout instance/server version (documented in docs/compatibility.md):
+ * `version`|`scoutVersion` on the root, under `response`, under `scoutServer`, or under
+ * `response.scoutServer`; for an array body (instances list) the same paths on each of the
+ * first 50 items. No deep search: a nested database/OS `version` elsewhere is never used.
+ */
+const VERSION_PATHS: string[][] = [
+  ['version'],
+  ['scoutVersion'],
+  ['scoutServer', 'version'],
+  ['scoutServer', 'scoutVersion'],
+  ['response', 'version'],
+  ['response', 'scoutVersion'],
+  ['response', 'scoutServer', 'version'],
+  ['response', 'scoutServer', 'scoutVersion'],
+];
+
+function versionAtPaths(v: unknown): string | null {
+  for (const path of VERSION_PATHS) {
+    let cur: unknown = v;
+    for (const seg of path) cur = getKey(cur, seg);
+    const s = sanitizeVersion(cur);
+    if (s !== null && parseScoutVersion(s) !== null) return s;
+  }
+  return null;
+}
+
+export function findVersionField(v: unknown): string | null {
   if (Array.isArray(v)) {
     for (const item of v.slice(0, 50)) {
-      const r = findVersionField(item, depth + 1);
+      const r = versionAtPaths(item);
       if (r) return r;
     }
     return null;
   }
-  const rec = v as Record<string, unknown>;
-  for (const [k, val] of Object.entries(rec)) {
-    if (/^(scout)?version$/i.test(k) && (typeof val === 'string' || typeof val === 'number')) {
-      if (parseScoutVersion(val) !== null) return String(val);
-    }
-  }
-  for (const val of Object.values(rec)) {
-    const r = findVersionField(val, depth + 1);
-    if (r) return r;
-  }
+  const direct = versionAtPaths(v);
+  if (direct) return direct;
+  const resp = getKey(v, 'response');
+  if (Array.isArray(resp)) return findVersionField(resp);
   return null;
 }
 
@@ -247,6 +282,7 @@ interface CacheEntry {
   report: CompatReport;
 }
 const cache = new WeakMap<object, CacheEntry>();
+const inflight = new WeakMap<object, Promise<CompatReport>>();
 
 /** Clears the per-client cache for a client (tests / reconfigure). */
 export function resetCompatCache(client: object): void {
@@ -262,7 +298,20 @@ export async function detectCapabilities(
   const ttl = opts.ttlMs ?? COMPAT_CACHE_TTL_MS;
   const hit = cache.get(client);
   if (!opts.force && hit && now() - hit.at <= ttl) return hit.report;
+  if (!opts.force) {
+    const pending = inflight.get(client);
+    if (pending) return pending;
+  }
+  const run = computeReport(client, opts, now);
+  inflight.set(client, run);
+  try {
+    return await run;
+  } finally {
+    if (inflight.get(client) === run) inflight.delete(client);
+  }
+}
 
+async function computeReport(client: ProbeClient, opts: DetectOptions, now: () => number): Promise<CompatReport> {
   const privateEnabled = opts.privateEnabled ?? process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS === 'true';
   const timeoutMs = opts.timeoutMs ?? PROBE_TIMEOUT_MS;
 
