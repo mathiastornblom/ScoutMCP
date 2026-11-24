@@ -22,6 +22,43 @@ interface ApiError {
   message?: string;
   /** Machine-readable message id (e.g. ELIAS `grantKeyChanged`, `containerNotFound`). */
   msgId?: string;
+  /** /rest helper envelope: `{ status: { result, msg } }`, or a plain string such as 'Internal server error'. */
+  response?: unknown;
+}
+
+/** Wording appended to a 401 that survived the single re-login (or was a rights denial). */
+export const DENIED_401_HINT =
+  'access denied or session invalid (the server uses 401 for some rights denials)';
+
+/**
+ * Best human-readable message from a Scout error body. The /rest OU/device helpers answer
+ * `{code, message:'not OK', response:{status:{result, msg:'not allowed action'}}}` (SBD-UI
+ * api/external/helpers/ou.helper.ts:196-224, device.helper.ts:333-358), so the nested
+ * `response.status.msg` / string `response` is more informative than `message`.
+ * Returns undefined when nothing useful is present. Text is untrusted: sanitised and capped.
+ */
+export function extractServerMessage(err: ApiError | undefined): string | undefined {
+  if (!err) return undefined;
+  const parts: string[] = [];
+  const top = typeof err.message === 'string' ? err.message : undefined;
+  if (top && top !== 'OK' && top !== 'not OK') parts.push(top);
+  const resp = err.response;
+  if (typeof resp === 'string' && resp) parts.push(resp);
+  else if (resp && typeof resp === 'object') {
+    const r = resp as { status?: { msg?: unknown }; message?: unknown };
+    if (typeof r.status?.msg === 'string' && r.status.msg) parts.push(r.status.msg);
+    else if (typeof r.message === 'string' && r.message) parts.push(r.message);
+  }
+  if (parts.length === 0) return top && top !== 'OK' ? top : undefined;
+  return sanitizeServerText(parts.join(': '));
+}
+
+/** True for the /rest rights-denial body (`not allowed action`), which must never trigger re-login or a write replay. */
+export function isRightsDenialBody(err: ApiError | undefined): boolean {
+  const resp = err?.response;
+  if (!resp || typeof resp !== 'object') return false;
+  const msg = (resp as { status?: { msg?: unknown } }).status?.msg;
+  return typeof msg === 'string' && /not allowed/i.test(msg);
 }
 
 /** Appended when a private (non-/rest) call is still 401 after a successful login + the single retry. */
@@ -225,8 +262,9 @@ export class ScoutClient {
       const check = this.checkMode(opts.opName ?? `${method} ${path}`);
       if (!check.proceed) return makeDryRunSkip<T>(check.dryRunNotice);
     }
-    await this.ensureAuth();
-    return this.doRequest<T>(method, path, body, false);
+    // A token minted by this very call cannot have expired: a 401 then is a denial, so no re-login.
+    const fresh = await this.ensureAuth();
+    return this.doRequest<T>(method, path, body, fresh);
   }
 
   /** Like request(), but skips the /rest prefix — for private endpoints served outside /rest/. */
@@ -240,8 +278,8 @@ export class ScoutClient {
       const check = this.checkMode(opts.opName ?? `${method} ${path}`);
       if (!check.proceed) return makeDryRunSkip<T>(check.dryRunNotice);
     }
-    await this.ensureAuth();
-    return this.doRawRequest<T>(method, path, body, false);
+    const fresh = await this.ensureAuth();
+    return this.doRawRequest<T>(method, path, body, fresh);
   }
 
   private checkMode(opName: string): MutationCheckResult {
@@ -262,12 +300,33 @@ export class ScoutClient {
     return Date.now() >= this.tokenExpiresAt - TOKEN_RENEW_BEFORE_MS;
   }
 
-  private async ensureAuth(): Promise<void> {
+  /** Returns true when this call had to log in (the token is fresh), false when it reused one. */
+  private async ensureAuth(): Promise<boolean> {
     if (!this.token || this.isTokenExpired()) {
       this.token = null;
       this.tokenExpiresAt = null;
       await this.login();
+      return true;
     }
+    return false;
+  }
+
+  /**
+   * Shared 401 policy. Returns the parsed body when a re-login+retry should happen; throws a
+   * ScoutError for a rights denial or a 401 that already followed a (re-)login. At most ONE
+   * re-login per call: `isRetry` is true after it, or when ensureAuth() just logged in.
+   */
+  private async handle401(res: Response, isRetry: boolean, raw: boolean): Promise<void> {
+    const apiError = await this.tryParseError(res);
+    if (!isRetry && !isRightsDenialBody(apiError)) return; // caller re-logs-in and retries once
+    const detail = extractServerMessage(apiError);
+    let msg = `${DENIED_401_HINT}${detail ? `: ${detail}` : ''} (HTTP 401)`;
+    if (raw && isRetry) msg = `${msg}. ${PRIVATE_401_HINT}`;
+    throw new ScoutError(
+      msg,
+      401,
+      typeof apiError?.msgId === 'string' ? apiError.msgId.slice(0, 100) : undefined,
+    );
   }
 
   private async doRequest<T>(
@@ -293,7 +352,8 @@ export class ScoutClient {
       ...(this.dispatcher ? { dispatcher: this.dispatcher as any } : {}),
     });
 
-    if (res.status === 401 && !isRetry) {
+    if (res.status === 401) {
+      await this.handle401(res, isRetry, false);
       this.token = null;
       this.tokenExpiresAt = null;
       await this.login();
@@ -302,11 +362,9 @@ export class ScoutClient {
 
     if (!res.ok) {
       const apiError = await this.tryParseError(res);
-      // The API sometimes returns {"message":"OK"} on error responses — ignore it.
-      const msg =
-        apiError?.message && apiError.message !== 'OK'
-          ? apiError.message
-          : `Request failed (HTTP ${res.status})`;
+      // The API sometimes returns {"message":"OK"} on error responses — ignore it. Denials
+      // (405/403/406/400/503/402/423) are reported with the server's own body message.
+      const msg = extractServerMessage(apiError) ?? `Request failed (HTTP ${res.status})`;
       throw new ScoutError(msg, res.status);
     }
 
@@ -339,7 +397,8 @@ export class ScoutClient {
       ...(this.dispatcher ? { dispatcher: this.dispatcher as any } : {}),
     });
 
-    if (res.status === 401 && !isRetry) {
+    if (res.status === 401) {
+      await this.handle401(res, isRetry, true);
       this.token = null;
       this.tokenExpiresAt = null;
       await this.login();
@@ -348,11 +407,7 @@ export class ScoutClient {
 
     if (!res.ok) {
       const apiError = await this.tryParseError(res);
-      let msg =
-        apiError?.message && apiError.message !== 'OK'
-          ? sanitizeServerText(String(apiError.message))
-          : `Request failed (HTTP ${res.status})`;
-      if (res.status === 401 && isRetry) msg = `${msg}. ${PRIVATE_401_HINT}`;
+      const msg = extractServerMessage(apiError) ?? `Request failed (HTTP ${res.status})`;
       throw new ScoutError(
         msg,
         res.status,

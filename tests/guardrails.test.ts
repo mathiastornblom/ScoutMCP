@@ -321,7 +321,7 @@ async function runToolGateTests(): Promise<void> {
     process.env.SCOUT_MODE = 'read-only';
     const result = await dbCleanupTool.execute({
       action: 'delete',
-      filter: '[{"name":"Test","filter":"x"}]',
+      filter: '[{"id":0,"from":"2020-01-01","to":"2021-01-01"}]',
       confirm: true,
     });
     assert(result.isError === true, 'expected an error result');
@@ -332,7 +332,7 @@ async function runToolGateTests(): Promise<void> {
     process.env.SCOUT_MODE = 'dry-run';
     const result = await dbCleanupTool.execute({
       action: 'delete',
-      filter: '[{"name":"Test","filter":"x"}]',
+      filter: '[{"id":0,"from":"2020-01-01","to":"2021-01-01"}]',
       confirm: true,
     });
     assert(result.isError !== true, 'expected a non-error result in dry-run');
@@ -346,7 +346,7 @@ async function runToolGateTests(): Promise<void> {
     process.env.SCOUT_MODE = 'read-only';
     const result = await adminManageTool.execute({
       action: 'delete_admin',
-      admin_id: 1,
+      admin_name: 'old-admin',
       confirm: true,
     });
     assert(result.isError === true, 'expected an error result');
@@ -357,7 +357,7 @@ async function runToolGateTests(): Promise<void> {
     process.env.SCOUT_MODE = 'dry-run';
     const result = await adminManageTool.execute({
       action: 'delete_admin',
-      admin_id: 1,
+      admin_name: 'old-admin',
       confirm: true,
     });
     assert(result.isError !== true, 'expected a non-error result in dry-run');
@@ -368,8 +368,8 @@ async function runToolGateTests(): Promise<void> {
     process.env.SCOUT_MODE = 'read-only';
     const result = await adminManageTool.execute({
       action: 'add_admin',
-      username: 'newadmin',
-      password: 'secret',
+      name: 'DOMAIN\\newadmin',
+      confirm: true,
     });
     assert(result.isError === true, 'expected an error result');
     assert(resultText(result).includes('admin_manage blocked:'), 'expected "admin_manage blocked:" prefix');

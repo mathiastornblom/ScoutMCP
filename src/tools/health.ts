@@ -22,6 +22,62 @@ const inputSchema = z.object({
 
 type Input = z.infer<typeof inputSchema>;
 
+export interface HealthAssessment {
+  state: 'ok' | 'degraded' | 'error';
+  problems: string[];
+}
+
+/**
+ * GET /rest/api/v1/healthcheck answers HTTP 200 even when it failed; the failure is in the body
+ * (SBD-UI api/external/routes/healthcheck.route.ts:174-302): `{message:'not OK', response:'Internal server error'}`,
+ * `scoutDBLayer:false` (license lookup failed) or `scoutDBLayer.status.result:1 'not available'`.
+ * Component blocks use status.result 0 ok, 1 failing, 2 partial, 3 unknown.
+ */
+export function assessHealthBody(data: unknown): HealthAssessment {
+  const problems: string[] = [];
+  let state: HealthAssessment['state'] = 'ok';
+  const bump = (to: 'degraded' | 'error'): void => {
+    if (to === 'error' || state === 'ok') state = to;
+  };
+  if (data === null || typeof data !== 'object') {
+    return { state: 'error', problems: ['healthcheck returned no JSON body'] };
+  }
+  const d = data as Record<string, unknown>;
+  if (typeof d['message'] === 'string' && d['message'] !== 'OK') {
+    bump('error');
+    problems.push(`message: ${String(d['message']).slice(0, 100)}`);
+  }
+  const resp = d['response'];
+  if (typeof resp === 'string') {
+    bump('error');
+    problems.push(`response: ${resp.slice(0, 200)}`);
+    return { state, problems };
+  }
+  if (resp && typeof resp === 'object') {
+    const r = resp as Record<string, unknown>;
+    if (r['scoutDBLayer'] === false) {
+      bump('error');
+      problems.push('scoutDBLayer: license/database lookup failed (server returned false)');
+    }
+    const statusOf = (v: unknown): number | undefined => {
+      const st = (v as { status?: { result?: unknown } } | null | undefined)?.status?.result;
+      return typeof st === 'number' ? st : undefined;
+    };
+    if (statusOf(r['scoutDBLayer']) === 1) {
+      bump('error');
+      problems.push('scoutDBLayer: not available');
+    }
+    for (const k of ['scoutServer', 'scoutKeepAlive', 'scoutDatabase']) {
+      const st = statusOf(r[k]);
+      if (st === 1 || st === 2) {
+        bump('degraded');
+        problems.push(`${k}: ${st === 1 ? 'failing' : 'partially failing'}`);
+      }
+    }
+  }
+  return { state, problems };
+}
+
 async function execute(raw: unknown): Promise<McpToolResult> {
   const input = inputSchema.parse(raw) as Input;
 
@@ -46,7 +102,13 @@ async function execute(raw: unknown): Promise<McpToolResult> {
 
   try {
     const data = await client.request<HealthCheckResponse>('GET', `/api/v1/healthcheck${qs}`);
-    const out: Record<string, unknown> = { ...data };
+    const assessment = assessHealthBody(data);
+    if (assessment.state === 'error') {
+      // HTTP 200 with the failure in the body — report it as an error, not as a healthy server.
+      return fail(`Health check reports an error (HTTP 200, failure in body): ${assessment.problems.join('; ')}`);
+    }
+    const out: Record<string, unknown> = { ...data, healthState: assessment.state };
+    if (assessment.problems.length > 0) out.healthProblems = assessment.problems;
     if (process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS === 'true') {
       out.systemcheckElias = await fetchEliasSystemcheck();
     }

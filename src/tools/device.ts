@@ -6,7 +6,8 @@ import { resolveOuRef } from '../resolver.js';
 import { enrich } from '../enricher.js';
 import { isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
-import { checkMutationAllowed, checkOuWriteAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
+import { checkMutationAllowed, checkOuWriteAllowed, isDryRunSkip, auditLog, GuardrailError } from '../safety/guardrails.js';
+import { assessDeviceWriteResult } from '../device_result.js';
 import { extractSearchDevices } from '../devices.js';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -253,6 +254,34 @@ export const deviceGetTool = {
   execute: deviceGetExecute,
 };
 
+/**
+ * Compare what a device delete/move was asked to do with what the server reports and surface any
+ * gap in BOTH the tool result and the audit log. Only annotates when something is off, so the
+ * normal success payload is unchanged.
+ */
+function withWriteVerification(
+  action: 'delete' | 'move',
+  target: string | undefined,
+  requestedIds: string[],
+  data: unknown,
+  enriched: unknown,
+): unknown {
+  const a = assessDeviceWriteResult(data, requestedIds);
+  if (a.confirmed && a.droppedIds.length === 0) return enriched;
+  auditLog({
+    opName: `device_manage(${action})`,
+    target: target ?? 'unknown',
+    operation: action,
+    result: 'error',
+    gate: null,
+    detail: `partial/unconfirmed: dropped=[${a.droppedIds.join(',')}] ${a.note ?? ''}`.trim(),
+  });
+  const base = enriched !== null && typeof enriched === 'object' && !Array.isArray(enriched)
+    ? (enriched as Record<string, unknown>)
+    : { result: enriched };
+  return { ...base, mcpWarning: a.note, droppedDeviceIds: a.droppedIds };
+}
+
 // ── device_manage ─────────────────────────────────────────────────────────────
 
 const deviceManageSchema = z.object({
@@ -411,7 +440,7 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           opName: 'device_manage(delete)',
         });
         if (isDryRunSkip(data)) break;
-        return ok(data);
+        return ok(withWriteVerification('delete', input.name ?? input.mac ?? input.id ?? input.clientid, input.id ? [input.id] : [], data, data));
       }
 
       case 'move': {
@@ -428,7 +457,7 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           opName: 'device_manage(move)',
         });
         if (isDryRunSkip(data)) break;
-        return ok(await enrich(data));
+        return ok(withWriteVerification('move', input.name ?? input.mac ?? input.id ?? input.clientid, input.id ? [input.id] : [], data, await enrich(data)));
       }
     }
 

@@ -2091,7 +2091,7 @@ if (!dbCleanupMod) {
   await test('db_cleanup: delete without confirm returns isError', async () => {
     const msg = await toolFail8('db_cleanup(delete/no-confirm)', dbCleanup, {
       action: 'delete',
-      filter: '[{"name":"Type","filter":"SomeType"}]',
+      filter: '[{"id":0,"from":"2020-01-01","to":"2020-02-01"}]',
     });
     assert(msg.toLowerCase().includes('confirm'), `Expected error about confirm: ${msg}`);
   });
@@ -2108,7 +2108,7 @@ if (!dbCleanupMod) {
     const msg = await toolFail8('db_cleanup(delete/confirm-false)', dbCleanup, {
       action: 'delete',
       confirm: false,
-      filter: '[{"name":"Type","filter":"SomeType"}]',
+      filter: '[{"id":0,"from":"2020-01-01","to":"2020-02-01"}]',
     });
     assert(msg.toLowerCase().includes('confirm'), `Expected error about confirm: ${msg}`);
   });
@@ -2128,25 +2128,25 @@ if (!dbCleanupMod) {
 
 if (!adminManageMod) {
   await skip('admin_manage: add_admin without username returns isError', phase8Skip);
-  await skip('admin_manage: add_admin without password returns isError', phase8Skip);
+  await skip('admin_manage: add_admin with password returns isError (admins have no password)', phase8Skip);
   await skip('admin_manage: update_admin without admin_id returns isError', phase8Skip);
-  await skip('admin_manage: delete_admin without admin_id returns isError', phase8Skip);
+  await skip('admin_manage: delete_admin without admin_name returns isError', phase8Skip);
   await skip('admin_manage: delete_admin without confirm returns isError', phase8Skip);
 } else {
   const adminManage = adminManageMod.adminManageTool.execute;
 
-  await test('admin_manage: add_admin without username returns isError', async () => {
-    const msg = await toolFail8('admin_manage(add_admin/no-username)', adminManage, {
+  await test('admin_manage: add_admin without name returns isError', async () => {
+    const msg = await toolFail8('admin_manage(add_admin/no-name)', adminManage, {
       action: 'add_admin',
-      password: 'secret',
     });
-    assert(msg.toLowerCase().includes('username'), `Expected error about username: ${msg}`);
+    assert(msg.toLowerCase().includes('name'), `Expected error about name: ${msg}`);
   });
 
-  await test('admin_manage: add_admin without password returns isError', async () => {
-    const msg = await toolFail8('admin_manage(add_admin/no-password)', adminManage, {
+  await test('admin_manage: add_admin with password returns isError (admins have no password)', async () => {
+    const msg = await toolFail8('admin_manage(add_admin/password)', adminManage, {
       action: 'add_admin',
-      username: 'testuser',
+      name: 'testuser',
+      password: 'secret',
     });
     assert(msg.toLowerCase().includes('password'), `Expected error about password: ${msg}`);
   });
@@ -2154,23 +2154,23 @@ if (!adminManageMod) {
   await test('admin_manage: update_admin without admin_id returns isError', async () => {
     const msg = await toolFail8('admin_manage(update_admin/no-id)', adminManage, {
       action: 'update_admin',
-      display_name: 'New Name',
+      root_ou: 1,
     });
     assert(msg.toLowerCase().includes('admin_id'), `Expected error about admin_id: ${msg}`);
   });
 
-  await test('admin_manage: delete_admin without admin_id returns isError', async () => {
-    const msg = await toolFail8('admin_manage(delete_admin/no-id)', adminManage, {
+  await test('admin_manage: delete_admin without admin_name returns isError', async () => {
+    const msg = await toolFail8('admin_manage(delete_admin/no-name)', adminManage, {
       action: 'delete_admin',
       confirm: true,
     });
-    assert(msg.toLowerCase().includes('admin_id'), `Expected error about admin_id: ${msg}`);
+    assert(msg.toLowerCase().includes('admin_name'), `Expected error about admin_name: ${msg}`);
   });
 
   await test('admin_manage: delete_admin without confirm returns isError', async () => {
     const msg = await toolFail8('admin_manage(delete_admin/no-confirm)', adminManage, {
       action: 'delete_admin',
-      admin_id: 42,
+      admin_name: 'no-such-admin',
     });
     assert(msg.toLowerCase().includes('confirm'), `Expected error about confirm: ${msg}`);
   });

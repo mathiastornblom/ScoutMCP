@@ -68,6 +68,7 @@ export class GuardrailError extends Error {
       | 'kill-switch'
       | 'private-write-production'
       | 'unresolvable-source-ou'
+      | 'audit-purge'
       | 'preflight',
   ) {
     super(message);
@@ -543,6 +544,22 @@ export function checkPrivateWriteAllowedInProduction(opName: string): void {
       'SCOUT_ENABLE_PRIVATE_ENDPOINTS=true. Set SCOUT_ALLOW_PRIVATE_WRITES_IN_PRODUCTION=true ' +
       'to explicitly re-enable this specific high-risk endpoint in production.',
     'private-write-production',
+  );
+}
+
+/**
+ * Hard refusal for purging the Scout Board activity log (db_cleanup table id 1 = ADMIN_LOGS).
+ * Deleting it erases the server-side record of who changed what, so it is refused unless
+ * SCOUT_ALLOW_AUDIT_PURGE=true is set explicitly (the caller must additionally pass an explicit
+ * confirm flag). Independent of SCOUT_MODE and of the private-write flag; never relaxes them.
+ */
+export function checkAuditPurgeAllowed(opName: string): void {
+  if (process.env.SCOUT_ALLOW_AUDIT_PURGE === 'true') return;
+  auditLog({ opName, target: 'ADMIN_LOGS', result: 'refused', gate: 'audit-purge' });
+  throw new GuardrailError(
+    'Blocked: this db_cleanup filter would purge ADMIN_LOGS (the Scout Board activity log, the server-side ' +
+      'audit trail). It is refused unless SCOUT_ALLOW_AUDIT_PURGE=true is set by the operator.',
+    'audit-purge',
   );
 }
 

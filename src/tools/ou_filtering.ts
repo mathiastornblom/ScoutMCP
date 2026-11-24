@@ -5,15 +5,21 @@
  * They are guarded by SCOUT_ENABLE_PRIVATE_ENDPOINTS=true — if that flag is absent or
  * false, the tools are not registered and will not appear in the tool list.
  *
- * Two filter types (FilterType in the API):
+ * Three filter types (FilterType in the API):
  *   FilterType: 1  Subnet filter      — matches device by IP network (SubnetAddress field)
- *   FilterType: 2  User-defined filter — matches device by ELUX_* property expression (CustomFilter field)
+ *   FilterType: 2  User-defined filter — matches device by ELUX_* property expression (CustomFilter field, max 4000 chars)
+ *   FilterType: 4  Rule filter        — condition string + visual-builder blocks, stored in CustomFilter as the JSON
+ *                                       envelope {"conditionString","filterBlocks"} (envelope max 65535 chars, condition max 32768)
+ *   (FilterType 3 = Follow-Me-Desktop shares the table and is deliberately NOT reachable here.)
+ *   Source: SBD-UI api/external/validations/ouFilter.validations.ts:28-45,120-140; api/external/helpers/ouFilter.helper.ts:69,97-104,277-292.
  *
  * Field name mapping (MCP → API):
  *   ou_id          → OUID
  *   entry_id       → EntryId
  *   subnet_address → SubnetAddress   (FilterType 1)
  *   custom_filter  → CustomFilter    (FilterType 2)
+ *   rule_condition → CustomFilter envelope conditionString (FilterType 4)
+ *   rule_blocks    → CustomFilter envelope filterBlocks    (FilterType 4)
  *   active         → Active
  *   order          → OrderNumber
  */
@@ -41,6 +47,92 @@ function logErr(tool: string, err: unknown): void {
 }
 
 // ── ou_filter_manage ──────────────────────────────────────────────────────────
+
+/** ScoutServer reads an expression row through a 4001-char buffer and silently truncates longer text. */
+export const MAX_EXPRESSION_LENGTH = 4000;
+/** Cap on the bare condition (kept below the envelope cap so it always fits once wrapped). */
+export const MAX_CONDITION_LENGTH = 32768;
+/** Cap on the marshalled {"conditionString","filterBlocks"} envelope ScoutServer loads for a rule. */
+export const MAX_RULE_ENVELOPE_LENGTH = 65535;
+
+/** Same marshalling as the server's buildRuleEnvelope (api/external/helpers/ouFilter.helper.ts:97-104). */
+export function buildRuleEnvelope(condition: string, blocks: unknown[] | undefined): string {
+  return JSON.stringify({ conditionString: condition, filterBlocks: blocks ?? [] });
+}
+
+export interface FilterEntryInput {
+  entry_id?: number;
+  subnet_address?: string;
+  custom_filter?: string;
+  rule_condition?: string;
+  rule_blocks?: Array<Record<string, unknown>>;
+  active?: boolean;
+  ou_id?: number;
+  order?: number;
+}
+
+/**
+ * Validate and translate one MCP entry into the wire entry. Throws Error with a user-facing message.
+ * Types 1 (subnet) and 2 (expression) keep their existing mapping; type 4 (rule) is new.
+ */
+export function buildFilterWireEntry(e: FilterEntryInput, mode: 'add' | 'modify'): Record<string, unknown> {
+  const kinds = [e.subnet_address, e.custom_filter, e.rule_condition].filter((v) => v !== undefined && v !== '').length;
+  const entry: Record<string, unknown> = mode === 'modify' ? { EntryId: e.entry_id } : {};
+  const isSubnet = mode === 'add' ? Boolean(e.subnet_address) : e.subnet_address !== undefined;
+  const isRule = e.rule_condition !== undefined;
+  if (isRule && (e.subnet_address !== undefined || e.custom_filter !== undefined)) {
+    throw new Error('A rule entry (rule_condition) cannot be combined with subnet_address or custom_filter');
+  }
+  if (e.rule_blocks !== undefined && !isRule) {
+    throw new Error('rule_blocks is only valid together with rule_condition');
+  }
+  if (mode === 'add' && kinds === 0) {
+    throw new Error(
+      'Each add entry must include either subnet_address (subnet filter), custom_filter (user-defined filter) ' +
+        'or rule_condition (rule filter)',
+    );
+  }
+  if (isRule) {
+    const cond = e.rule_condition as string;
+    if (cond.length === 0) throw new Error('rule_condition must not be empty');
+    if (cond.length > MAX_CONDITION_LENGTH) {
+      throw new Error(`rule_condition must not exceed ${MAX_CONDITION_LENGTH} characters (got ${cond.length})`);
+    }
+    const envelope = buildRuleEnvelope(cond, e.rule_blocks);
+    if (envelope.length > MAX_RULE_ENVELOPE_LENGTH) {
+      throw new Error(
+        `rule condition + blocks marshal to ${envelope.length} characters, over the ${MAX_RULE_ENVELOPE_LENGTH} ` +
+          'limit of the buffer ScoutServer loads them through',
+      );
+    }
+    if (mode === 'add' && (e.ou_id === undefined || e.active === undefined)) {
+      throw new Error('A rule entry requires ou_id and active when added');
+    }
+    entry['FilterType'] = 4;
+    entry['CustomFilter'] = envelope;
+    // Rule rows carry their priority as Sequence on the wire (helper toWireEntry, ouFilter.helper.ts:291).
+    if (e.order !== undefined) entry['Sequence'] = e.order;
+  } else if (isSubnet) {
+    entry['FilterType'] = 1;
+    entry['SubnetAddress'] = e.subnet_address;
+    if (e.order !== undefined) entry['OrderNumber'] = e.order;
+  } else if (mode === 'add' || e.custom_filter !== undefined) {
+    const expr = e.custom_filter as string;
+    if (expr.length > MAX_EXPRESSION_LENGTH) {
+      throw new Error(
+        `custom_filter must not exceed ${MAX_EXPRESSION_LENGTH} characters (got ${expr.length}); ScoutServer silently truncates longer expressions`,
+      );
+    }
+    entry['FilterType'] = 2;
+    entry['CustomFilter'] = expr;
+    if (e.order !== undefined) entry['OrderNumber'] = e.order;
+  } else if (e.order !== undefined) {
+    entry['OrderNumber'] = e.order;
+  }
+  if (e.active !== undefined) entry['Active'] = e.active;
+  if (e.ou_id !== undefined) entry['OUID'] = e.ou_id;
+  return entry;
+}
 
 const filterEntrySchema = z.object({
   entry_id: z.number().int().optional().describe(
@@ -80,6 +172,17 @@ const filterEntrySchema = z.object({
     'ELUX_KERNEL (kernel version), ELUX_IDF (firmware image name). ' +
     'Multiple filter entries targeting the same OU are ANDed at evaluation time. ' +
     'Provide this field (instead of subnet_address) to create/update a user-defined rule.',
+  ),
+
+  // Rule filter (FilterType 4)
+  rule_condition: z.string().optional().describe(
+    'Condition string of a rule filter (FilterType 4), max 32768 characters. Cannot be combined with ' +
+    'subnet_address/custom_filter. Requires ou_id and active when adding. The server stores it in the ' +
+    'CustomFilter column as the JSON envelope {"conditionString","filterBlocks"} (max 65535 characters in total).',
+  ),
+  rule_blocks: z.array(z.record(z.unknown())).optional().describe(
+    'Visual-builder blocks stored verbatim next to rule_condition (array of objects; defaults to []). ' +
+    'Only valid together with rule_condition.',
   ),
 
   active: z.boolean().optional().describe('Whether the filter entry is active'),
@@ -170,33 +273,16 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
       case 'add': {
         if (!input.entries || input.entries.length === 0)
           return fail('add requires at least one entry in entries[]');
-        for (const e of input.entries) {
-          if (!e.subnet_address && !e.custom_filter)
-            return fail(
-              'Each add entry must include either subnet_address (subnet filter) ' +
-              'or custom_filter (user-defined filter)',
-            );
+        let requestValues: Array<Record<string, unknown>>;
+        try {
+          requestValues = input.entries.map((e) => buildFilterWireEntry(e, 'add'));
+        } catch (e) {
+          return fail(e instanceof Error ? e.message : String(e));
         }
         const modeCheck = checkMutationAllowed('ou_filter_manage(add)');
         if (!modeCheck.proceed) {
           return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         }
-        const requestValues = input.entries.map((e) => {
-          const entry: Record<string, unknown> = {};
-          if (e.subnet_address) {
-            // FilterType 1 = subnet filter
-            entry['FilterType'] = 1;
-            entry['SubnetAddress'] = e.subnet_address;
-          } else {
-            // FilterType 2 = user-defined expression filter
-            entry['FilterType'] = 2;
-            entry['CustomFilter'] = e.custom_filter;
-          }
-          if (e.active !== undefined) entry['Active'] = e.active;
-          if (e.ou_id !== undefined) entry['OUID'] = e.ou_id;
-          if (e.order !== undefined) entry['OrderNumber'] = e.order;
-          return entry;
-        });
         const body = { requestValues };
         log(tool, 'POST', '/api/v1/oufilter/add', body);
         const data = await client.rawRequest<unknown>('POST', '/api/v1/oufilter/add', body, {
@@ -213,24 +299,16 @@ async function ouFilterManageExecute(raw: unknown): Promise<McpToolResult> {
           return fail('modify requires at least one entry in entries[]');
         const missingId = input.entries.find((e) => e.entry_id === undefined);
         if (missingId) return fail('Every entry in modify must include entry_id');
+        let requestValues: Array<Record<string, unknown>>;
+        try {
+          requestValues = input.entries.map((e) => buildFilterWireEntry(e, 'modify'));
+        } catch (e) {
+          return fail(e instanceof Error ? e.message : String(e));
+        }
         const modeCheck = checkMutationAllowed('ou_filter_manage(modify)');
         if (!modeCheck.proceed) {
           return ok({ status: 'dry_run', action: input.action, message: modeCheck.dryRunNotice });
         }
-        const requestValues = input.entries.map((e) => {
-          const entry: Record<string, unknown> = { EntryId: e.entry_id };
-          if (e.subnet_address !== undefined) {
-            entry['FilterType'] = 1;
-            entry['SubnetAddress'] = e.subnet_address;
-          } else if (e.custom_filter !== undefined) {
-            entry['FilterType'] = 2;
-            entry['CustomFilter'] = e.custom_filter;
-          }
-          if (e.active !== undefined) entry['Active'] = e.active;
-          if (e.ou_id !== undefined) entry['OUID'] = e.ou_id;
-          if (e.order !== undefined) entry['OrderNumber'] = e.order;
-          return entry;
-        });
         const body = { requestValues };
         log(tool, 'POST', '/api/v1/oufilter/modify', body);
         const data = await client.rawRequest<unknown>('POST', '/api/v1/oufilter/modify', body, {
@@ -278,9 +356,11 @@ export const ouFilterManageTool = {
   description:
     '[PRIVATE ENDPOINT — not in public OpenAPI spec. Enabled via SCOUT_ENABLE_PRIVATE_ENDPOINTS=true.] ' +
     'Manage Scout Board OU filter rules and global settings. ' +
-    'Two filter rule types are supported: ' +
+    'Three filter rule types are supported: ' +
     '(1) Subnet filter (FilterType 1) — matches enrolling devices by IP network; uses subnet_address e.g. "192.168.1.0/24". ' +
     '(2) User-defined filter (FilterType 2) — matches by ELUX_* device property expression; uses custom_filter e.g. "ELUX_NETADDR=192.168.1.0". ' +
+    '(4) Rule filter (FilterType 4) — rule_condition (max 32768 chars) + optional rule_blocks; requires ou_id and active on add; stored as a JSON envelope capped at 65535 chars. ' +
+    'custom_filter is capped at 4000 characters (the server silently truncates longer text). ' +
     'custom_filter format: PROPERTY = value. ' +
     'Combine conditions with AND / OR (uppercase): "ELUX_HOSTNAME=PC AND ELUX_OSVERSION=2603". ' +
     'Prefix matching is built in — no wildcard character needed. ' +
@@ -291,7 +371,7 @@ export const ouFilterManageTool = {
     'ELUX_GRAPHICS, ELUX_OSNAME, ELUX_OSVERSION, ELUX_KERNEL, ELUX_IDF. ' +
     'Multiple rules targeting the same OU are ANDed at evaluation time. ' +
     'Actions: get_settings, list, set_settings, ' +
-    'add (each entry requires subnet_address OR custom_filter; optional: active, ou_id, order), ' +
+    'add (each entry requires subnet_address OR custom_filter OR rule_condition; optional: active, ou_id, order), ' +
     'modify (update rules by entry_id — optional: subnet_address, custom_filter, active, ou_id, order), ' +
     'delete (remove rules by entry_id). ' +
     'DESTRUCTIVE: modify/delete/set_settings permanently alter OU filter configuration.',
