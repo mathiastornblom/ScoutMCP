@@ -11,7 +11,8 @@
  */
 
 import { getClient } from './client.js';
-import { canonicalizeOuPath } from './ou_path.js';
+import { canonicalizeOuPath, OuPathError } from './ou_path.js';
+import { auditLog, GuardrailError } from './safety/guardrails.js';
 import { parseOuTree, ouChain, ouSubtree, type OuTree, type OuTreeNode } from './ou_tree.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -86,7 +87,15 @@ export async function resolveOuRef(ref: string | number): Promise<OuMatch> {
   // 2. Exact path
   if (s.startsWith('/')) {
     // Canonical compare (case, repeated/trailing slashes); '.'/'..' segments throw.
-    const want = canonicalizeOuPath(s);
+    let want: string;
+    try {
+      want = canonicalizeOuPath(s);
+    } catch (err) {
+      if (!(err instanceof OuPathError)) throw err;
+      const message = `Refusing OU reference ${JSON.stringify(s)}: ${err.message}.`;
+      auditLog({ opName: 'ou-ref-resolve', target: s, result: 'refused', gate: 'protected-ou', detail: message });
+      throw new GuardrailError(message, 'protected-ou');
+    }
     const byPath = all.filter((o) => canonicalizeOuPath(o.path) === want);
     if (byPath.length === 1) return byPath[0];
     if (byPath.length > 1) return throwAmbiguous(s, byPath);
@@ -174,6 +183,34 @@ export async function countDevicesUnderOu(ouRef: string | number): Promise<numbe
 export async function resolveOuForWriteGate(ref: string | number): Promise<OuMatch> {
   invalidateOuCache();
   return resolveOuRef(ref);
+}
+
+/**
+ * Resolves every supplied reference (fresh tree) and requires they all name the SAME OU.
+ * Returns that OU, or undefined if no reference was supplied. Callers gate on the returned
+ * canonical path AND must send only `{id: match.ouid}` to the server, so the OU that was gated
+ * and the OU that is written are the same by construction (a caller giving an allowed id plus
+ * a protected path is refused here rather than judged on the id alone).
+ */
+export async function resolveWriteTarget(
+  refs: Array<string | number | undefined>,
+  label = 'OU',
+): Promise<OuMatch | undefined> {
+  const given = refs.filter((r): r is string | number => r !== undefined);
+  if (given.length === 0) return undefined;
+  invalidateOuCache();
+  const matches: OuMatch[] = [];
+  for (const r of given) matches.push(await resolveOuRef(r));
+  const first = matches[0];
+  const other = matches.find((m) => m.ouid !== first.ouid);
+  if (other) {
+    const message =
+      `Refusing: the ${label} references resolve to different OUs ("${first.path}" id ${first.ouid} vs ` +
+      `"${other.path}" id ${other.ouid}). Give a single OU reference.`;
+    auditLog({ opName: 'ou-ref-resolve', target: label, result: 'refused', gate: 'protected-ou', detail: message });
+    throw new GuardrailError(message, 'protected-ou');
+  }
+  return first;
 }
 
 /** Throws unless OU `ouid` currently has exactly the path that was gated (fresh tree read). */

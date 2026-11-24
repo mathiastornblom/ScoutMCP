@@ -432,25 +432,40 @@ function parseOuList(raw: string | undefined): string[] {
 }
 
 /** Canonical comparison form (see src/ou_path.ts). An invalid path (".."/"." segment, control
- *  chars) THROWS - fail closed: it is neither "protected" nor "allowed", the write is refused. */
-function normalizeOuPath(path: string): string {
+ *  chars) THROWS a GuardrailError and writes an audit entry - fail closed: it is neither
+ *  "protected" nor "allowed", the write is refused. `envVar` is set when the bad value is a
+ *  list entry (so the message names the variable and entry, not the target path). */
+function normalizeOuPath(path: string, envVar?: 'SCOUT_PROTECTED_OUS' | 'SCOUT_ALLOWED_OUS'): string {
   try {
     return canonicalizeOuPath(path);
   } catch (err) {
-    throw new GuardrailError(
-      `Blocked: "${path}" is not a valid OU path (${err instanceof Error ? err.message : String(err)}). ` +
-        'Refusing to evaluate SCOUT_PROTECTED_OUS / SCOUT_ALLOWED_OUS against an ambiguous path.',
-      'protected-ou',
-    );
+    const why = err instanceof Error ? err.message : String(err);
+    const message = envVar
+      ? `Blocked: malformed ${envVar} entry ${JSON.stringify(path)} (${why}). Fix the environment variable; ` +
+        'refusing every OU write until it is valid.'
+      : `Blocked: "${path}" is not a valid OU path (${why}). ` +
+        'Refusing to evaluate SCOUT_PROTECTED_OUS / SCOUT_ALLOWED_OUS against an ambiguous path.';
+    auditLog({
+      opName: 'ou-write-check',
+      target: envVar ? envVar : path,
+      result: 'refused',
+      gate: 'protected-ou',
+      detail: message,
+    });
+    throw new GuardrailError(message, 'protected-ou');
   }
 }
 
 /** True if `candidate` is exactly `ancestorOrSelf`, or a descendant of it (path-prefix
  *  match on path segments, not raw string prefix — so "/Enterprise2" is not treated as a
- *  descendant of "/Enterprise"). */
-function isSameOrDescendant(candidate: string, ancestorOrSelf: string): boolean {
+ *  descendant of "/Enterprise"). `envVar` names the list `ancestorOrSelf` came from. */
+function isSameOrDescendant(
+  candidate: string,
+  ancestorOrSelf: string,
+  envVar: 'SCOUT_PROTECTED_OUS' | 'SCOUT_ALLOWED_OUS',
+): boolean {
+  const a = normalizeOuPath(ancestorOrSelf, envVar);
   const c = normalizeOuPath(candidate);
-  const a = normalizeOuPath(ancestorOrSelf);
   if (c === a) return true;
   if (a === '/') return true; // everything is a descendant of root
   return c.startsWith(a + '/');
@@ -495,7 +510,7 @@ export interface OuWriteCheckParams {
 export function checkOuWriteAllowed(params: OuWriteCheckParams): void {
   const protectedOus = getProtectedOus();
   for (const denied of protectedOus) {
-    if (isSameOrDescendant(params.targetPath, denied)) {
+    if (isSameOrDescendant(params.targetPath, denied, 'SCOUT_PROTECTED_OUS')) {
       auditLog({
         opName: 'ou-write-check',
         target: params.targetPath,
@@ -514,7 +529,7 @@ export function checkOuWriteAllowed(params: OuWriteCheckParams): void {
   const allowedOus = getAllowedOus();
   if (allowedOus.length === 0) return; // no allow-list configured — everything not denied is fine
 
-  const isAllowed = allowedOus.some((allowed) => isSameOrDescendant(params.targetPath, allowed));
+  const isAllowed = allowedOus.some((allowed) => isSameOrDescendant(params.targetPath, allowed, 'SCOUT_ALLOWED_OUS'));
   if (!isAllowed) {
     auditLog({
       opName: 'ou-write-check',

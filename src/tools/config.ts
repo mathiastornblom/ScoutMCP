@@ -18,7 +18,7 @@ import { validateConfigWrite, formatViolations, formatWarnings } from '../valida
 import { resolveTargetRef, resolveEffectiveConfig } from './config_resolve.js';
 import { foldConfigLayers, type ResolvedConfigKey } from '../rsop.js';
 import { loadEluxConfigSchema } from '../schema/eluxConfig.js';
-import { getOuChain, resolveOuRef, countDevicesUnderOu, invalidateOuCache, assertOuPathUnchanged } from '../resolver.js';
+import { getOuChain, resolveOuRef, countDevicesUnderOu, invalidateOuCache, assertOuPathUnchanged, resolveWriteTarget } from '../resolver.js';
 
 // Section examples (not exhaustive — API accepts any valid section string):
 // general, firmware, display, hardware, security, userauthentication, diagnostics,
@@ -176,10 +176,11 @@ async function configUpdateExecute(raw: unknown, ctx?: ToolContext): Promise<Mcp
     let resolvedOuPath: string | undefined;
     let resolvedOuId: number | undefined;
     if (input.target === 'ou') {
-      const ouRef = input.ouId ?? input.ouPath;
-      if (ouRef === undefined) return fail('config_update target=ou requires ouPath or ouId');
-      invalidateOuCache(); // gate against a fresh tree, not a cached one
-      const resolved = await resolveOuRef(ouRef);
+      // Resolve BOTH references when both are given and refuse if they name different OUs; the
+      // write below sends only the resolved id (never the raw caller ouPath), so the gated OU
+      // and the written OU are the same by construction.
+      const resolved = await resolveWriteTarget([input.ouId, input.ouPath], 'ouId/ouPath');
+      if (!resolved) return fail('config_update target=ou requires ouPath or ouId');
       resolvedOuPath = resolved.path;
       resolvedOuId = resolved.ouid;
       checkOuWriteAllowed({ targetPath: resolvedOuPath });
@@ -323,7 +324,7 @@ async function configUpdateExecute(raw: unknown, ctx?: ToolContext): Promise<Mcp
     // actually a "count = 1" operation once inheritance is accounted for.
     let qs = '';
     if (input.target === 'ou') {
-      qs = buildQuery({ path: input.ouPath, id: input.ouId });
+      qs = buildQuery({ id: resolvedOuId });
     } else if (input.target === 'device') {
       qs = buildQuery({ name: input.name, mac: input.mac, id: input.id, clientid: input.clientid });
     }
@@ -337,6 +338,12 @@ async function configUpdateExecute(raw: unknown, ctx?: ToolContext): Promise<Mcp
         message: modeCheck.dryRunNotice,
         ...(warningLines.length > 0 ? { warnings: warningLines } : {}),
       });
+    }
+
+    // Re-assert after the confirmation prompt, immediately before writing, that the gated OU
+    // still has the gated path.
+    if (input.target === 'ou' && resolvedOuId !== undefined && resolvedOuPath !== undefined) {
+      await assertOuPathUnchanged(resolvedOuId, resolvedOuPath);
     }
 
     const data = await client.request<unknown>(

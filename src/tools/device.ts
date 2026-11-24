@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
-import { resolveOuRef, invalidateOuCache, resolveOuForWriteGate } from '../resolver.js';
+import { resolveOuRef, invalidateOuCache, resolveOuForWriteGate, resolveWriteTarget, assertOuPathUnchanged, type OuMatch } from '../resolver.js';
 import { enrich } from '../enricher.js';
 import { isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
@@ -380,14 +380,23 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
     // checked unconditionally for add/move (a device's resolved destination matters even
     // if the device doesn't exist yet, for add); the source is resolved by looking up the
     // device's current OUID before the move executes.
+    let destMatch: OuMatch | undefined;
     if (input.action === 'move' || input.action === 'add') {
       // Gate on the canonical path from a FRESH tree read, never the raw caller string.
-      const destRefs: Array<string | number> =
+      // Every supplied destination reference must name the same OU; gate on it and send ONLY
+      // its id, so the gated OU and the written OU are the same by construction.
+      destMatch = await resolveWriteTarget(
         input.destouRef !== undefined
-          ? [resolvedDestId as number]
-          : [resolvedDestPath, input.destouid].filter((r): r is string | number => r !== undefined);
-      for (const ref of destRefs) {
-        checkOuWriteAllowed({ targetPath: (await resolveOuForWriteGate(ref)).path });
+          ? [input.destouRef]
+          : input.destoupath === undefined && input.destouid === undefined
+            ? [resolvedDestPath] // working-OU fallback, only when no explicit destination was given
+            : [input.destoupath, input.destouid],
+        'destination OU',
+      );
+      if (destMatch) {
+        checkOuWriteAllowed({ targetPath: destMatch.path });
+        resolvedDestId = destMatch.ouid;
+        resolvedDestPath = destMatch.path;
       }
     }
     if (input.action === 'move') {
@@ -409,6 +418,10 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
       });
     }
 
+    // Re-assert, immediately before the mutating call, that the gated destination still has the
+    // gated path (a concurrent rename/move must not slip through).
+    if (destMatch) await assertOuPathUnchanged(destMatch.ouid, destMatch.path);
+
     let data: unknown;
 
     switch (input.action) {
@@ -416,7 +429,6 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
         if (!input.newDeviceName) return fail('newDeviceName is required for action=add');
         if (!input.newDeviceMac) return fail('newDeviceMac is required for action=add');
         const qs = buildQuery({
-          destoupath: resolvedDestPath,
           destouid: resolvedDestId,
           name: input.newDeviceName,
           mac: input.newDeviceMac,
@@ -467,7 +479,6 @@ async function deviceManageExecute(raw: unknown): Promise<McpToolResult> {
           mac: input.mac,
           id: input.id,
           clientid: input.clientid,
-          destoupath: resolvedDestPath,
           destouid: resolvedDestId,
         });
         data = await client.request<unknown>('PUT', `/api/v1/device/move${qs}`, undefined, {

@@ -19,7 +19,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { confirmDestructiveAction, supportsElicitation } from '../elicitation.js';
-import { resolveOuRef, invalidateOuCache, resolveOuForWriteGate } from '../resolver.js';
+import { resolveOuRef, invalidateOuCache, resolveWriteTarget, assertOuPathUnchanged } from '../resolver.js';
 import {
   checkMutationAllowed,
   checkBlastRadius,
@@ -371,11 +371,11 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
     // included. The write is blocked if ANY resolved source OU or the destination is
     // protected (or, with an allow-list configured, not allowed).
     // Canonical path from a FRESH tree read, never the raw caller string.
-    invalidateOuCache();
-    const destRefs = [input.destOuPath, input.destOuId].filter((r): r is string | number => r !== undefined);
-    for (const ref of destRefs) {
-      checkOuWriteAllowed({ targetPath: (await resolveOuForWriteGate(ref)).path });
-    }
+    // destOuPath and destOuId (if both given) must name the same OU; the move request below
+    // sends ONLY the resolved id, so the gated and the written destination are identical.
+    const destMatch = await resolveWriteTarget([input.destOuPath, input.destOuId], 'destination OU');
+    if (!destMatch) throw new Error('destOuPath or destOuId is required');
+    checkOuWriteAllowed({ targetPath: destMatch.path });
     // Fail closed: resolveDistinctSourceOuPathsOrThrow throws (rather than returning []) if
     // any matched device's source OU can't be determined — see its doc comment. A thrown
     // error here is caught by this function's outer catch and surfaced as a refusal, the
@@ -397,6 +397,10 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
       });
     }
 
+    // Re-assert (after the confirmation prompt, immediately before writing) that the gated
+    // destination still has the gated path.
+    await assertOuPathUnchanged(destMatch.ouid, destMatch.path);
+
     // Move each device
     let moved = 0;
     const failed: Array<{ device: string; error: string }> = [];
@@ -410,8 +414,7 @@ async function moveDevicesByFilterExecute(raw: unknown, ctx?: ToolContext): Prom
       try {
         const moveQs = buildQuery({
           name,
-          destoupath: input.destOuPath,
-          destouid: input.destOuId,
+          destouid: destMatch.ouid,
         });
         const result = await client.request<unknown>('PUT', `/api/v1/device/move${moveQs}`, undefined, {
           mutating: true,

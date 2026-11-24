@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
-import { resolveOuRef, invalidateOuCache, resolveOuForWriteGate } from '../resolver.js';
+import { resolveOuRef, invalidateOuCache, resolveWriteTarget, assertOuPathUnchanged, type OuMatch } from '../resolver.js';
 import { enrich, invalidateEnrichmentCache } from '../enricher.js';
 import { suggestOus, formatOuSuggestions, isNotFound } from '../fuzzy.js';
 import { getWorkingOu } from '../context.js';
@@ -252,6 +252,27 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
       ? checkMutationAllowed(`ou_manage(${input.action})`)
       : { proceed: true };
 
+    // Resolve the write target/destination ONCE, from a fresh tree, requiring that every
+    // supplied reference (ouRef / path / id) names the same OU. From here on the gates AND the
+    // request use only this resolved OU (requests carry the id, never the raw caller path), so
+    // the gated OU and the written OU are the same by construction.
+    let tgt: OuMatch | undefined;
+    let dst: OuMatch | undefined;
+    if (['rename', 'delete', 'move', 'converttobase'].includes(input.action)) {
+      tgt = await resolveWriteTarget(
+        input.ouRef !== undefined ? [input.ouRef] : [input.path, input.id],
+        'target OU',
+      );
+      if (tgt) { resolvedId = tgt.ouid; resolvedPath = tgt.path; }
+    }
+    if (input.action === 'move' || input.action === 'add') {
+      dst = await resolveWriteTarget(
+        input.destouRef !== undefined ? [input.destouRef] : [input.destoupath, input.destouid],
+        'destination OU',
+      );
+      if (dst) { resolvedDestId = dst.ouid; resolvedDestPath = dst.path; }
+    }
+
     // Gate 2: root OU is protected the same way as Base config — it's the ancestor of
     // every other OU, so rename/delete/move/converttobase against it is fleet-wide blast
     // radius. We only know "root" by comparing the resolved target against the live
@@ -286,22 +307,10 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
       // Gate on the canonical, server-derived path from a FRESH tree read, never the raw
       // caller string (case/whitespace/slash variants must not dodge SCOUT_PROTECTED_OUS).
       // Unresolvable refs throw -> refused.
-      const targetRefs: Array<string | number> =
-        input.ouRef !== undefined
-          ? [resolvedId as number]
-          : [input.path, input.id].filter((r): r is string | number => r !== undefined);
-      for (const ref of targetRefs) {
-        checkOuWriteAllowed({ targetPath: (await resolveOuForWriteGate(ref)).path });
-      }
+      if (tgt) checkOuWriteAllowed({ targetPath: tgt.path });
     }
     if (isMutatingAction && (input.action === 'move' || input.action === 'add')) {
-      const destRefs: Array<string | number> =
-        input.destouRef !== undefined
-          ? [resolvedDestId as number]
-          : [input.destoupath, input.destouid].filter((r): r is string | number => r !== undefined);
-      for (const ref of destRefs) {
-        checkOuWriteAllowed({ targetPath: (await resolveOuForWriteGate(ref)).path });
-      }
+      if (dst) checkOuWriteAllowed({ targetPath: dst.path });
     }
 
     if (!modeCheck.proceed) {
@@ -335,12 +344,17 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
       });
     }
 
+    // Re-assert, immediately before the mutating call, that the gated OUs still have the
+    // gated paths (a rename/move by someone else since the gate must not slip through).
+    if (tgt) await assertOuPathUnchanged(tgt.ouid, tgt.path);
+    if (dst) await assertOuPathUnchanged(dst.ouid, dst.path);
+
     let result: unknown;
 
     switch (input.action) {
       case 'add': {
         if (!input.name) return fail('name is required for action=add');
-        const qs = buildQuery({ destoupath: resolvedDestPath, destouid: resolvedDestId, name: input.name });
+        const qs = buildQuery({ destouid: resolvedDestId, name: input.name });
         result = await client.request<unknown>('POST', `/api/v1/ou${qs}`, undefined, {
           mutating: true,
           opName: 'ou_manage(add)',
@@ -350,7 +364,7 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
 
       case 'rename': {
         if (!input.newname) return fail('newname is required for action=rename');
-        const qs = buildQuery({ path: resolvedPath, id: resolvedId, newname: input.newname });
+        const qs = buildQuery({ id: resolvedId, newname: input.newname });
         result = await client.request<unknown>('PUT', `/api/v1/ou${qs}`, undefined, {
           mutating: true,
           opName: 'ou_manage(rename)',
@@ -360,7 +374,6 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
 
       case 'delete': {
         const qs = buildQuery({
-          path: resolvedPath,
           id: resolvedId,
           forceDeleteOUFilter: input.forceDeleteOUFilter,
         });
@@ -373,9 +386,7 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
 
       case 'move': {
         const qs = buildQuery({
-          path: resolvedPath,
           id: resolvedId,
-          destoupath: resolvedDestPath,
           destouid: resolvedDestId,
         });
         result = await client.request<unknown>('PUT', `/api/v1/ou/move${qs}`, undefined, {
@@ -386,7 +397,7 @@ async function ouManageExecute(raw: unknown): Promise<McpToolResult> {
       }
 
       case 'converttobase': {
-        const qs = buildQuery({ path: resolvedPath, id: resolvedId });
+        const qs = buildQuery({ id: resolvedId });
         result = await client.request<unknown>('PUT', `/api/v1/ou/converttobase${qs}`, undefined, {
           mutating: true,
           opName: 'ou_manage(converttobase)',
