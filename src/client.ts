@@ -2,9 +2,12 @@ import { Agent, fetch } from 'undici';
 import { type ScoutConfig, resolveConfig, buildCcTokenUrl } from './session.js';
 import {
   checkMutationAllowed,
+  GuardrailError,
   type MutationCheckResult,
   DRY_RUN_SKIP_MARKER,
 } from './safety/guardrails.js';
+import { classifyRequest, assertBodyAllowed, isSendableWrite, isLegacyMutating, normalizeWritePath } from './elias/optable.js';
+import { isMutationToken, bodyHashOf, type MutationToken } from './elias/token.js';
 
 function makeDryRunSkip<T>(notice?: string): T {
   return {
@@ -14,6 +17,50 @@ function makeDryRunSkip<T>(notice?: string): T {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+/** Upper bound for a per-call timeout override (solver / upload class calls). */
+export const MAX_CALL_TIMEOUT_MS = 330_000;
+
+/** Per-call options for rawRequest() beyond the legacy `mutating`/`opName` pair. */
+export interface RawRequestOpts {
+  mutating?: boolean;
+  opName?: string;
+  /**
+   * Single-use token minted at the ELIAS write pipeline's gate 13 (src/elias/token.ts). Required for
+   * every ELIAS write op; consumed per request. Never combined with `mutating:true` (no double count).
+   */
+  mutationToken?: MutationToken;
+  /** Per-call timeout in ms (clamped to MAX_CALL_TIMEOUT_MS). Default: the client's request timeout. */
+  timeoutMs?: number;
+  /** 'json' (default, strict), 'empty' (empty body expected) or 'any' (empty -> undefined, JSON else text). */
+  expect?: 'json' | 'empty' | 'any';
+  /** Receives the HTTP status of the final response (success only). */
+  onResponse?: (meta: { status: number }) => void;
+}
+
+/** Effective timeout for one call: the override when it is a positive finite number, clamped; else the default. */
+export function resolveCallTimeout(requested: number | undefined, fallback: number): number {
+  if (typeof requested !== 'number' || !Number.isFinite(requested) || requested <= 0) return fallback;
+  return Math.min(Math.floor(requested), MAX_CALL_TIMEOUT_MS);
+}
+
+/**
+ * Reads a response body per `expect`. 'json' keeps the strict legacy behaviour (an empty body is a
+ * parse error); 'empty' and 'any' tolerate an empty body (lock/set and release answer 200 with none).
+ */
+export async function readResponseBody(
+  res: { status: number; text(): Promise<string> },
+  expect: 'json' | 'empty' | 'any' = 'json',
+): Promise<unknown> {
+  if (res.status === 204) return undefined;
+  const text = await res.text();
+  if (expect === 'json') return JSON.parse(text);
+  if (text.trim() === '') return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
 /** Renew token this many ms before its actual expiry to avoid race windows. */
 const TOKEN_RENEW_BEFORE_MS = 60_000;
 
@@ -258,6 +305,7 @@ export class ScoutClient {
     body?: unknown,
     opts?: { mutating?: boolean; opName?: string },
   ): Promise<T> {
+    this.enforceRestWritePolicy(method, path);
     if (opts?.mutating) {
       const check = this.checkMode(opts.opName ?? `${method} ${path}`);
       if (!check.proceed) return makeDryRunSkip<T>(check.dryRunNotice);
@@ -272,14 +320,118 @@ export class ScoutClient {
     method: string,
     path: string,
     body?: unknown,
-    opts?: { mutating?: boolean; opName?: string },
+    opts?: RawRequestOpts,
   ): Promise<T> {
+    // C1/C2/C14: the closed op table decides what a non-GET may do. Runs before any network traffic.
+    this.enforceRawWritePolicy(method, path, body, opts);
     if (opts?.mutating) {
       const check = this.checkMode(opts.opName ?? `${method} ${path}`);
       if (!check.proceed) return makeDryRunSkip<T>(check.dryRunNotice);
     }
     const fresh = await this.ensureAuth();
-    return this.doRawRequest<T>(method, path, body, fresh);
+    return this.doRawRequest<T>(method, path, body, fresh, opts);
+  }
+
+  /**
+   * Security C1 (ELIAS write foundation). For every non-GET sent through rawRequest():
+   *   - Tier C paths (signing / sign / trust / certificates) are refused, always.
+   *   - A known ELIAS write op needs a minted single-use token (consumed here: binding, expiry,
+   *     kill switch, mode) and its op must be `enabled` in this build; `mutating:true` on such a path
+   *     is refused (no double breaker count, no bypass of the pipeline).
+   *   - A closed list of read-class POSTs is allowed without a token (when `enabled`).
+   *   - Internal session/lock paths are refused (no internal caller exists yet).
+   *   - Anything else is allowed only for legacy callers that pass `mutating:true` (they go through
+   *     checkMutationAllowed as before); a bare non-GET to an unknown path is refused.
+   */
+  private enforceRawWritePolicy(method: string, path: string, body: unknown, opts?: RawRequestOpts): void {
+    const m = method.toUpperCase();
+    if (m === 'GET' || m === 'HEAD') return;
+    const label = path.split(/[?#]/, 1)[0].replace(/[^\x20-\x7e]/g, '?').slice(0, 120);
+    const cls = classifyRequest(m, path);
+    if (cls.kind === 'tier-c') {
+      throw new GuardrailError(
+        `Refused: ${m} ${label} is Tier C (signing/trust/certificates) and is permanently excluded from this MCP.`,
+        'tier-c',
+      );
+    }
+    if (cls.kind === 'rejected') {
+      throw new GuardrailError(`Refused: ${m} ${label}: path rejected (${cls.reason}).`, 'mutation-token');
+    }
+    const token = opts?.mutationToken;
+    if (token !== undefined && !isMutationToken(token)) {
+      throw new GuardrailError('Refused: invalid mutation token.', 'mutation-token');
+    }
+    if (cls.kind === 'op') {
+      const op = cls.op;
+      if (op.kind === 'internal') {
+        throw new GuardrailError(`Refused: ${label} is internal session/lock plumbing; no internal caller is enabled.`, 'mutation-token');
+      }
+      if (op.kind === 'read-post') {
+        if (!op.enabled) {
+          throw new GuardrailError(`Refused: read-class POST ${op.template} is not enabled (live non-mutation evidence missing).`, 'mutation-token');
+        }
+        if (token !== undefined) throw new GuardrailError('Refused: a mutation token is not valid for a read-class POST.', 'mutation-token');
+        return;
+      }
+      // op.kind === 'write'
+      if (opts?.mutating) {
+        throw new GuardrailError(
+          `Refused: ${m} ${op.template} is an ELIAS write; it must use the write pipeline (mutation token), not mutating:true.`,
+          'mutation-token',
+        );
+      }
+      if (!token) {
+        throw new GuardrailError(`Refused: ${m} ${op.template} needs a mutation token (ELIAS writes go through the pipeline only).`, 'mutation-token');
+      }
+      if (!isSendableWrite(op)) {
+        throw new GuardrailError(`Refused: ${op.template} is classified but not enabled in this build.`, 'mutation-token');
+      }
+      assertBodyAllowed(body); // C14: throws BodyDenied
+      token.consume(m, op.template, cls.path, bodyHashOf(body));
+      return;
+    }
+    if (cls.kind === 'read') return;
+    // Unknown to the op table: only the explicit legacy allow-list, and only with mutating:true.
+    if (token !== undefined) {
+      throw new GuardrailError(`Refused: ${m} ${label} is not in the closed ELIAS op table; a token cannot be used for it.`, 'mutation-token');
+    }
+    if (opts?.mutating && isLegacyMutating(cls.path, cls.query)) return; // gated by checkMutationAllowed below
+    throw new GuardrailError(
+      `Refused: ${m} ${label} is a non-GET that is neither in the ELIAS op table nor on the legacy private-write allow-list.`,
+      'mutation-token',
+    );
+  }
+
+  /**
+   * Write-policy backstop for the /rest path (Security F3): a non-GET may not use traversal or
+   * encoded separators, may not be Tier C, and may not resolve to an ELIAS/internal op path.
+   */
+  private enforceRestWritePolicy(method: string, path: string): void {
+    const m = method.toUpperCase();
+    if (m === 'GET' || m === 'HEAD') return;
+    const label = path.split(/[?#]/, 1)[0].replace(/[^\x20-\x7e]/g, '?').slice(0, 120);
+    const n = normalizeWritePath(path);
+    if (!n.ok) throw new GuardrailError(`Refused: ${m} ${label}: path rejected (${n.reason}).`, 'mutation-token');
+    const cls = classifyRequest(m, path);
+    if (cls.kind === 'tier-c') {
+      throw new GuardrailError(`Refused: ${m} ${label} is Tier C (signing/trust/certificates) and is permanently excluded from this MCP.`, 'tier-c');
+    }
+    if (cls.kind === 'op' && cls.op.kind !== 'read-post') {
+      throw new GuardrailError(`Refused: ${m} ${label} resolves to an ELIAS/internal op path; not allowed through /rest.`, 'mutation-token');
+    }
+    let resolved: string;
+    try {
+      resolved = new URL(`${this.baseUrl}/rest${path}`).pathname;
+    } catch {
+      throw new GuardrailError(`Refused: ${m} ${label}: unresolvable path.`, 'mutation-token');
+    }
+    if (!resolved.startsWith('/rest/')) {
+      throw new GuardrailError(`Refused: ${m} ${label} resolves outside /rest.`, 'mutation-token');
+    }
+    const r = classifyRequest(m, resolved.slice('/rest'.length));
+    if (r.kind === 'tier-c') {
+      throw new GuardrailError(`Refused: ${m} ${label} is Tier C (signing/trust/certificates) and is permanently excluded from this MCP.`, 'tier-c');
+    }
   }
 
   private checkMode(opName: string): MutationCheckResult {
@@ -379,6 +531,7 @@ export class ScoutClient {
     path: string,
     body: unknown,
     isRetry: boolean,
+    opts?: RawRequestOpts,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
@@ -389,20 +542,25 @@ export class ScoutClient {
       headers['Content-Type'] = 'application/json';
     }
 
-    const res = await this.fetchWithTimeout(url, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...(this.dispatcher ? { dispatcher: this.dispatcher as any } : {}),
-    });
+    const res = await this.fetchWithTimeout(
+      url,
+      {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ...(this.dispatcher ? { dispatcher: this.dispatcher as any } : {}),
+      },
+      resolveCallTimeout(opts?.timeoutMs, this.timeoutMs),
+    );
 
     if (res.status === 401) {
       await this.handle401(res, isRetry, true);
       this.token = null;
       this.tokenExpiresAt = null;
       await this.login();
-      return this.doRawRequest<T>(method, path, body, true);
+      // A 401 means the request was not processed: this single replay is the only automatic re-send.
+      return this.doRawRequest<T>(method, path, body, true, opts);
     }
 
     if (!res.ok) {
@@ -415,17 +573,19 @@ export class ScoutClient {
       );
     }
 
+    opts?.onResponse?.({ status: res.status });
     if (res.status === 204) return undefined as T;
 
-    return res.json() as Promise<T>;
+    return (await readResponseBody(res, opts?.expect ?? 'json')) as T;
   }
 
   private async fetchWithTimeout(
     url: string,
     init: Parameters<typeof fetch>[1],
+    timeoutMs: number = this.timeoutMs,
   ): Promise<Response> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       return (await fetch(url, {
         ...init,

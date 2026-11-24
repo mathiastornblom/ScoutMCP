@@ -19,6 +19,8 @@ import type { ToolContext, McpTool } from './types.js';
 import { loadSavedConfig, setSessionConfig, clearSessionConfig, resolveConfig } from './session.js';
 import { getClient } from './client.js';
 import { eliasTools } from './tools/elias.js';
+import { getEliasWriteTools } from './tools/elias_write.js';
+import { recoverUnknownIntents } from './elias/audit.js';
 import { configureTool } from './tools/configure.js';
 import { contextTool } from './tools/context.js';
 import { healthCheckTool } from './tools/health.js';
@@ -120,6 +122,19 @@ if (privateEndpointsEnabled) {
   process.stderr.write('[scout-mcp] Private endpoints enabled (SCOUT_ENABLE_PRIVATE_ENDPOINTS=true)\n');
 }
 
+// ELIAS write foundation: tools only with SCOUT_ELIAS_WRITES=a|b; startup surfaces intents that never got a result.
+const eliasWriteTools = privateEndpointsEnabled ? getEliasWriteTools() : [];
+if (eliasWriteTools.length > 0) {
+  try {
+    const recovered = recoverUnknownIntents();
+    if (recovered.length > 0) {
+      process.stderr.write(`[scout-mcp] ${recovered.length} ELIAS write intent(s) without a result were marked recovered-unknown\n`);
+    }
+  } catch {
+    /* best effort */
+  }
+}
+
 const tools: McpTool[] = [
   configureTool,
   contextTool,
@@ -159,6 +174,7 @@ const tools: McpTool[] = [
         serverInstancesTool,
         dbCleanupTool,
         ...eliasTools, // read-only ELIAS (Scout 2611+)
+        ...eliasWriteTools, // [] unless SCOUT_ELIAS_WRITES=a|b (and body evidence / test escape hatch)
       ]
     : []),
 ];

@@ -20,6 +20,7 @@ a minimum release. Status values:
 | `advanced-file-entries` | - | untested | ? | ? | route | Public `/config/advanced/*/fileEntries` are in `openapi.json`. On 26.11.0 the capability probe reported the route available (2026-11-24); `config_resolve` has not been run against it live. Only `config_resolve` consumes them. |
 | `ou-filter-and-or` | 2605 | verified-live | yes | ? | ? | README: AND/OR, bracket grouping and prefix matching "confirmed working against Scout 2605". Earlier releases not tested. |
 | `ccauth-login` | - | untested | ? | ? | ? | Citrix Cloud service-principal login; config-driven (`SCOUT_CC_*` variables), not probeable. Server-side support release unknown. |
+| `elias-write-containers` | 2611 | untested | ? | ? | ? | ELIAS container write foundation: `POST /api/v1/containers/import {name}` (`elias_container_create`). Off by default (`SCOUT_ELIAS_WRITES`). The request body is known from vendor source/e2e only; no live capture exists, so the tool is NOT registered (rule D0) until a scrubbed live capture is recorded `verified-live` with an evidence record (see below). Not probeable. |
 | `healthcheck` | - | verified-live | ? | ? | yes | Public `/api/v1/healthcheck`; present in the shipped OpenAPI spec. `health_check` ran on 26.11.0 (2026-11-24): `healthState: ok`, database layer available. |
 
 Legend: `yes` = verified on that release, `route` = only the endpoint's existence was verified (probe),
@@ -32,6 +33,21 @@ Legend: `yes` = verified on that release, `route` = only the endpoint's existenc
 | 2026-11-24 | 26.11.0 | `health_check`: version detection and capability probes | Version `26.11.0`, confidence `medium`, `healthState: ok`; probes: `elias`, `advanced-file-entries`, `healthcheck`, `ourights-preflight` available; ELIAS `reachable`; database layer available. `ou-filter-and-or` and `ccauth-login` are not probeable. |
 | 2026-11-24 | 26.11.0 | `elias_container_list`, `elias_rights` (Bearer auth, read-only mode) | 11 containers (`uc-elux7-2507` ... `uc-elux7-2612`, `uc-rp6-x64`); all six ELIAS rights allowed |
 | 2026-11-24 | 26.11.0 | `ourights` probe | Before the 404-message fix it reported unavailable; after, available (the 404 `OuId not found` means the route exists) |
+
+## ELIAS write tools: body evidence (rule D0)
+
+A write tool is registered only when its request body is `verified-live` AND the registry carries an
+evidence record (`date`, `captureId`, `fixtureSha256` of the scrubbed contract fixture under
+`tests/fixtures/elias/contracts/`). A status string alone is self-attested and is not enough. The one
+exception is the test-environment escape hatch (`SCOUT_ELIAS_ALLOW_UNVERIFIED_WRITES=true` with
+`SCOUT_ENV=test`), limited to names matching `MCPTEST-<8 digits>-<8 hex>` and audited with `unverified:true`.
+Fixtures are produced by `scripts/scrub-fixture.ts` (allow-list extraction: method, path template, body key
+names and types, status; no values, hosts, cookies, tokens or credentials). Raw HARs are gitignored and must
+never be committed.
+
+| Tool | Endpoint | Body status | Evidence |
+|------|----------|-------------|----------|
+| `elias_container_create` | `POST /api/v1/containers/import {name}` | untested | none (no live capture yet) |
 
 Not yet exercised live: the container-scoped ELIAS tools (need the per-container grant), `elias_my_roles`, `config_resolve` with advanced file entries, every write tool.
 
