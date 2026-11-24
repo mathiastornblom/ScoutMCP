@@ -328,8 +328,14 @@ ELIAS is built into Scout Board 2611 and served on the same host under `/api/v1/
 | `elias_image_list` | `GET /images/getAll/{id}` |
 | `elias_certificate_list` / `elias_certificate_get` | `GET /certificates/getAll/{id}`, `/certificates/{id}/{certId}`, `/certificates/signing/{id}` |
 | `elias_upload_status` | `GET /files/upload/{id}/status` |
+| `elias_container_get` | `GET /containers/{id}` |
+| `elias_container_capabilities` | `GET /containers/capabilities` |
+| `elias_container_rules` | `GET /containers/{id}/rules` |
+| `elias_package_versions` / `elias_package_dependencies` | `GET /epms/{containerId}/{id}/versions`, `/dependencies` |
+| `elias_image_get` | `GET /images/{containerId}/{id}` |
+| `elias_my_roles` | `POST /elias/my-container-roles` (read behind a POST; body `{containerIds}` only) |
 
-Safeguards: container/certificate/upload ids must be GUIDs and package names match a strict charset (no `..`, `/`, `%`, `?`, `#`); every segment is `encodeURIComponent`-encoded into a fixed path template. Lists use a minimal projection with `limit`/`offset` (default 50) and a 100 KB output cap. Certificates are metadata-only (PEM only via `includePem` for `CRT` public certs, never for the signing certificate); all responses pass through a recursive redaction filter for private-key/secret-looking fields. A 404 on the signing certificate is reported as `{"signingCertificate":"none"}`. Server text is untrusted data.
+Safeguards: container/certificate/upload ids must be GUIDs and package names match a strict charset (no `..`, `/`, `%`, `?`, `#`); every segment is `encodeURIComponent`-encoded into a fixed path template. Lists use a minimal projection with `limit`/`offset` (default 50) and a 100 KB output cap. Certificates are metadata-only (PEM only via `includePem` for `CRT` public certs, never for the signing certificate); all responses pass through a recursive redaction filter for private-key/secret-looking fields. A 404 on the signing certificate is reported as `{"signingCertificate":"none"}`. Server text is untrusted data. Container ids are upper-cased before use (DBLayer only accepts the spelling `GET /containers` lists). Container-scoped calls need a per-container grant that the Scout Board proxy mints for any authenticated caller. Note: on CCAUTH installs Bearer-only calls outside `/rest` get a JSON 401, and on OIDC installs the `oidcToken` cookie is also required, so ELIAS/private tools may not work there. See [docs/reference/elias-api-notes.md](docs/reference/elias-api-notes.md) for rights, grant behaviour and what is deliberately not exposed.
 
 Not implemented (later, Security-gated phase): container import/delete, image delete/save, upload init/complete, solver solve/generateRules, lock set/release. `POST /images/{id}/{name}.idf/idf` (IDF text export) is also left out: the HAR shows a POST with body `{}` returning text/plain but cannot prove it has no side effects, and `rawRequest()` parses JSON only.
 

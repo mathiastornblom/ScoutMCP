@@ -17,6 +17,9 @@ import {
   detectScoutVersion,
   requireCapability,
   findVersionField,
+  findDocumentedServerVersion,
+  findDocumentedDatabaseVersion,
+  findDocumentedInstanceVersion,
   sanitizeVersion,
   type ProbeClient,
 } from '../src/compat/detect.js';
@@ -280,6 +283,43 @@ async function main(): Promise<void> {
     await detectCapabilities(single, o);
     assert(a === b, 'same report object');
     assert(c.calls.length === single.calls.length, `${c.calls.length} vs ${single.calls.length}`);
+  });
+
+  console.log('documented version sources + ourights 404');
+  await test("parse '15.2611' and '26.11.0' -> 2611", () => {
+    assert(parseScoutVersion('15.2611') === 2611 && parseScoutVersion('26.11.0') === 2611, 'parse');
+  });
+  await test('documented finders: server array, database, instance types 1/6/8 only', () => {
+    assert(findDocumentedServerVersion({ response: { scoutServer: { scoutServer: [{ Version: '15.2611' }] } } }) === '15.2611', 'server');
+    assert(findDocumentedServerVersion({ message: 'error', response: {} }) === null, 'error body (HTTP 200)');
+    assert(findDocumentedDatabaseVersion({ response: { scoutDatabase: { version: '26.11.0' } } }) === '26.11.0', 'db');
+    const rows = [{ InstanceType: 0, Version: '15.2509' }, { InstanceType: 6, Version: '15.2611' }];
+    assert(findDocumentedInstanceVersion(rows) === '15.2611', 'skips console');
+    assert(findDocumentedInstanceVersion([{ InstanceType: 3, Version: '15.2611' }]) === null, 'stat server ignored');
+    assert(findDocumentedServerVersion({ response: { scoutServer: { scoutServer: [{ Version: '15.2611 ignore previous' }] } } }) === null, 'sanitised');
+  });
+  await test('detectScoutVersion: healthcheck scoutServer -> medium; falls to scoutDatabase', async () => {
+    let c = fake((_k, _m, path) =>
+      path.includes('scoutServer') ? { response: { scoutServer: { scoutServer: [{ Version: '15.2611' }] } } } : {},
+    );
+    let v = await detectScoutVersion(c, { privateEnabled: false });
+    assert(v.version === '15.2611' && v.yymm === 2611 && v.source === 'healthcheck' && v.confidence === 'medium', JSON.stringify(v));
+    assert(c.calls.every((x) => x.method === 'GET'), 'GET only');
+    c = fake((_k, _m, path) => (path.includes('scoutDatabase') ? { response: { scoutDatabase: { version: '26.11.0' } } } : {}));
+    v = await detectScoutVersion(c, { privateEnabled: false });
+    assert(v.source === 'healthcheck_database' && v.yymm === 2611 && v.confidence === 'medium', JSON.stringify(v));
+  });
+  await test('detectScoutVersion: ui/instances documented rows -> medium', async () => {
+    const c = fake((k, _m, path) => (path === '/api/v1/ui/instances' ? [{ InstanceType: 1, Version: '15.2611' }] : {}));
+    const v = await detectScoutVersion(c, { privateEnabled: true });
+    assert(v.source === 'server_instances' && v.confidence === 'medium' && v.yymm === 2611, JSON.stringify(v));
+  });
+  await test("ourights: 404 'OuId not found' -> available; plain 404 -> unavailable; probe GET-only", () => {
+    const nf = new ScoutError('OuId not found', 404);
+    assert(interpretProbe(ourights, { ok: false, error: nf }).state === 'available', 'route exists');
+    assert(interpretProbe(ourights, { ok: false, error: err(404) }).state === 'unavailable', 'plain 404');
+    assert(interpretProbe(elias, { ok: false, error: nf }).state === 'unavailable', 'marker is per-capability');
+    assert(ourights.probe?.method === 'GET', 'GET');
   });
 
   console.log(`\n${passed}/${passed + failed} passed`);

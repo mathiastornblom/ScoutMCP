@@ -26,6 +26,11 @@ export interface CapabilityProbe {
    * Only set where the probe deliberately omits a required parameter.
    */
   badRequestMeansAvailable?: boolean;
+  /**
+   * HTTP 404 whose body message contains this text (case-insensitive) means "route exists, the
+   * entity was not found" -> available. A plain route-404 (any other message) stays unavailable.
+   */
+  notFoundMessageMeansAvailable?: string;
 }
 
 export interface Capability {
@@ -50,6 +55,13 @@ const ELIAS_TOOLS = [
   'elias_certificate_list',
   'elias_certificate_get',
   'elias_upload_status',
+  'elias_container_get',
+  'elias_container_capabilities',
+  'elias_container_rules',
+  'elias_package_versions',
+  'elias_package_dependencies',
+  'elias_image_get',
+  'elias_my_roles',
 ];
 
 export const CAPABILITIES: readonly Capability[] = [
@@ -66,7 +78,7 @@ export const CAPABILITIES: readonly Capability[] = [
     id: 'ourights-preflight',
     description: 'Per-OU rights check (GET /api/v1/ourights?ouId=) used as a UX-only write preflight',
     minScoutVersion: null,
-    probe: { method: 'GET', path: '/api/v1/ourights', kind: 'private', badRequestMeansAvailable: true },
+    probe: { method: 'GET', path: '/api/v1/ourights', kind: 'private', badRequestMeansAvailable: true, notFoundMessageMeansAvailable: 'OuId not found' },
     dependentTools: ['ou_manage', 'device_command', 'config_update'],
     status: 'har-only',
   },

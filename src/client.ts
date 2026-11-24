@@ -20,12 +20,29 @@ const TOKEN_RENEW_BEFORE_MS = 60_000;
 interface ApiError {
   code?: string | number;
   message?: string;
+  /** Machine-readable message id (e.g. ELIAS `grantKeyChanged`, `containerNotFound`). */
+  msgId?: string;
+}
+
+/** Appended when a private (non-/rest) call is still 401 after a successful login + the single retry. */
+export const PRIVATE_401_HINT =
+  'Login succeeded but this non-/rest (private) endpoint still answers 401. On Citrix Cloud (CCAUTH) installs ' +
+  'Bearer-only calls outside /rest are refused, and on OIDC installs the oidcToken cookie is also required, so ' +
+  'private/ELIAS tools may not work on this installation.';
+
+/** Server-supplied error text is untrusted: strip control chars/newlines and cap length. */
+export function sanitizeServerText(text: string, max = 300): string {
+  // eslint-disable-next-line no-control-regex
+  const t = text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
 export class ScoutError extends Error {
   constructor(
     message: string,
     public readonly statusCode?: number,
+    /** Server-supplied msgId from the error body, when present (raw/private endpoints only). */
+    public readonly msgId?: string,
   ) {
     super(message);
     this.name = 'ScoutError';
@@ -331,11 +348,16 @@ export class ScoutClient {
 
     if (!res.ok) {
       const apiError = await this.tryParseError(res);
-      const msg =
+      let msg =
         apiError?.message && apiError.message !== 'OK'
-          ? apiError.message
+          ? sanitizeServerText(String(apiError.message))
           : `Request failed (HTTP ${res.status})`;
-      throw new ScoutError(msg, res.status);
+      if (res.status === 401 && isRetry) msg = `${msg}. ${PRIVATE_401_HINT}`;
+      throw new ScoutError(
+        msg,
+        res.status,
+        typeof apiError?.msgId === 'string' ? apiError.msgId.slice(0, 100) : undefined,
+      );
     }
 
     if (res.status === 204) return undefined as T;

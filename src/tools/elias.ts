@@ -19,7 +19,7 @@
 
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { getClient, ScoutError } from '../client.js';
+import { getClient, ScoutError, PRIVATE_401_HINT, sanitizeServerText } from '../client.js';
 import { requireCapability } from '../compat/detect.js';
 import { ok, fail, type McpTool, type McpToolResult } from '../types.js';
 
@@ -41,6 +41,14 @@ export const EliasName = z
 /** Validates then percent-encodes a path segment. Throws ZodError on invalid input. */
 export function seg(schema: z.ZodType<string>, value: unknown): string {
   return encodeURIComponent(schema.parse(value));
+}
+
+/**
+ * DBLayer only accepts container ids spelled as GET /containers lists them: UPPER CASE, no braces
+ * (any other spelling is 404 containerNotFound). Validate as GUID, then upper-case.
+ */
+export function cseg(value: unknown): string {
+  return encodeURIComponent(EliasGuid.parse(value).toUpperCase());
 }
 
 const LimitField = z
@@ -72,13 +80,17 @@ const PKCS12_WORD_RE = /\bPKCS\s*#?\s*12\b/i;
 /** Long base64 (with optional line breaks) = a key/keystore blob when it sits in a key-ish field. */
 const BASE64_BLOB_RE = /^[A-Za-z0-9+/=\s_-]{128,}$/;
 
+/** Names ending in 'key' that are NOT secrets (public keys, sort/primary/foreign keys ...). */
+const NON_SECRET_KEY_SUFFIX = /(?:public|sort|hot|primary|foreign|group|order|cache|lookup)key$/;
+
 function normKey(k: string): string {
   return k.toLowerCase().replace(/[\s_-]+/g, '');
 }
 
 function isSecretKey(k: string): boolean {
   const n = normKey(k);
-  return n === 'key' || n === 'secret' || SECRET_KEY_SUBSTRINGS.test(n) || (n.includes('pem') && n.includes('private'));
+  const symmetricKeyName = n.endsWith('key') && !NON_SECRET_KEY_SUFFIX.test(n);
+  return n === 'key' || n === 'secret' || symmetricKeyName || SECRET_KEY_SUBSTRINGS.test(n) || (n.includes('pem') && n.includes('private'));
 }
 
 /** Recursively redacts key/secret-looking fields and private-key/PKCS#12-looking values. */
@@ -135,21 +147,40 @@ function privateEnabled(): boolean {
   return process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS === 'true';
 }
 
-function describeError(err: unknown): string {
+function describeError(err: unknown, right: string | null = 'view (415)'): string {
   if (err instanceof z.ZodError) {
     return `invalid input: ${err.issues.map((i) => `${i.path.join('.') || 'value'} ${i.message}`).join('; ')}`;
   }
   if (err instanceof ScoutError) {
-    if (err.statusCode === 401) return 'authentication failed (HTTP 401) — check credentials / token';
-    if (err.statusCode === 403) return 'forbidden (HTTP 403) — the Scout user lacks ELIAS rights (see elias_rights)';
-    if (err.statusCode === 404) return 'not found (HTTP 404) — wrong id, or ELIAS is not available (requires Scout 2611+)';
-    return err.message;
+    if (err.statusCode === 401) return `authentication failed (HTTP 401) — check credentials / token. ${PRIVATE_401_HINT}`;
+    if (err.statusCode === 403) {
+      if (err.msgId === 'grantKeyChanged') {
+        return 'forbidden (HTTP 403, grantKeyChanged) — the per-container grant was issued under an old key; retried once without success. Re-establish the Scout session and try again.';
+      }
+      if (/no per-container grant/i.test(err.message)) {
+        return (
+          'forbidden (HTTP 403) — the request carries no per-container grant. This usually means the container id ' +
+          'spelling is wrong (it must be the UPPER CASE GUID exactly as elias_container_list shows it), the grant is ' +
+          'stale (retry), or the right is genuinely denied (see elias_rights). The grant is minted by the Scout Board ' +
+          'proxy; this tool cannot and does not mint it.'
+        );
+      }
+      if (right === null) return 'forbidden (HTTP 403) — this endpoint needs authentication only; check that the session is valid';
+      return `forbidden (HTTP 403) — right denied: the Scout user likely lacks the ELIAS "${right}" right for this container (see elias_rights)`;
+    }
+    if (err.statusCode === 404) {
+      if (err.msgId === 'containerNotFound') {
+        return 'not found (HTTP 404, containerNotFound) — the container id was not found. Use the id exactly as elias_container_list shows it (UPPER CASE GUID, no braces).';
+      }
+      return 'not found (HTTP 404) — wrong id, or ELIAS is not available (requires Scout 2611+)';
+    }
+    return sanitizeServerText(err.message);
   }
-  return err instanceof Error ? err.message : String(err);
+  return err instanceof Error ? sanitizeServerText(err.message) : sanitizeServerText(String(err));
 }
 
 /** Shared wrapper: private-endpoint gate, error mapping. */
-function wrap(tool: string, run: (input: unknown) => Promise<unknown>) {
+function wrap(tool: string, run: (input: unknown) => Promise<unknown>, right: string | null = 'view (415)') {
   return async (raw: unknown): Promise<McpToolResult> => {
     if (!privateEnabled()) {
       return fail(`${tool} is a private endpoint tool. Set SCOUT_ENABLE_PRIVATE_ENDPOINTS=true to enable it.`);
@@ -158,21 +189,30 @@ function wrap(tool: string, run: (input: unknown) => Promise<unknown>) {
       // Responses are untrusted data: redact secrets, then cap size.
       return ok(capOutput(redactSecrets(await run(raw))));
     } catch (err) {
-      // On HTTP 404, check the capability probe so the user sees 'requires Scout >=2611'
-      // instead of a raw 404. Costs no extra request on the happy path.
-      if (err instanceof ScoutError && err.statusCode === 404) {
+      // On a plain HTTP 404, check the capability probe so the user sees 'requires Scout >=2611'
+      // instead of a raw 404. containerNotFound proves ELIAS exists, so it skips the probe.
+      if (err instanceof ScoutError && err.statusCode === 404 && err.msgId !== 'containerNotFound') {
         const msg = await requireCapability('elias', getClient());
         if (msg) return fail(`${tool} failed: ${msg}`);
       }
-      process.stderr.write(`[scout-mcp/${tool}] error: ${describeError(err)}\n`);
-      return fail(`${tool} failed: ${describeError(err)}`);
+      process.stderr.write(`[scout-mcp/${tool}] error: ${describeError(err, right)}\n`);
+      return fail(`${tool} failed: ${describeError(err, right)}`);
     }
   };
 }
 
 async function get<T>(tool: string, path: string): Promise<T> {
   log(tool, path);
-  return getClient().rawRequest<T>('GET', path);
+  try {
+    return await getClient().rawRequest<T>('GET', path);
+  } catch (err) {
+    // grantKeyChanged: the grant was minted under an old key. Safe to retry ONCE (GET only).
+    if (err instanceof ScoutError && err.statusCode === 403 && err.msgId === 'grantKeyChanged') {
+      log(tool, `${path} (retry after grantKeyChanged)`);
+      return getClient().rawRequest<T>('GET', path);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -255,7 +295,7 @@ export const eliasContainerFilesTool: McpTool = {
     const { containerId, limit, offset } = containerFilesSchema.parse(raw);
     const data = await get<unknown>(
       'elias_container_files',
-      `/api/v1/containers/${seg(EliasGuid, containerId)}/files`,
+      `/api/v1/containers/${cseg(containerId)}/files`,
     );
     const files = asArray(data);
     const byCategory: Record<string, number> = {};
@@ -289,7 +329,7 @@ export const eliasRightsTool: McpTool = {
     const path =
       containerId === undefined
         ? '/api/v1/containers/rights'
-        : `/api/v1/containers/${seg(EliasGuid, containerId)}/rights`;
+        : `/api/v1/containers/${cseg(containerId)}/rights`;
     return get<unknown>('elias_rights', path);
   }),
 };
@@ -316,7 +356,7 @@ export const eliasPackageListTool: McpTool = {
   inputSchema: zodToJsonSchema(packageListSchema),
   execute: wrap('elias_package_list', async (raw) => {
     const { containerId, name, limit, offset } = packageListSchema.parse(raw);
-    const cid = seg(EliasGuid, containerId);
+    const cid = cseg(containerId);
     if (name === undefined) {
       const data = await get<unknown>('elias_package_list', `/api/v1/epms/getAll/${cid}`);
       return capList(asArray(data), limit, offset, (e) => ({
@@ -351,7 +391,7 @@ export const eliasImageListTool: McpTool = {
   inputSchema: zodToJsonSchema(imageListSchema),
   execute: wrap('elias_image_list', async (raw) => {
     const { containerId, limit, offset } = imageListSchema.parse(raw);
-    const data = await get<unknown>('elias_image_list', `/api/v1/images/getAll/${seg(EliasGuid, containerId)}`);
+    const data = await get<unknown>('elias_image_list', `/api/v1/images/getAll/${cseg(containerId)}`);
     return capList(asArray(data), limit, offset, (i) => pick(i, ['id', 'name', 'imageSize', 'locked', 'created', 'modified']));
   }),
 };
@@ -383,7 +423,7 @@ export const eliasCertificateListTool: McpTool = {
     const { containerId, limit, offset } = certListSchema.parse(raw);
     const data = await get<unknown>(
       'elias_certificate_list',
-      `/api/v1/certificates/getAll/${seg(EliasGuid, containerId)}`,
+      `/api/v1/certificates/getAll/${cseg(containerId)}`,
     );
     return capList(asArray(data), limit, offset, certSummary);
   }),
@@ -410,7 +450,7 @@ export const eliasCertificateGetTool: McpTool = {
   inputSchema: zodToJsonSchema(certGetObject),
   execute: wrap('elias_certificate_get', async (raw) => {
     const { containerId, certificateId, signing, includePem } = certGetSchema.parse(raw);
-    const cid = seg(EliasGuid, containerId);
+    const cid = cseg(containerId);
     // PEM only for ordinary public CRT certs, only on explicit request. Never for signing certs.
     const shape = (c: Rec): Rec => ({
       ...certSummary(c),
@@ -421,7 +461,7 @@ export const eliasCertificateGetTool: McpTool = {
         const c = await get<Rec>('elias_certificate_get', `/api/v1/certificates/signing/${cid}`);
         return { signingCertificate: certSummary(c) }; // metadata-only until Security reviews a live 200 sample
       } catch (err) {
-        if (!(err instanceof ScoutError && err.statusCode === 404)) throw err;
+        if (!(err instanceof ScoutError && err.statusCode === 404) || err.msgId === 'containerNotFound') throw err;
         // 404 is ambiguous: "no signing cert" vs "no such container" vs "ELIAS absent".
         // Only claim `none` when the container list proves the container exists.
         let known: boolean | null = null;
@@ -460,7 +500,126 @@ export const eliasUploadStatusTool: McpTool = {
     const { uploadId } = uploadStatusSchema.parse(raw);
     const data = await get<Rec>('elias_upload_status', `/api/v1/files/upload/${seg(EliasGuid, uploadId)}/status`);
     return { chunkCount: Array.isArray(data.chunks) ? data.chunks.length : undefined, parse: data.parse };
+  }, 'upload (416)'),
+};
+
+// ── Generic read tools (response schemas unknown: redact, cap, paginate) ──────
+
+/** Arrays are paginated and passed through (redacted/capped by wrap); objects are returned as-is. */
+function genericShape(data: unknown, limit: number, offset: number): unknown {
+  if (Array.isArray(data) || (data !== null && typeof data === 'object' && Array.isArray((data as Rec).response))) {
+    return capList(asArray(data), limit, offset, (r) => r);
+  }
+  return data;
+}
+
+const containerGetSchema = z.object({ containerId: EliasGuid });
+export const eliasContainerGetTool: McpTool = {
+  name: 'elias_container_get',
+  description: TOOL_TAG + 'Get one ELIAS container (GET /api/v1/containers/{id}). Response is redacted and size-capped.',
+  annotations: READ_ONLY,
+  inputSchema: zodToJsonSchema(containerGetSchema),
+  execute: wrap('elias_container_get', async (raw) => {
+    const { containerId } = containerGetSchema.parse(raw);
+    return get<unknown>('elias_container_get', `/api/v1/containers/${cseg(containerId)}`);
   }),
+};
+
+const capabilitiesSchema = z.object({ limit: LimitField, offset: OffsetField });
+export const eliasContainerCapabilitiesTool: McpTool = {
+  name: 'elias_container_capabilities',
+  description:
+    TOOL_TAG + 'Show ELIAS container capabilities (GET /api/v1/containers/capabilities). Response is redacted and size-capped.',
+  annotations: READ_ONLY,
+  inputSchema: zodToJsonSchema(capabilitiesSchema),
+  execute: wrap('elias_container_capabilities', async (raw) => {
+    const { limit, offset } = capabilitiesSchema.parse(raw ?? {});
+    return genericShape(await get<unknown>('elias_container_capabilities', '/api/v1/containers/capabilities'), limit, offset);
+  }),
+};
+
+const rulesSchema = z.object({ containerId: EliasGuid, limit: LimitField, offset: OffsetField });
+export const eliasContainerRulesTool: McpTool = {
+  name: 'elias_container_rules',
+  description:
+    TOOL_TAG + 'List the rules of an ELIAS container (GET /api/v1/containers/{id}/rules). Paginated, redacted, size-capped.',
+  annotations: READ_ONLY,
+  inputSchema: zodToJsonSchema(rulesSchema),
+  execute: wrap('elias_container_rules', async (raw) => {
+    const { containerId, limit, offset } = rulesSchema.parse(raw);
+    return genericShape(await get<unknown>('elias_container_rules', `/api/v1/containers/${cseg(containerId)}/rules`), limit, offset);
+  }),
+};
+
+const pkgSubSchema = z.object({
+  containerId: EliasGuid,
+  id: EliasName.describe('EPM id as shown by elias_package_list (e.g. "onboard-1.4.1.7.epm")'),
+  limit: LimitField,
+  offset: OffsetField,
+});
+export const eliasPackageVersionsTool: McpTool = {
+  name: 'elias_package_versions',
+  description:
+    TOOL_TAG + 'List versions of a package (GET /api/v1/epms/{containerId}/{id}/versions). Paginated, redacted, size-capped.',
+  annotations: READ_ONLY,
+  inputSchema: zodToJsonSchema(pkgSubSchema),
+  execute: wrap('elias_package_versions', async (raw) => {
+    const { containerId, id, limit, offset } = pkgSubSchema.parse(raw);
+    const path = `/api/v1/epms/${cseg(containerId)}/${seg(EliasName, id)}/versions`;
+    return genericShape(await get<unknown>('elias_package_versions', path), limit, offset);
+  }),
+};
+
+export const eliasPackageDependenciesTool: McpTool = {
+  name: 'elias_package_dependencies',
+  description:
+    TOOL_TAG + 'List dependencies of a package (GET /api/v1/epms/{containerId}/{id}/dependencies). Paginated, redacted, size-capped.',
+  annotations: READ_ONLY,
+  inputSchema: zodToJsonSchema(pkgSubSchema),
+  execute: wrap('elias_package_dependencies', async (raw) => {
+    const { containerId, id, limit, offset } = pkgSubSchema.parse(raw);
+    const path = `/api/v1/epms/${cseg(containerId)}/${seg(EliasName, id)}/dependencies`;
+    return genericShape(await get<unknown>('elias_package_dependencies', path), limit, offset);
+  }),
+};
+
+const imageGetSchema = z.object({
+  containerId: EliasGuid,
+  id: EliasName.describe('Image id as shown by elias_image_list (e.g. "NorthCreek.idf")'),
+});
+export const eliasImageGetTool: McpTool = {
+  name: 'elias_image_get',
+  description: TOOL_TAG + 'Get one IDF image record (GET /api/v1/images/{containerId}/{id}). Redacted and size-capped.',
+  annotations: READ_ONLY,
+  inputSchema: zodToJsonSchema(imageGetSchema),
+  execute: wrap('elias_image_get', async (raw) => {
+    const { containerId, id } = imageGetSchema.parse(raw);
+    return get<unknown>('elias_image_get', `/api/v1/images/${cseg(containerId)}/${seg(EliasName, id)}`);
+  }),
+};
+
+// ── elias_my_roles (a read behind a POST) ──────────────────────────────────────
+
+const myRolesSchema = z.object({
+  containerIds: z.array(EliasGuid).min(1).max(100).describe('Container ids (GUIDs); upper-cased before sending'),
+});
+
+export const eliasMyRolesTool: McpTool = {
+  name: 'elias_my_roles',
+  description:
+    TOOL_TAG +
+    "Show the current user's per-container ELIAS roles (POST /api/v1/elias/my-container-roles, body {containerIds}). " +
+    'A read behind a POST: nothing is created or changed. Returns {<id>: {view, upload, delete, manageContainers, runSolver, sign}}; ' +
+    'a mis-spelled id answers all-false, so pass ids exactly as elias_container_list shows them.',
+  annotations: READ_ONLY,
+  inputSchema: zodToJsonSchema(myRolesSchema),
+  execute: wrap('elias_my_roles', async (raw) => {
+    const { containerIds } = myRolesSchema.parse(raw);
+    const body = { containerIds: containerIds.map((c) => c.toUpperCase()) };
+    log('elias_my_roles', '/api/v1/elias/my-container-roles (POST, read-only semantics)');
+    // No `mutating` option: this is not a write, so it must not be affected by mode gates.
+    return getClient().rawRequest<unknown>('POST', '/api/v1/elias/my-container-roles', body);
+  }, null),
 };
 
 export const eliasTools: McpTool[] = [
@@ -473,4 +632,11 @@ export const eliasTools: McpTool[] = [
   eliasCertificateListTool,
   eliasCertificateGetTool,
   eliasUploadStatusTool,
+  eliasContainerGetTool,
+  eliasContainerCapabilitiesTool,
+  eliasContainerRulesTool,
+  eliasPackageVersionsTool,
+  eliasPackageDependenciesTool,
+  eliasImageGetTool,
+  eliasMyRolesTool,
 ];
