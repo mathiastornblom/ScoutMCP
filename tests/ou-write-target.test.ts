@@ -16,6 +16,7 @@ import { checkOuWriteAllowed, __resetCircuitBreakerStateForTests } from '../src/
 import { ouManageTool } from '../src/tools/ou.js';
 import { deviceManageTool } from '../src/tools/device.js';
 import { configUpdateTool } from '../src/tools/config.js';
+import { moveDevicesByFilterTool } from '../src/tools/workflow.js';
 
 setSessionConfig({ baseUrl: 'https://fake-scout-board.invalid:22160', username: 'u', password: 'p' });
 const AUDIT = join(mkdtempSync(join(tmpdir(), 'scout-wt-')), 'audit.log');
@@ -49,6 +50,7 @@ c.request = async (method: string, path: string) => {
   if (method !== 'GET') { writes.push(`${method} ${path}`); return { ok: true }; }
   if (path.startsWith('/api/v1/ou/structure')) return tree(++structureFetches);
   if (path.startsWith('/api/v1/ou/root')) return { OUID: 2, OUPath: '/NorthCreek' };
+  if (path.startsWith('/api/v1/device/search')) return { response: { status: { msg: { visibleDevices: [{ Name: 'thin01', OUID: 10 }], hiddenDevices: 0 } } } };
   if (path.startsWith('/api/v1/device?')) return { OUID: 10, Name: 'thin01' };
   return {};
 };
@@ -170,6 +172,50 @@ await test('NFD env entry protects the NFC-named OU (and vice versa)', () => {
   process.env.SCOUT_PROTECTED_OUS = nfc;
   blocked = false; try { checkOuWriteAllowed({ targetPath: nfd }); } catch { blocked = true; }
   assert(blocked, 'NFD candidate blocked by NFC entry');
+});
+
+console.log('\nN1 move_devices_by_filter destination (re-verification round 3)');
+const mv = (extra: Record<string, unknown>) =>
+  ({ sourceOuPath: '/NorthCreek/AD', searchTerm: '*', confirm: true, ...extra });
+const moves = (): string[] => writes.filter((w) => w.startsWith('PUT /api/v1/device/move'));
+await test('protected destination via path variant (case/slashes) -> refused, no move', async () => {
+  reset(); writeMode(); process.env.SCOUT_PROTECTED_OUS = PROT;
+  for (const destOuPath of [PROT, '/northcreek/CUSTOMERS/', ' //NorthCreek//Customers ']) {
+    const r = await moveDevicesByFilterTool.execute(mv({ destOuPath }));
+    assert(r.isError === true && moves().length === 0, `${destOuPath} refused, moves=${moves().join('|')}: ${r.content[0]?.text}`);
+  }
+});
+await test('protected destination via id -> refused, no move', async () => {
+  reset(); writeMode(); process.env.SCOUT_PROTECTED_OUS = PROT;
+  const r = await moveDevicesByFilterTool.execute(mv({ destOuId: 8 }));
+  assert(r.isError === true && moves().length === 0, `refused: ${r.content[0]?.text}`);
+});
+await test('protected child via id (descendant of protected) -> refused', async () => {
+  reset(); writeMode(); process.env.SCOUT_PROTECTED_OUS = PROT;
+  const r = await moveDevicesByFilterTool.execute(mv({ destOuId: 9 }));
+  assert(r.isError === true && moves().length === 0, `refused: ${r.content[0]?.text}`);
+});
+await test('mixed disagreeing refs (allowed id + protected path, and reverse) -> refused, no move', async () => {
+  for (const extra of [{ destOuId: 5, destOuPath: PROT }, { destOuId: 8, destOuPath: '/NorthCreek/Imprivata' }]) {
+    reset(); writeMode(); process.env.SCOUT_PROTECTED_OUS = PROT;
+    const r = await moveDevicesByFilterTool.execute(mv(extra));
+    assert(r.isError === true && moves().length === 0, `${JSON.stringify(extra)} refused: ${r.content[0]?.text}`);
+    assert(/different OUs/.test(r.content[0]!.text), 'refused for disagreement');
+  }
+});
+await test('consistent unprotected (path / id / both) -> moves; request carries ONLY destouid=<resolved>', async () => {
+  for (const extra of [{ destOuPath: '/northcreek/imprivata' }, { destOuId: 5 }, { destOuId: 5, destOuPath: '/NorthCreek/Imprivata' }]) {
+    reset(); writeMode(); process.env.SCOUT_PROTECTED_OUS = PROT;
+    const r = await moveDevicesByFilterTool.execute(mv(extra));
+    assert(!r.isError && moves().length === 1, `${JSON.stringify(extra)}: ${r.content[0]?.text}`);
+    assert(moves()[0] === 'PUT /api/v1/device/move?name=thin01&destouid=5', `only resolved id sent: ${moves()[0]}`);
+  }
+});
+await test('destination renamed after the gate -> refused, no move', async () => {
+  reset(); writeMode();
+  tree = (n) => (n <= 1 ? LIVE : renamed('Imprivata', 'Moved'));
+  const r = await moveDevicesByFilterTool.execute(mv({ destOuPath: '/NorthCreek/Imprivata' }));
+  assert(r.isError === true && moves().length === 0, `refused: ${r.content[0]?.text}`);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
