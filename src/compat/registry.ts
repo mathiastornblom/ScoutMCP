@@ -107,6 +107,15 @@ export const CAPABILITIES: readonly Capability[] = [
     status: 'untested',
   },
   {
+    id: 'elias-write-containers',
+    description:
+      'ELIAS container write ops (POST /api/v1/containers/import; foundation only: off by default, registered only with verified-live body evidence)',
+    minScoutVersion: '2611',
+    probe: null,
+    dependentTools: ['elias_container_create'],
+    status: 'untested',
+  },
+  {
     id: 'healthcheck',
     description: 'Public GET /api/v1/healthcheck (authenticated system status)',
     minScoutVersion: null,
@@ -118,4 +127,63 @@ export const CAPABILITIES: readonly Capability[] = [
 
 export function getCapability(id: string): Capability | undefined {
   return CAPABILITIES.find((c) => c.id === id);
+}
+
+// ── Per-tool write body evidence (ELIAS write phase, design D0 / Security C12) ────────────────────
+
+/**
+ * Evidence that a write body was captured from a live server and scrubbed (allow-list extraction,
+ * see src/elias/fixture-scrub.ts). A status string alone is self-attested and is NOT enough.
+ */
+export interface BodyEvidence {
+  /** ISO date `YYYY-MM-DD` of the capture. */
+  date: string;
+  /** Opaque capture id (never a host name). */
+  captureId: string;
+  /** sha256 (hex) of the scrubbed contract fixture file. */
+  fixtureSha256: string;
+}
+
+export interface WriteBodyContract {
+  toolName: string;
+  /** Key into the closed op table (src/elias/optable.ts). */
+  opKey: string;
+  /** `verified-live` needs `evidence` and `fixture`. */
+  bodyStatus: CapabilityStatus;
+  evidence?: BodyEvidence;
+  /** Path of the scrubbed contract fixture, relative to tests/fixtures/elias/contracts/. */
+  fixture?: string;
+}
+
+/**
+ * Write tools whose request body is registered. Rule D0: a write tool is registered with the MCP only
+ * when its entry here is `verified-live` WITH a valid evidence record (or, in SCOUT_ENV=test only,
+ * the explicit unverified escape hatch restricted to strict MCPTEST names).
+ * `POST /containers/import {name}` is known from the vendor source/e2e only; no live capture exists yet.
+ */
+export const WRITE_BODY_CONTRACTS: readonly WriteBodyContract[] = [
+  { toolName: 'elias_container_create', opKey: 'containers.import', bodyStatus: 'untested' },
+];
+
+export function getBodyContract(toolName: string, contracts: readonly WriteBodyContract[] = WRITE_BODY_CONTRACTS): WriteBodyContract | undefined {
+  return contracts.find((c) => c.toolName === toolName);
+}
+
+/** Structural validity of an evidence record (the fixture hash is verified in tests/compat). */
+export function hasValidEvidence(c: WriteBodyContract): boolean {
+  const e = c.evidence;
+  return (
+    !!e &&
+    /^\d{4}-\d{2}-\d{2}$/.test(e.date) &&
+    /^[A-Za-z0-9._-]{4,64}$/.test(e.captureId) &&
+    /^[0-9a-f]{64}$/.test(e.fixtureSha256) &&
+    typeof c.fixture === 'string' &&
+    c.fixture.length > 0
+  );
+}
+
+/** D0: `verified-live` AND a valid evidence record. */
+export function isBodyVerifiedLive(toolName: string, contracts: readonly WriteBodyContract[] = WRITE_BODY_CONTRACTS): boolean {
+  const c = getBodyContract(toolName, contracts);
+  return !!c && c.bodyStatus === 'verified-live' && hasValidEvidence(c);
 }

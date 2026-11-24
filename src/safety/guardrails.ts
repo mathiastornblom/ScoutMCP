@@ -69,7 +69,17 @@ export class GuardrailError extends Error {
       | 'private-write-production'
       | 'unresolvable-source-ou'
       | 'audit-purge'
-      | 'preflight',
+      | 'preflight'
+      // ELIAS write phase (src/elias/*): see .agents/design-elias-write-phase.md section 2.1.
+      | 'validation'
+      | 'confirm'
+      | 'elias-scope'
+      | 'elias-switch'
+      | 'unregistered'
+      | 'conflict'
+      | 'audit-write'
+      | 'mutation-token'
+      | 'tier-c',
   ) {
     super(message);
     this.name = 'GuardrailError';
@@ -533,9 +543,12 @@ export function checkOuWriteAllowed(params: OuWriteCheckParams): void {
  * mode is exactly 'write' — read-only/dry-run already block or no-op the mutation via Gate
  * 1, so this gate would be redundant (and confusingly worded) there.
  */
+export function isPrivateWriteBlockedInProduction(): boolean {
+  return getScoutMode() === 'write' && process.env.SCOUT_ALLOW_PRIVATE_WRITES_IN_PRODUCTION !== 'true';
+}
+
 export function checkPrivateWriteAllowedInProduction(opName: string): void {
-  if (getScoutMode() !== 'write') return;
-  if (process.env.SCOUT_ALLOW_PRIVATE_WRITES_IN_PRODUCTION === 'true') return;
+  if (!isPrivateWriteBlockedInProduction()) return;
 
   auditLog({ opName, target: 'unknown', result: 'refused', gate: 'private-write-production' });
   throw new GuardrailError(
