@@ -342,7 +342,7 @@ Not implemented (later, Security-gated phase): container import/delete, image de
 
 ## Scout version compatibility
 
-`health_check` (mode `healthcheck`) reports `scoutVersion`, `versionSource` and a per-feature `capabilities` map (`available` / `unavailable` / `unknown`, plus a `verified-live` / `har-only` / `untested` status). Version detection is best-effort and low-confidence (no verified version field exists in the captures); read-only capability probes are the source of truth. The `elias_*` tools return "requires Scout >=2611 (detected X)" instead of a raw 404 on older servers. See [docs/compatibility.md](docs/compatibility.md) for the release matrix; the registry lives in `src/compat/registry.ts`.
+`health_check` (mode `healthcheck`) reports `scoutVersion`, `versionSource` and a per-feature `capabilities` map (`available` / `unavailable` / `unknown`, plus a `verified-live` / `har-only` / `untested` status). Version detection is best-effort (medium confidence from the documented healthcheck/instances sources; verified on Scout 26.11.0); read-only capability probes are the source of truth. The `elias_*` tools return "requires Scout >=2611 (detected X)" instead of a raw 404 on older servers. See [docs/compatibility.md](docs/compatibility.md) for the release matrix; the registry lives in `src/compat/registry.ts`.
 
 ## Response enrichment
 
