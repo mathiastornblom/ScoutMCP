@@ -26,6 +26,14 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
+# Runtime data read from the repo root by dist/ (schema resources, spec version for compat checks).
+COPY schema/ ./schema/
+COPY openapi.json ./openapi.json
+
+# Audit log + pre-write snapshots default to ./logs; keep them writable for the non-root user
+# and mountable as a volume (-v scout-logs:/app/logs) so they survive container restarts.
+RUN mkdir -p /app/logs && chown node:node /app/logs
+VOLUME ["/app/logs"]
 
 USER node
 
