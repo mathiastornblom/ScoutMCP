@@ -109,9 +109,10 @@ async function execute(raw: unknown): Promise<McpToolResult> {
       return fail(`Health check reports an error (HTTP 200, failure in body): ${assessment.problems.join('; ')}`);
     }
     const out: Record<string, unknown> = {
-      mcpServerVersion: MCP_SERVER_VERSION,
       ...data,
       healthState: assessment.state,
+      // After the spread so a Scout response can never override our own version.
+      mcpServerVersion: MCP_SERVER_VERSION,
     };
     if (assessment.problems.length > 0) out.healthProblems = assessment.problems;
     if (process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS === 'true') {
