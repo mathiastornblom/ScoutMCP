@@ -17,7 +17,7 @@ import { fetch } from 'undici';
 import { setProgressReporter, clearProgressReporter, createProgressReporter } from './progress.js';
 import type { ToolContext, McpTool } from './types.js';
 import { loadSavedConfig, setSessionConfig, clearSessionConfig, resolveConfig } from './session.js';
-import { getClient } from './client.js';
+import { getClient, ScoutError } from './client.js';
 import { eliasTools } from './tools/elias.js';
 import { getEliasWriteTools } from './tools/elias_write.js';
 import { recoverUnknownIntents } from './elias/audit.js';
@@ -53,24 +53,37 @@ import { registerPrompts } from './prompts.js';
 const savedConfig = loadSavedConfig();
 if (savedConfig) setSessionConfig(savedConfig);
 
-// Verify auth against the backend before accepting tool calls.
-// If credentials are present but invalid, clear them and warn so the AI
-// knows to ask the user to run scout_configure.
+// Verify auth in the BACKGROUND. The MCP handshake must not wait on the Scout login:
+// a cold Scout server can take >30s for the first login, which exceeds the client's
+// connect timeout and makes the whole server show as "failed". Tool calls log in lazily
+// (ensureAuth), so nothing depends on this finishing first. Credentials are cleared only
+// when the server explicitly REJECTS them (HTTP 400/401/403); a timeout or network error
+// is transient and must not wipe a working configuration.
 const startupConfig = resolveConfig();
 if (startupConfig) {
-  try {
-    await getClient().login();
-    process.stderr.write(
-      `[scout-mcp] Authenticated — connected to ${startupConfig.baseUrl} as ${startupConfig.authMethod === 'citrix-cloud' ? `service principal ${startupConfig.ccClientId}` : startupConfig.username}\n`,
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      `[scout-mcp] WARNING: Startup auth failed (${msg}). ` +
-        'Credentials cleared — use scout_configure to reconnect.\n',
-    );
-    clearSessionConfig();
-  }
+  void (async () => {
+    try {
+      await getClient().login();
+      process.stderr.write(
+        `[scout-mcp] Authenticated — connected to ${startupConfig.baseUrl} as ${startupConfig.authMethod === 'citrix-cloud' ? `service principal ${startupConfig.ccClientId}` : startupConfig.username}\n`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const status = err instanceof ScoutError ? err.statusCode : undefined;
+      if (status === 400 || status === 401 || status === 403) {
+        process.stderr.write(
+          `[scout-mcp] WARNING: Startup auth failed (${msg}). ` +
+            'Credentials cleared — use scout_configure to reconnect.\n',
+        );
+        clearSessionConfig();
+      } else {
+        process.stderr.write(
+          `[scout-mcp] WARNING: Startup auth did not complete (${msg}). ` +
+            'Credentials kept; the next tool call will retry the login.\n',
+        );
+      }
+    }
+  })();
 } else {
   process.stderr.write(
     '[scout-mcp] No credentials configured. ' +

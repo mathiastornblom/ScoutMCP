@@ -17,6 +17,8 @@ function makeDryRunSkip<T>(notice?: string): T {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+/** Password login can take >30s on a cold Scout server (observed 34s); give it more headroom. */
+const LOGIN_TIMEOUT_MS = 90_000;
 /** Upper bound for a per-call timeout override (solver / upload class calls). */
 export const MAX_CALL_TIMEOUT_MS = 330_000;
 
@@ -188,7 +190,7 @@ export class ScoutClient {
       body: JSON.stringify({ loginData64 }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...(this.dispatcher ? { dispatcher: this.dispatcher as any } : {}),
-    });
+    }, Math.max(this.timeoutMs, LOGIN_TIMEOUT_MS));
 
     if (!res.ok) {
       const body = await this.tryParseError(res);
