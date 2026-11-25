@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -142,6 +142,6 @@ export const serverInstancesTool = {
     'delete (DESTRUCTIVE: remove an instance by entity_id), ' +
     'modify (DESTRUCTIVE: update instance properties by entity_id — at least one of: ' +
     'cpu_threshold, license_threshold, ip_address, ip_name, use_balancer, instance_type).',
-  inputSchema: zodToJsonSchema(serverInstancesSchema),
+  inputSchema: toInputSchema(serverInstancesSchema),
   execute: serverInstancesExecute,
 };

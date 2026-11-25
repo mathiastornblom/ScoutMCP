@@ -1,0 +1,1378 @@
+{
+ "admin_manage": {
+  "described": [
+   "action",
+   "admin_id",
+   "admin_name",
+   "base_rights",
+   "confirm",
+   "display_name",
+   "domain",
+   "duplicate_from",
+   "email",
+   "force_update",
+   "full_access",
+   "menu_rights",
+   "name",
+   "password",
+   "permission_ids",
+   "root_ou",
+   "root_ou_fmd",
+   "type",
+   "type_id",
+   "username"
+  ],
+  "enums": {
+   "action": [
+    "list",
+    "permissions",
+    "advanced_rights",
+    "configuration_rights",
+    "update_rights",
+    "add_admin",
+    "update_admin",
+    "delete_admin"
+   ]
+  },
+  "properties": [
+   "action",
+   "admin_id",
+   "admin_name",
+   "base_rights",
+   "confirm",
+   "display_name",
+   "domain",
+   "duplicate_from",
+   "email",
+   "force_update",
+   "full_access",
+   "menu_rights",
+   "name",
+   "password",
+   "permission_ids",
+   "root_ou",
+   "root_ou_fmd",
+   "type",
+   "type_id",
+   "username"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "app_list": {
+  "described": [
+   "ouId",
+   "ouPath",
+   "scope"
+  ],
+  "enums": {
+   "scope": [
+    "base",
+    "ou"
+   ]
+  },
+  "properties": [
+   "ouId",
+   "ouPath",
+   "scope"
+  ],
+  "required": [
+   "scope"
+  ]
+ },
+ "app_manage": {
+  "described": [
+   "action",
+   "appId",
+   "applicationType",
+   "body",
+   "ouId",
+   "ouPath",
+   "scope"
+  ],
+  "enums": {
+   "action": [
+    "create",
+    "delete",
+    "copy",
+    "move",
+    "get_inheritance",
+    "set_inheritance"
+   ],
+   "scope": [
+    "base",
+    "ou"
+   ]
+  },
+  "properties": [
+   "action",
+   "appId",
+   "applicationType",
+   "body",
+   "ouId",
+   "ouPath",
+   "scope"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "bulk_command": {
+  "described": [
+   "command",
+   "commandBody",
+   "confirm",
+   "dryRun",
+   "includeSubOus",
+   "limit",
+   "overrideBlastRadius",
+   "searchFields",
+   "searchTerm",
+   "sourceOuId",
+   "sourceOuPath"
+  ],
+  "enums": {
+   "command": [
+    "restart",
+    "halt",
+    "start",
+    "factoryreset",
+    "update",
+    "updateuefi",
+    "custom",
+    "predefined",
+    "delivery",
+    "message"
+   ]
+  },
+  "properties": [
+   "command",
+   "commandBody",
+   "confirm",
+   "dryRun",
+   "includeSubOus",
+   "limit",
+   "overrideBlastRadius",
+   "searchFields",
+   "searchTerm",
+   "sourceOuId",
+   "sourceOuPath"
+  ],
+  "required": [
+   "command",
+   "searchTerm"
+  ]
+ },
+ "config_compare": {
+  "described": [
+   "deviceIds",
+   "leftRef",
+   "mode",
+   "rightRef",
+   "section"
+  ],
+  "enums": {
+   "mode": [
+    "device-device",
+    "device-ou",
+    "device-base",
+    "ou-ou",
+    "ou-parent"
+   ]
+  },
+  "properties": [
+   "deviceIds",
+   "leftRef",
+   "mode",
+   "rightRef",
+   "section"
+  ],
+  "required": []
+ },
+ "config_get": {
+  "described": [
+   "clientid",
+   "id",
+   "mac",
+   "name",
+   "ouId",
+   "ouPath",
+   "properties",
+   "section"
+  ],
+  "enums": {
+   "target": [
+    "base",
+    "ou",
+    "device"
+   ]
+  },
+  "properties": [
+   "clientid",
+   "id",
+   "mac",
+   "name",
+   "ouId",
+   "ouPath",
+   "properties",
+   "section",
+   "target"
+  ],
+  "required": [
+   "section",
+   "target"
+  ]
+ },
+ "config_resolve": {
+  "described": [
+   "ref",
+   "render",
+   "section",
+   "target"
+  ],
+  "enums": {
+   "render": [
+    "json",
+    "table"
+   ],
+   "target": [
+    "device",
+    "ou"
+   ]
+  },
+  "properties": [
+   "ref",
+   "render",
+   "section",
+   "target"
+  ],
+  "required": [
+   "ref",
+   "target"
+  ]
+ },
+ "config_update": {
+  "described": [
+   "body",
+   "confirm",
+   "deviceIds",
+   "overrideBlastRadius",
+   "section",
+   "skipValidation"
+  ],
+  "enums": {
+   "target": [
+    "base",
+    "ou",
+    "device"
+   ]
+  },
+  "properties": [
+   "body",
+   "clientid",
+   "confirm",
+   "deviceIds",
+   "id",
+   "mac",
+   "name",
+   "ouId",
+   "ouPath",
+   "overrideBlastRadius",
+   "section",
+   "skipValidation",
+   "target"
+  ],
+  "required": [
+   "body",
+   "section",
+   "target"
+  ]
+ },
+ "db_cleanup": {
+  "described": [
+   "action",
+   "confirm",
+   "confirm_audit_purge",
+   "filter"
+  ],
+  "enums": {
+   "action": [
+    "list",
+    "delete"
+   ]
+  },
+  "properties": [
+   "action",
+   "confirm",
+   "confirm_audit_purge",
+   "filter"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "device_command": {
+  "described": [
+   "body",
+   "clientid",
+   "confirm",
+   "id",
+   "mac",
+   "name",
+   "ouRef",
+   "target"
+  ],
+  "enums": {
+   "command": [
+    "restart",
+    "halt",
+    "start",
+    "factoryreset",
+    "update",
+    "updateuefi",
+    "custom",
+    "predefined",
+    "delivery",
+    "message"
+   ],
+   "target": [
+    "device",
+    "devicelist",
+    "ou",
+    "ddg"
+   ]
+  },
+  "properties": [
+   "body",
+   "clientid",
+   "command",
+   "confirm",
+   "id",
+   "mac",
+   "name",
+   "ouRef",
+   "target"
+  ],
+  "required": [
+   "command",
+   "target"
+  ]
+ },
+ "device_diagnostics": {
+  "described": [
+   "action",
+   "clientid",
+   "diagnosticsFileId",
+   "poll_interval_s",
+   "timeout_s"
+  ],
+  "enums": {
+   "action": [
+    "trigger",
+    "poll",
+    "download_url",
+    "run"
+   ]
+  },
+  "properties": [
+   "action",
+   "clientid",
+   "diagnosticsFileId",
+   "id",
+   "mac",
+   "name",
+   "poll_interval_s",
+   "timeout_s"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "device_get": {
+  "described": [
+   "clientid",
+   "configSection",
+   "id",
+   "includeSubOus",
+   "limit",
+   "mac",
+   "mode",
+   "name",
+   "ouId",
+   "ouPath",
+   "ouRef",
+   "properties",
+   "searchFields",
+   "searchTerm"
+  ],
+  "enums": {
+   "mode": [
+    "get",
+    "search",
+    "search_with_config",
+    "status",
+    "configOrigins"
+   ]
+  },
+  "properties": [
+   "clientid",
+   "configSection",
+   "id",
+   "includeSubOus",
+   "limit",
+   "mac",
+   "mode",
+   "name",
+   "ouId",
+   "ouPath",
+   "ouRef",
+   "properties",
+   "searchFields",
+   "searchTerm"
+  ],
+  "required": [
+   "mode"
+  ]
+ },
+ "device_manage": {
+  "described": [
+   "action",
+   "clientid",
+   "destouRef",
+   "destouid",
+   "destoupath",
+   "id",
+   "mac",
+   "name",
+   "newDeviceMac",
+   "newDeviceName",
+   "newname"
+  ],
+  "enums": {
+   "action": [
+    "add",
+    "rename",
+    "delete",
+    "move"
+   ]
+  },
+  "properties": [
+   "action",
+   "clientid",
+   "destouRef",
+   "destouid",
+   "destoupath",
+   "id",
+   "mac",
+   "name",
+   "newDeviceMac",
+   "newDeviceName",
+   "newname"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "elias_certificate_get": {
+  "described": [
+   "certificateId",
+   "includePem",
+   "signing"
+  ],
+  "enums": {},
+  "properties": [
+   "certificateId",
+   "containerId",
+   "includePem",
+   "signing"
+  ],
+  "required": [
+   "containerId"
+  ]
+ },
+ "elias_certificate_list": {
+  "described": [
+   "limit",
+   "offset"
+  ],
+  "enums": {},
+  "properties": [
+   "containerId",
+   "limit",
+   "offset"
+  ],
+  "required": [
+   "containerId"
+  ]
+ },
+ "elias_container_capabilities": {
+  "described": [
+   "limit",
+   "offset"
+  ],
+  "enums": {},
+  "properties": [
+   "limit",
+   "offset"
+  ],
+  "required": []
+ },
+ "elias_container_files": {
+  "described": [
+   "limit",
+   "offset"
+  ],
+  "enums": {},
+  "properties": [
+   "containerId",
+   "limit",
+   "offset"
+  ],
+  "required": [
+   "containerId"
+  ]
+ },
+ "elias_container_get": {
+  "described": [],
+  "enums": {},
+  "properties": [
+   "containerId"
+  ],
+  "required": [
+   "containerId"
+  ]
+ },
+ "elias_container_list": {
+  "described": [
+   "limit",
+   "offset"
+  ],
+  "enums": {},
+  "properties": [
+   "limit",
+   "offset"
+  ],
+  "required": []
+ },
+ "elias_container_rules": {
+  "described": [
+   "limit",
+   "offset",
+   "textMaxChars"
+  ],
+  "enums": {},
+  "properties": [
+   "containerId",
+   "limit",
+   "offset",
+   "textMaxChars"
+  ],
+  "required": [
+   "containerId"
+  ]
+ },
+ "elias_health": {
+  "described": [],
+  "enums": {},
+  "properties": [],
+  "required": []
+ },
+ "elias_image_get": {
+  "described": [
+   "id"
+  ],
+  "enums": {},
+  "properties": [
+   "containerId",
+   "id"
+  ],
+  "required": [
+   "containerId",
+   "id"
+  ]
+ },
+ "elias_image_list": {
+  "described": [
+   "limit",
+   "offset"
+  ],
+  "enums": {},
+  "properties": [
+   "containerId",
+   "limit",
+   "offset"
+  ],
+  "required": [
+   "containerId"
+  ]
+ },
+ "elias_my_roles": {
+  "described": [
+   "containerIds"
+  ],
+  "enums": {},
+  "properties": [
+   "containerIds"
+  ],
+  "required": [
+   "containerIds"
+  ]
+ },
+ "elias_package_dependencies": {
+  "described": [
+   "id",
+   "limit",
+   "offset"
+  ],
+  "enums": {},
+  "properties": [
+   "containerId",
+   "id",
+   "limit",
+   "offset"
+  ],
+  "required": [
+   "containerId",
+   "id"
+  ]
+ },
+ "elias_package_list": {
+  "described": [
+   "limit",
+   "name",
+   "offset"
+  ],
+  "enums": {},
+  "properties": [
+   "containerId",
+   "limit",
+   "name",
+   "offset"
+  ],
+  "required": [
+   "containerId"
+  ]
+ },
+ "elias_package_versions": {
+  "described": [
+   "id",
+   "limit",
+   "offset"
+  ],
+  "enums": {},
+  "properties": [
+   "containerId",
+   "id",
+   "limit",
+   "offset"
+  ],
+  "required": [
+   "containerId",
+   "id"
+  ]
+ },
+ "elias_rights": {
+  "described": [
+   "containerId"
+  ],
+  "enums": {},
+  "properties": [
+   "containerId"
+  ],
+  "required": []
+ },
+ "elias_upload_status": {
+  "described": [],
+  "enums": {},
+  "properties": [
+   "uploadId"
+  ],
+  "required": [
+   "uploadId"
+  ]
+ },
+ "health_check": {
+  "described": [
+   "capabilities",
+   "license",
+   "mode",
+   "scoutDatabase",
+   "scoutKeepAlive",
+   "scoutServer",
+   "subscription"
+  ],
+  "enums": {
+   "mode": [
+    "ping",
+    "healthcheck"
+   ]
+  },
+  "properties": [
+   "capabilities",
+   "license",
+   "mode",
+   "scoutDatabase",
+   "scoutKeepAlive",
+   "scoutServer",
+   "subscription"
+  ],
+  "required": [
+   "mode"
+  ]
+ },
+ "label_manage": {
+  "described": [
+   "body",
+   "labelId"
+  ],
+  "enums": {
+   "action": [
+    "list",
+    "get",
+    "create",
+    "update",
+    "delete"
+   ]
+  },
+  "properties": [
+   "action",
+   "body",
+   "labelId"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "license_manage": {
+  "described": [
+   "action",
+   "license_server",
+   "selfsigned",
+   "thumbprint"
+  ],
+  "enums": {
+   "action": [
+    "get",
+    "check_availability",
+    "reconfigure"
+   ]
+  },
+  "properties": [
+   "action",
+   "license_server",
+   "selfsigned",
+   "thumbprint"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "maintenance_window_manage": {
+  "described": [
+   "body",
+   "maintenanceWindowId"
+  ],
+  "enums": {
+   "action": [
+    "list",
+    "create",
+    "update",
+    "delete"
+   ]
+  },
+  "properties": [
+   "action",
+   "body",
+   "maintenanceWindowId"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "move_devices_by_filter": {
+  "described": [
+   "confirm",
+   "destOuId",
+   "destOuPath",
+   "dryRun",
+   "includeSubOus",
+   "limit",
+   "overrideBlastRadius",
+   "searchFields",
+   "searchTerm",
+   "sourceOuId",
+   "sourceOuPath"
+  ],
+  "enums": {},
+  "properties": [
+   "confirm",
+   "destOuId",
+   "destOuPath",
+   "dryRun",
+   "includeSubOus",
+   "limit",
+   "overrideBlastRadius",
+   "searchFields",
+   "searchTerm",
+   "sourceOuId",
+   "sourceOuPath"
+  ],
+  "required": [
+   "searchTerm"
+  ]
+ },
+ "new_device_options": {
+  "described": [
+   "accept_only_known_devices",
+   "action",
+   "allow_dynamic_ou_change",
+   "deactivate_new_devices",
+   "default_ou"
+  ],
+  "enums": {
+   "action": [
+    "get",
+    "set"
+   ]
+  },
+  "properties": [
+   "accept_only_known_devices",
+   "action",
+   "allow_dynamic_ou_change",
+   "deactivate_new_devices",
+   "default_ou"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "notification_manage": {
+  "described": [
+   "action",
+   "body",
+   "ouId",
+   "ouPath",
+   "type"
+  ],
+  "enums": {
+   "action": [
+    "set",
+    "delete"
+   ],
+   "target": [
+    "device",
+    "devicelist",
+    "ou",
+    "ddg"
+   ],
+   "type": [
+    "configurationupdate",
+    "delivery",
+    "updateuefi",
+    "updatefirmware",
+    "devicerelocation"
+   ]
+  },
+  "properties": [
+   "action",
+   "body",
+   "clientid",
+   "id",
+   "mac",
+   "name",
+   "ouId",
+   "ouPath",
+   "target",
+   "type"
+  ],
+  "required": [
+   "action",
+   "target",
+   "type"
+  ]
+ },
+ "onboard_branch": {
+  "described": [
+   "filterActive",
+   "name",
+   "parentOuId",
+   "parentOuPath",
+   "subnetCidr"
+  ],
+  "enums": {},
+  "properties": [
+   "filterActive",
+   "name",
+   "parentOuId",
+   "parentOuPath",
+   "subnetCidr"
+  ],
+  "required": [
+   "name"
+  ]
+ },
+ "ou_filter_manage": {
+  "described": [
+   "action",
+   "entries",
+   "ou_filter_ignore_default",
+   "ou_filter_type"
+  ],
+  "enums": {
+   "action": [
+    "get_settings",
+    "list",
+    "set_settings",
+    "add",
+    "modify",
+    "delete"
+   ]
+  },
+  "properties": [
+   "action",
+   "entries",
+   "ou_filter_ignore_default",
+   "ou_filter_type"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "ou_get": {
+  "described": [
+   "id",
+   "includeSubOus",
+   "mode",
+   "onlyFirstLevel",
+   "ouId",
+   "ouPath",
+   "ouRef",
+   "path",
+   "properties",
+   "searchFields",
+   "searchTerm"
+  ],
+  "enums": {
+   "mode": [
+    "get",
+    "root",
+    "search",
+    "subordinate",
+    "structure",
+    "device_status"
+   ]
+  },
+  "properties": [
+   "id",
+   "includeSubOus",
+   "mode",
+   "onlyFirstLevel",
+   "ouId",
+   "ouPath",
+   "ouRef",
+   "path",
+   "properties",
+   "searchFields",
+   "searchTerm"
+  ],
+  "required": [
+   "mode"
+  ]
+ },
+ "ou_manage": {
+  "described": [
+   "action",
+   "destouRef",
+   "destouid",
+   "destoupath",
+   "dryRun",
+   "forceDeleteOUFilter",
+   "id",
+   "importPayload",
+   "name",
+   "newname",
+   "ouId",
+   "ouRef",
+   "path"
+  ],
+  "enums": {
+   "action": [
+    "add",
+    "rename",
+    "delete",
+    "move",
+    "converttobase",
+    "structure_export",
+    "structure_import"
+   ]
+  },
+  "properties": [
+   "action",
+   "destouRef",
+   "destouid",
+   "destoupath",
+   "dryRun",
+   "exportAdvancedConfig",
+   "exportDeviceConfig",
+   "exportDevices",
+   "exportOuStructure",
+   "forceDeleteOUFilter",
+   "id",
+   "importPayload",
+   "name",
+   "newname",
+   "ouId",
+   "ouRef",
+   "path"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "predefined_commands": {
+  "described": [
+   "action",
+   "add_entries",
+   "delete_entries",
+   "modify_entries",
+   "password",
+   "template_entries"
+  ],
+  "enums": {
+   "action": [
+    "list",
+    "add",
+    "modify",
+    "delete",
+    "auth",
+    "list_templates",
+    "modify_templates"
+   ]
+  },
+  "properties": [
+   "action",
+   "add_entries",
+   "delete_entries",
+   "modify_entries",
+   "password",
+   "template_entries"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "predefined_images": {
+  "described": [
+   "action"
+  ],
+  "enums": {
+   "action": [
+    "list_images",
+    "list_uefi"
+   ]
+  },
+  "properties": [
+   "action"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "predefined_paths": {
+  "described": [
+   "action",
+   "entry_ids",
+   "paths"
+  ],
+  "enums": {
+   "action": [
+    "list",
+    "add",
+    "delete"
+   ]
+  },
+  "properties": [
+   "action",
+   "entry_ids",
+   "paths"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "rule_manage": {
+  "described": [
+   "action",
+   "body",
+   "labelId",
+   "ruleId"
+  ],
+  "enums": {
+   "action": [
+    "list",
+    "get",
+    "create",
+    "update",
+    "delete",
+    "validate",
+    "link_label",
+    "update_label_priority",
+    "unlink_label"
+   ]
+  },
+  "properties": [
+   "action",
+   "body",
+   "labelId",
+   "ruleId"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "schedule_manage": {
+  "described": [
+   "action",
+   "body",
+   "includeSubOus",
+   "ouId",
+   "ouPath",
+   "scheduleId"
+  ],
+  "enums": {
+   "action": [
+    "get_ou",
+    "get_device",
+    "update",
+    "delete"
+   ]
+  },
+  "properties": [
+   "action",
+   "body",
+   "clientid",
+   "id",
+   "includeSubOus",
+   "mac",
+   "name",
+   "ouId",
+   "ouPath",
+   "scheduleId"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "scout_configure": {
+  "described": [
+   "action",
+   "authMethod",
+   "baseUrl",
+   "ccClientId",
+   "ccClientSecret",
+   "ccCustomerId",
+   "ccRegion",
+   "ccTokenUrl",
+   "deleteSaved",
+   "domain",
+   "ignoreTls",
+   "password",
+   "save",
+   "test",
+   "username"
+  ],
+  "enums": {
+   "action": [
+    "set",
+    "status",
+    "clear"
+   ],
+   "authMethod": [
+    "password",
+    "citrix-cloud"
+   ],
+   "ccRegion": [
+    "us",
+    "eu",
+    "ap-s",
+    "jp",
+    "staging"
+   ]
+  },
+  "properties": [
+   "action",
+   "authMethod",
+   "baseUrl",
+   "ccClientId",
+   "ccClientSecret",
+   "ccCustomerId",
+   "ccRegion",
+   "ccTokenUrl",
+   "deleteSaved",
+   "domain",
+   "ignoreTls",
+   "password",
+   "save",
+   "test",
+   "username"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "scout_context": {
+  "described": [
+   "action",
+   "id",
+   "path"
+  ],
+  "enums": {
+   "action": [
+    "set_ou",
+    "get_ou",
+    "clear_ou"
+   ]
+  },
+  "properties": [
+   "action",
+   "id",
+   "path"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "scout_update": {
+  "described": [
+   "action"
+  ],
+  "enums": {
+   "action": [
+    "check",
+    "apply"
+   ]
+  },
+  "properties": [
+   "action"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "server_instances": {
+  "described": [
+   "action",
+   "cpu_threshold",
+   "entity_id",
+   "instance_type",
+   "ip_address",
+   "ip_name",
+   "license_threshold",
+   "use_balancer"
+  ],
+  "enums": {
+   "action": [
+    "list",
+    "delete",
+    "modify"
+   ]
+  },
+  "properties": [
+   "action",
+   "cpu_threshold",
+   "entity_id",
+   "instance_type",
+   "ip_address",
+   "ip_name",
+   "license_threshold",
+   "use_balancer"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "system_info": {
+  "described": [
+   "action",
+   "filter",
+   "in_overview",
+   "search_value"
+  ],
+  "enums": {
+   "action": [
+    "status_summary",
+    "device_count",
+    "device_distribution",
+    "device_image_files",
+    "recovery_settings",
+    "db_diags",
+    "system_check",
+    "tree_filter",
+    "missed_notifications",
+    "auth_user"
+   ]
+  },
+  "properties": [
+   "action",
+   "filter",
+   "in_overview",
+   "search_value"
+  ],
+  "required": [
+   "action"
+  ]
+ },
+ "system_settings": {
+  "described": [
+   "action",
+   "discover_collect_time",
+   "discover_ping_time",
+   "log_enabled",
+   "log_keep_alive",
+   "log_level",
+   "max_log_file_size",
+   "max_log_files",
+   "name_options",
+   "new_password",
+   "old_password",
+   "recovery_options",
+   "retain_local_configuration",
+   "scout_board_id"
+  ],
+  "enums": {
+   "action": [
+    "get_logging",
+    "set_logging",
+    "get_discover",
+    "set_discover",
+    "get_retain_local_config",
+    "set_retain_local_config",
+    "get_device_name_options",
+    "set_device_name_options",
+    "get_recovery_settings",
+    "set_recovery_settings",
+    "set_device_password"
+   ]
+  },
+  "properties": [
+   "action",
+   "discover_collect_time",
+   "discover_ping_time",
+   "log_enabled",
+   "log_keep_alive",
+   "log_level",
+   "max_log_file_size",
+   "max_log_files",
+   "name_options",
+   "new_password",
+   "old_password",
+   "recovery_options",
+   "retain_local_configuration",
+   "scout_board_id"
+  ],
+  "required": [
+   "action"
+  ]
+ }
+}

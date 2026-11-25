@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult, type ToolContext } from '../types.js';
 import { confirmDestructiveAction } from '../elicitation.js';
@@ -291,6 +291,6 @@ export const dbCleanupTool = {
     'delete (DESTRUCTIVE: POST {filter:[{id,from,to}]}, id 0 ALARMS, 2 DEVICE_LIST, 3 COMMAND_HISTORY, 4 COMMAND_RESULTS — ' +
     'requires confirm=true and a bounded from/to range). ' +
     'id 1 (ADMIN_LOGS, the activity log) is refused unless the operator sets SCOUT_ALLOW_AUDIT_PURGE=true and the call also passes confirm_audit_purge=true.',
-  inputSchema: zodToJsonSchema(dbCleanupSchema),
+  inputSchema: toInputSchema(dbCleanupSchema),
   execute: dbCleanupExecute,
 };

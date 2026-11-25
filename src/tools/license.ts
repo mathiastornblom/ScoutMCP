@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -122,6 +122,6 @@ export const licenseManageTool = {
     'Actions: get (current license information), ' +
     'check_availability (check if license server is reachable — requires license_server), ' +
     'reconfigure (DESTRUCTIVE: update license server configuration — requires license_server, selfsigned, optional thumbprint).',
-  inputSchema: zodToJsonSchema(licenseManageSchema),
+  inputSchema: toInputSchema(licenseManageSchema),
   execute: licenseManageExecute,
 };

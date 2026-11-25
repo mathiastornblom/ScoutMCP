@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -7,7 +7,7 @@ import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/gu
 const maintenanceWindowManageSchema = z.object({
   action: z.enum(['list', 'create', 'update', 'delete']),
   maintenanceWindowId: z.string().optional().describe('Maintenance window ID (required for update/delete)'),
-  body: z.record(z.unknown()).optional().describe('Maintenance window fields for create/update'),
+  body: z.record(z.string(), z.unknown()).optional().describe('Maintenance window fields for create/update'),
 });
 
 type MaintenanceWindowManageInput = z.infer<typeof maintenanceWindowManageSchema>;
@@ -74,6 +74,6 @@ export const maintenanceWindowManageTool = {
   description:
     'Manage maintenance windows in Scout Board. Maintenance windows define time periods when device updates and commands are allowed. ' +
     'Actions: list, create, update, delete.',
-  inputSchema: zodToJsonSchema(maintenanceWindowManageSchema),
+  inputSchema: toInputSchema(maintenanceWindowManageSchema),
   execute: maintenanceWindowManageExecute,
 };

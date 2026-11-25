@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { assertOuPathUnchanged, type OuMatch } from '../resolver.js';
@@ -59,7 +59,7 @@ const deviceCommandSchema = z.object({
   ),
 
   // --- body: scheduling / inform user ---
-  body: z.record(z.unknown()).optional().describe(
+  body: z.record(z.string(), z.unknown()).optional().describe(
     'Optional JSON body: ouPath/ouId for target=ou (or use ouRef instead), ' +
     'InformUser fields (informUser.title/text/...), and/or Schedule fields',
   ),
@@ -208,7 +208,7 @@ export const deviceCommandTool = {
     'Commands: restart, halt, start, factoryreset, update, updateuefi, custom, predefined, delivery, message. ' +
     'For target=ou, use ouRef to identify the OU by name — it is automatically resolved and injected into the request. ' +
     'DESTRUCTIVE: factoryreset and halt require confirm=true. factoryreset wipes device configuration.',
-  inputSchema: zodToJsonSchema(deviceCommandSchema),
+  inputSchema: toInputSchema(deviceCommandSchema),
   execute: deviceCommandExecute,
 };
 
@@ -363,6 +363,6 @@ export const deviceDiagnosticsTool = {
     'sends log notifications (visible in the MCP client) for each poll step. ' +
     'Manual path: trigger → poll (repeat until HTTP 200) → download_url to get the ZIP link. ' +
     'Binary download must be performed by the caller using the ScoutBoardAuthJWT cookie.',
-  inputSchema: zodToJsonSchema(deviceDiagnosticsSchema),
+  inputSchema: toInputSchema(deviceDiagnosticsSchema),
   execute: deviceDiagnosticsExecute,
 };

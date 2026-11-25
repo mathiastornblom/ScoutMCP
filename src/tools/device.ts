@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { resolveOuRef, invalidateOuCache, resolveOuForWriteGate, assertOuPathUnchanged, type OuMatch } from '../resolver.js';
@@ -210,7 +210,7 @@ export const deviceGetTool = {
     'search_with_config (search + fetch a config section for every matched device in one call — use this instead of search + N×config_get), ' +
     'status (runtime status and activation state), configOrigins (configuration inheritance origins). ' +
     'For search modes, use ouRef to identify the OU by name instead of needing the exact path or ID.',
-  inputSchema: zodToJsonSchema(deviceGetSchema),
+  inputSchema: toInputSchema(deviceGetSchema),
   execute: deviceGetExecute,
 };
 
@@ -448,6 +448,6 @@ export const deviceManageTool = {
     'DESTRUCTIVE: action=delete permanently removes a device from Scout Board. ' +
     'In SCOUT_ENV=test mode, delete is blocked entirely; add and move are restricted to paths under SCOUT_TEST_OU_PATH. ' +
     'Gated by SCOUT_MODE (read-only blocks all writes, dry-run plans without executing).',
-  inputSchema: zodToJsonSchema(deviceManageSchema),
+  inputSchema: toInputSchema(deviceManageSchema),
   execute: deviceManageExecute,
 };

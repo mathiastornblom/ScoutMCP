@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
 
@@ -74,6 +74,6 @@ export const predefinedImagesTool = {
     '[PRIVATE ENDPOINT — not in public OpenAPI spec. Enabled via SCOUT_ENABLE_PRIVATE_ENDPOINTS=true.] ' +
     'List Scout Board predefined OS images and UEFI configurations available for device deployment. ' +
     'Actions: list_images (all predefined OS images), list_uefi (all predefined UEFI configurations).',
-  inputSchema: zodToJsonSchema(predefinedImagesSchema),
+  inputSchema: toInputSchema(predefinedImagesSchema),
   execute: predefinedImagesExecute,
 };

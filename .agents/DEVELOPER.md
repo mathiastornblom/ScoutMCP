@@ -19,7 +19,7 @@ Arkitekten ger dig uppgifter. Du implementerar, commitar och rapporterar status.
 - Node.js 20+, TypeScript strict
 - `@modelcontextprotocol/sdk`
 - `undici` (fetch + Agent för TLS-kontroll)
-- Zod + `zod-to-json-schema`
+- Zod 4 (JSON Schema via `src/schema.ts` `toInputSchema`)
 - `dotenv` (dev), rena env-vars (prod)
 
 ## Scout Board auth-flöde (kritiskt)

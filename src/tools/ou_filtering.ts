@@ -25,7 +25,7 @@
  */
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -251,7 +251,7 @@ const filterEntrySchema = z.object({
     'subnet_address/custom_filter. Requires ou_id and active when adding. The server stores it in the ' +
     'CustomFilter column as the JSON envelope {"conditionString","filterBlocks"} (max 65535 characters in total).',
   ),
-  rule_blocks: z.array(z.record(z.unknown())).optional().describe(
+  rule_blocks: z.array(z.record(z.string(), z.unknown())).optional().describe(
     'Visual-builder blocks stored verbatim next to rule_condition (array of objects; defaults to []). ' +
     'Only valid together with rule_condition.',
   ),
@@ -452,7 +452,7 @@ export const ouFilterManageTool = {
     'modify (update rules by entry_id — optional: subnet_address, custom_filter, active, ou_id, order), ' +
     'delete (remove rules by entry_id). ' +
     'DESTRUCTIVE: modify/delete/set_settings permanently alter OU filter configuration.',
-  inputSchema: zodToJsonSchema(ouFilterManageSchema),
+  inputSchema: toInputSchema(ouFilterManageSchema),
   execute: ouFilterManageExecute,
 };
 
@@ -551,6 +551,6 @@ export const newDeviceOptionsTool = {
     'deactivate_new_devices, allow_dynamic_ou_change). ' +
     'action=set updates one or more settings. ' +
     'DESTRUCTIVE: set permanently changes how newly enrolling devices are handled.',
-  inputSchema: zodToJsonSchema(newDeviceOptionsSchema),
+  inputSchema: toInputSchema(newDeviceOptionsSchema),
   execute: newDeviceOptionsExecute,
 };
