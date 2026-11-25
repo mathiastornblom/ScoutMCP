@@ -32,6 +32,7 @@ import {
   MAX_RULE_ENVELOPE_LENGTH,
 } from '../src/tools/ou_filtering.js';
 import { healthCheckTool, assessHealthBody } from '../src/tools/health.js';
+import { MCP_BUILD } from '../src/version.js';
 import { deviceManageTool } from '../src/tools/device.js';
 import { assessDeviceWriteResult } from '../src/device_result.js';
 
@@ -597,6 +598,8 @@ async function main(): Promise<void> {
       (JSON.parse(text(good)) as { mcpServerVersion?: string }).mcpServerVersion === pkgVersion,
       `mcpServerVersion should be ${pkgVersion}: ${text(good)}`,
     );
+    const mb = (JSON.parse(text(good)) as { mcpBuild?: { build?: string; version?: string } }).mcpBuild;
+    assert(mb?.version === pkgVersion && mb.build === MCP_BUILD.build, `mcpBuild missing/wrong: ${text(good)}`);
   });
 
   console.log('\nDevice delete/move post-condition');
