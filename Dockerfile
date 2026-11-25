@@ -17,8 +17,10 @@ FROM node:20-alpine AS runtime
 # Baked in at build time via --build-arg GIT_SHA=<sha> --build-arg VERSION=<semver>
 ARG GIT_SHA=dev
 ARG VERSION=dev
+ARG BUILD_DATE=unknown
 ENV SCOUT_GIT_SHA=${GIT_SHA}
 ENV SCOUT_VERSION=${VERSION}
+ENV SCOUT_BUILD_DATE=${BUILD_DATE}
 
 WORKDIR /app
 

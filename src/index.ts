@@ -19,7 +19,7 @@ import type { ToolContext, McpTool } from './types.js';
 import { loadSavedConfig, setSessionConfig, clearSessionConfig, resolveConfig } from './session.js';
 import { shouldClearCredentialsAfterAuthFailure } from './startup_auth.js';
 import { getClient } from './client.js';
-import { MCP_SERVER_VERSION } from './version.js';
+import { MCP_BUILD } from './version.js';
 import { eliasTools } from './tools/elias.js';
 import { getEliasWriteTools } from './tools/elias_write.js';
 import { recoverUnknownIntents } from './elias/audit.js';
@@ -204,7 +204,7 @@ const tools: McpTool[] = [
 const toolMap = new Map(tools.map((t) => [t.name, t]));
 
 const server = new Server(
-  { name: 'scout-mcp-server', version: MCP_SERVER_VERSION },
+  { name: 'scout-mcp-server', version: MCP_BUILD.build },
   { capabilities: { tools: {}, resources: {}, prompts: {} } },
 );
 

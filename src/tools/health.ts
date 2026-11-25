@@ -1,4 +1,4 @@
-import { MCP_SERVER_VERSION } from '../version.js';
+import { MCP_SERVER_VERSION, MCP_BUILD } from '../version.js';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
@@ -113,6 +113,7 @@ async function execute(raw: unknown): Promise<McpToolResult> {
       healthState: assessment.state,
       // After the spread so a Scout response can never override our own version.
       mcpServerVersion: MCP_SERVER_VERSION,
+      mcpBuild: MCP_BUILD,
     };
     if (assessment.problems.length > 0) out.healthProblems = assessment.problems;
     if (process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS === 'true') {
@@ -131,7 +132,7 @@ async function execute(raw: unknown): Promise<McpToolResult> {
     return ok(out);
   } catch (err) {
     return fail(
-      `Health check failed (scout-mcp ${MCP_SERVER_VERSION}): ${err instanceof Error ? err.message : String(err)}`,
+      `Health check failed (scout-mcp ${MCP_BUILD.build}): ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 }

@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Build identifier: `health_check` returns `mcpBuild` (`version`, `gitSha`, `builtAt`, `build` e.g. `1.6.0+a1b2c3d`) and MCP `serverInfo.version` is now the build string. Baked in via Docker build args `GIT_SHA`/`BUILD_DATE`; `npm run docker:build` sets them locally.
 - `health_check` now returns `mcpServerVersion` (the version of this MCP server). The version is read from `package.json` (`src/version.ts`) and also feeds MCP `serverInfo`, so the two cannot drift.
 
 ### Fixed

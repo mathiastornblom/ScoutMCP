@@ -231,6 +231,28 @@ No action is taken automatically — the check is informational only.
 
 ---
 
+## Identifying your build
+
+Every image carries a build identifier `<version>+<short git sha>`, e.g. `1.6.0+a1b2c3d`. It is shown in MCP `serverInfo.version` and in the `mcpBuild` object returned by `health_check` (mode `healthcheck`):
+
+```json
+"mcpBuild": { "version": "1.6.0", "gitSha": "a1b2c3d", "builtAt": "2026-11-25T12:00:00Z", "build": "1.6.0+a1b2c3d" }
+```
+
+Build locally with the sha and timestamp baked in (plain `docker compose build` yields `local`/`unknown`):
+
+```bash
+npm run docker:build
+```
+
+Compare with the latest commit on GitHub; if the shas differ, rebuild or pull a newer image:
+
+```bash
+gh api repos/mathiastornblom/ScoutMCP/commits/main --jq '.sha[0:7]'
+```
+
+---
+
 ## Resources
 
 Scout MCP exposes browsable MCP Resources so AI clients can read Scout Board context without consuming tool calls. Resources are built from the live connected server at query time.
