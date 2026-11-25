@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `health_check` now returns `mcpServerVersion` (the version of this MCP server). The version is read from `package.json` (`src/version.ts`) and also feeds MCP `serverInfo`, so the two cannot drift.
+
+### Fixed
+- Startup login no longer blocks the MCP handshake (cold Scout servers can take >30s to log in); credentials are cleared only on explicit rejection (400/401/403). Login timeout is 90s. (PR #42)
+
+### Changed
+- Integration suite aligned with the 1.6.0 gates; run with `SCOUT_MODE=write SCOUT_ALLOWED_OUS=/MCP-Test npm test` (PR #43).
+
 ## 1.6.0 (2026-11-25)
 
 Verified live against Scout Board 26.11.0 (read-only plus `dry-run`; no write was sent). Every change below went through independent Security and QA review (`.agents/`).
