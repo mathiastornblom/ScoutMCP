@@ -265,7 +265,7 @@ export class ScoutClient {
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...(this.dispatcher ? { dispatcher: this.dispatcher as any } : {}),
-    });
+    }, Math.max(this.timeoutMs, LOGIN_TIMEOUT_MS)); // cold Scout server: same headroom as the direct login
 
     if (!exchangeRes.ok) {
       let msg: string;

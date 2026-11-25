@@ -17,7 +17,8 @@ import { fetch } from 'undici';
 import { setProgressReporter, clearProgressReporter, createProgressReporter } from './progress.js';
 import type { ToolContext, McpTool } from './types.js';
 import { loadSavedConfig, setSessionConfig, clearSessionConfig, resolveConfig } from './session.js';
-import { getClient, ScoutError } from './client.js';
+import { shouldClearCredentialsAfterAuthFailure } from './startup_auth.js';
+import { getClient } from './client.js';
 import { MCP_SERVER_VERSION } from './version.js';
 import { eliasTools } from './tools/elias.js';
 import { getEliasWriteTools } from './tools/elias_write.js';
@@ -70,8 +71,15 @@ if (startupConfig) {
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      const status = err instanceof ScoutError ? err.statusCode : undefined;
-      if (status === 400 || status === 401 || status === 403) {
+      // resolveConfig() can throw (e.g. session cleared + invalid env config); that must never crash the
+      // detached task, so treat it as "config unknown" and keep credentials.
+      let currentConfig: ReturnType<typeof resolveConfig> = null;
+      try {
+        currentConfig = resolveConfig();
+      } catch {
+        currentConfig = null;
+      }
+      if (shouldClearCredentialsAfterAuthFailure(err, startupConfig, currentConfig)) {
         process.stderr.write(
           `[scout-mcp] WARNING: Startup auth failed (${msg}). ` +
             'Credentials cleared — use scout_configure to reconnect.\n',
