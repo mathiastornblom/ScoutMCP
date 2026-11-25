@@ -262,11 +262,29 @@ export async function resolveDeviceSourceOus(opName: string, target: string, dev
   const read = devices.length === 1 ? readDeviceOuId(devices[0]) : readDeviceOuIds(devices);
   if (!read.ok) return refuse(read.reason);
   const ids = 'ids' in read ? read.ids : [read.id];
+  const claimed: Array<string | undefined> = 'ids' in read ? read.claimedPaths : [read.claimedPath];
+  let matches: OuMatch[];
   try {
-    return await resolveOuIdsFresh(ids);
+    matches = await resolveOuIdsFresh(ids);
   } catch (err) {
     return refuse(err instanceof Error ? err.message : String(err));
   }
+  // Defense in depth: a row that carries an enriched path must agree with the FRESH tree. Mismatch
+  // means the record is untrustworthy (never fall back to the claimed path).
+  for (let i = 0; i < matches.length; i++) {
+    const cp = claimed[i];
+    if (cp === undefined) continue;
+    let fresh: string;
+    try {
+      fresh = canonicalizeOuPath(matches[i].path);
+    } catch (err) {
+      return refuse(`row ${i + 1}: fresh OU path "${matches[i].path}" is not canonicalisable (${err instanceof Error ? err.message : String(err)})`);
+    }
+    if (fresh !== cp) {
+      return refuse(`row ${i + 1}: claimed OU path "${cp}" disagrees with the fresh OU tree path "${matches[i].path}" for id ${ids[i]}`);
+    }
+  }
+  return matches;
 }
 
 /** Applies the protected/allowed lists and SCOUT_ENV=test scope to each distinct source OU. */
@@ -320,4 +338,165 @@ export async function gateSingleDeviceSource(
   const [ou] = await resolveDeviceSourceOus(opName, target, [single.row]);
   gateSourceOus(opName, [ou]);
   return ou;
+}
+
+
+// ── devicelist / ddg targets ──────────────────────────────────────────────────
+
+/** Max devices in one devicelist command/notification while source-OU checks are active. */
+export const DEVICELIST_MAX = 100;
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** trim, strip ONE surrounding brace pair, lower-case; undefined unless it is then a plain ASCII GUID. */
+export function normalizeClientId(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  let s = v.trim();
+  if (s.startsWith('{') && s.endsWith('}')) s = s.slice(1, -1);
+  s = s.toLowerCase();
+  return GUID_RE.test(s) ? s : undefined;
+}
+
+/**
+ * target=ddg cannot be resolved (the API cannot enumerate dynamic-device-group members): refused
+ * whenever source-OU checks are active, audited, no override. No-op otherwise.
+ */
+export function refuseDdgWhenGated(opName: string): void {
+  if (!sourceOuChecksActive()) return;
+  refuseOuWrite(
+    opName,
+    'ddg',
+    'target=ddg is refused while OU gates are active: dynamic device group membership cannot be enumerated via the API, so its source OUs cannot be checked. Use target=devicelist with explicit clientIds, or target=ou.',
+    'unresolvable-source-ou',
+  );
+}
+
+export interface DeviceListGate {
+  /** Body to send: caller keys sanitised, clientIds rebuilt from the server-returned identifiers. */
+  body: Record<string, unknown>;
+  deviceCount: number;
+  ouCount: number;
+  /** Human summary for confirm prompts. */
+  summary: string;
+  /** Re-reads the OU tree and refuses (audited) if any source OU id no longer has its gated path. Call right before the POST. */
+  recheck(): Promise<void>;
+}
+
+type DeviceReader = { request<T>(method: string, path: string, ...rest: unknown[]): Promise<T> };
+
+/**
+ * Gates a devicelist body: every clientId is looked up (GET /api/v1/device?clientid=), must resolve
+ * to exactly one visible device whose ClientIdentifier equals the request, and all distinct source
+ * OUs go through one fresh tree read and gateSourceOus. ANY failure refuses the whole command
+ * (audited 'unresolvable-source-ou'; test-scope/protected-ou from gateSourceOus). Only call when
+ * sourceOuChecksActive(). Lookups are reads and also run in dry-run.
+ */
+export async function gateDeviceListSources(client: DeviceReader, opName: string, rawBody: Record<string, unknown> | undefined, allowedKeys: readonly string[] = []): Promise<DeviceListGate> {
+  const refuse = (detail: string): never => {
+    auditLog({ opName, target: 'devicelist', result: 'refused', gate: 'unresolvable-source-ou', detail });
+    throw new GuardrailError(
+      `Refusing devicelist: ${detail}. The protected-OU check cannot run against an unverified device list.`,
+      'unresolvable-source-ou',
+    );
+  };
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) return refuse('body with clientIds is required');
+  // Strip every case/separator variant of clientIds from the caller body; exactly one clientIds variant allowed.
+  const idKeys = Object.keys(rawBody).filter((k) => normKey(k) === 'clientids');
+  if (idKeys.length !== 1) return refuse(idKeys.length === 0 ? 'body.clientIds is missing' : 'body carries several clientIds variants');
+  const list = rawBody[idKeys[0]];
+  if (!Array.isArray(list) || list.length === 0) return refuse('body.clientIds must be a non-empty array');
+  if (list.length > DEVICELIST_MAX) return refuse(`body.clientIds has ${list.length} entries (max ${DEVICELIST_MAX})`);
+  const requested = new Map<string, string>(); // normalised ids (de-duplicated across forms)
+  for (let i = 0; i < list.length; i++) {
+    const n = normalizeClientId(list[i]);
+    if (n === undefined) return refuse(`clientIds[${i}] is not an accepted client id (accepted: a GUID like 8-4-4-4-12 hex digits, optionally wrapped in one pair of braces, no surrounding text)`);
+    requested.set(n, n);
+  }
+  const rest: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(rawBody)) {
+    const nk = normKey(k);
+    if (nk === 'clientids') continue;
+    rest[k] = v;
+  }
+  const sb = sanitizeOuBody(rest, { generic: true });
+  if (sb.ouRefs.length > 0) return refuse('body carries OU keys, which devicelist does not accept');
+  // Allowlist (openapi request schema of this endpoint): any other key is refused, never forwarded.
+  const unknown = Object.keys(sb.body).filter((k) => !allowedKeys.includes(k));
+  if (unknown.length > 0) return refuse(`body carries key(s) not in the documented request schema (${unknown.slice(0, 5).join(', ')}); allowed: ${allowedKeys.join(', ') || 'clientIds only'}`);
+
+  const entries = [...requested.entries()];
+  const rows: DeviceRecord[] = new Array(entries.length);
+  let next = 0;
+  let failure: string | undefined;
+  const worker = async (): Promise<void> => {
+    while (failure === undefined) {
+      const i = next++;
+      if (i >= entries.length) return;
+      const [norm] = entries[i];
+      try {
+        const data = await client.request<unknown>('GET', `/api/v1/device${buildQuery({ clientid: norm.toUpperCase() })}`);
+        const single = parseSingleDevice(data);
+        if (!single.ok) { failure = `lookup of device ${i + 1}: ${single.reason}`; return; }
+        if (normalizeClientId(single.row['ClientIdentifier']) !== norm) {
+          failure = `lookup of device ${i + 1} returned a different ClientIdentifier`;
+          return;
+        }
+        rows[i] = single.row;
+      } catch (err) {
+        failure = `lookup of device ${i + 1} failed: ${err instanceof Error ? err.message : String(err)}`;
+        return;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(5, entries.length) }, worker));
+  if (failure !== undefined) return refuse(failure);
+
+  const sources = await resolveDeviceSourceOus(opName, 'devicelist', rows);
+  gateSourceOus(opName, sources);
+  const distinct = new Map<number, string>();
+  for (const s of sources) distinct.set(s.ouid, s.path);
+  auditLog({
+    opName, target: 'devicelist', result: 'allowed', gate: null,
+    detail: `${rows.length} device(s) in ${distinct.size} source OU(s)`,
+  });
+  return {
+    // Rebuilt from the SERVER-returned identifiers in openapi's example form: {UPPERCASE-GUID}.
+    body: { ...sb.body, clientIds: rows.map((r) => `{${(normalizeClientId(r['ClientIdentifier']) as string).toUpperCase()}}`) },
+    deviceCount: rows.length,
+    ouCount: distinct.size,
+    summary: `${rows.length} device(s) in ${distinct.size} OU(s)`,
+    async recheck(): Promise<void> {
+      let fresh: OuMatch[];
+      try {
+        fresh = await resolveOuIdsFresh([...distinct.keys()]);
+      } catch (err) {
+        return refuse(`source OUs could not be re-read before the write: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      for (const m of fresh) {
+        if (distinct.get(m.ouid) !== m.path) return refuse(`source OU ${m.ouid} changed during the operation; retry`);
+      }
+    },
+  };
+}
+
+
+/**
+ * devicerelocation: pulls body.destinationOU (any case/separator variant) out of the caller body, requires
+ * it (an omitted destination means the server default OU, which escapes the allow-list), and gates it as a
+ * write target. Callers send ONLY `destination.ouid` as destinationOU. Call only when sourceOuChecksActive().
+ */
+export async function gateRelocationDestination(
+  opName: string,
+  raw: Record<string, unknown> | undefined,
+): Promise<{ rest: Record<string, unknown> | undefined; destination: OuMatch }> {
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const keys = Object.keys(src).filter((k) => normKey(k) === 'destinationou');
+  if (keys.length === 0) refuseOuWrite(opName, 'relocation', 'devicerelocation requires destinationOU while OU gates are active (an omitted destination means the server default OU, which cannot be checked).');
+  if (keys.length > 1) refuseOuWrite(opName, 'relocation', 'body carries several destinationOU variants');
+  const v = src[keys[0]];
+  if (!(typeof v === 'number' || (typeof v === 'string' && v.trim() !== ''))) refuseOuWrite(opName, 'relocation', 'destinationOU must be an OU id or path');
+  const destination = await gateOuWrite(opName, [v as string | number], 'destination OU');
+  if (!destination) throw new Error('destination OU unresolved');
+  const rest: Record<string, unknown> = {};
+  for (const [k, val] of Object.entries(src)) if (k !== keys[0]) rest[k] = val;
+  return { rest, destination };
 }

@@ -154,9 +154,10 @@ Subtree-affecting actions (`ou_manage` rename, delete, move of the moved OU, con
 
 `move_devices_by_filter` and `bulk_command` re-check the gated OU path before every batch of 25 devices and stop (status `aborted`) if it changed; the confirm prompt names the resolved destination path.
 
+**Fail-closed while a gate is active** (`SCOUT_PROTECTED_OUS`, `SCOUT_ALLOWED_OUS` or `SCOUT_ENV=test`; with none active behaviour is unchanged): `device_command` and `notification_manage` with `target=devicelist` look up every `clientId` (GUID, max 100, de-duplicated; any failed, ambiguous or mismatching lookup refuses the whole command), gate every distinct source OU, forward only the server-returned identifiers, refuse OU keys in the body, and re-read the OU tree right before the write; The body is rebuilt from the endpoint's documented keys (unknown keys are refused). `devicerelocation` (set) with `target=device|devicelist|ou` requires `destinationOU` (an omitted one means the server default OU) and gates it as a write target. `target=ddg` is refused (dynamic-group members cannot be enumerated via the API), and `schedule_manage` `update`/`delete` are refused (the API cannot map a `scheduleId` to its OU); use the Scout Board UI or unset the gates for those. Device rows carrying enriched `_GroupIDPath`/`_OUIDPath` keys are refused if the claimed path disagrees with the fresh OU tree.
+
 **Known gaps (protected/allowed-OU gate coverage).** These writes cannot be tied to one OU from their input, so the lists do NOT apply to them; use `SCOUT_MODE=read-only` or server-side OU rights:
-- `device_command` / `notification_manage` with `target=devicelist|ddg` (a device list or dynamic group is not tied to one OU).
-- `schedule_manage` `update`/`delete` (a `scheduleId` does not identify its OU) and `ou_filter_manage` `set_settings` (global).
+- `ou_filter_manage` `set_settings` (global).
 - Base/global scope: `app_manage` `scope=base`, labels, rules, predefined commands/images/paths, license, maintenance windows, server instances, system settings, `db_cleanup`, `admin_manage` add/delete.
 - `ou_filter_manage` modify/delete look up the entry's current OU in `GET /api/v1/oufilter` (fields `EntryId`/`OUID`, shape not verified live) only when a list or `SCOUT_ENV=test` is active, and refuse if it cannot be determined.
 

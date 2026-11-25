@@ -3,6 +3,21 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
+import { sourceOuChecksActive, refuseOuWrite } from '../safety/ou_gate.js';
+
+/**
+ * update/delete take a bare scheduleId and the API has no get-by-id or owner lookup, so a job cannot be
+ * mapped to an OU. While source-OU checks are active (lists or SCOUT_ENV=test) they are refused (audited,
+ * fail closed, no extra GETs); with no gate active behaviour is unchanged.
+ */
+function refuseScheduleWriteWhenGated(opName: string, scheduleId: number): void {
+  if (!sourceOuChecksActive()) return;
+  refuseOuWrite(
+    opName,
+    `schedule:${scheduleId}`,
+    'schedule update/delete is refused while OU gates are active: the Scout API cannot map a schedule id to its OU/devices, so the job cannot be checked. Use the Scout Board UI or unset the gates.',
+  );
+}
 
 const scheduleManageSchema = z.object({
   action: z.enum(['get_ou', 'get_device', 'update', 'delete']).describe(
@@ -43,6 +58,7 @@ async function scheduleManageExecute(raw: unknown): Promise<McpToolResult> {
       case 'update': {
         if (input.scheduleId === undefined) return fail('scheduleId is required for action=update');
         const modeCheck = checkMutationAllowed('schedule_manage(update)');
+        refuseScheduleWriteWhenGated('schedule_manage(update)', input.scheduleId);
         if (!modeCheck.proceed) {
           return ok({ status: 'dry_run', action: input.action, scheduleId: input.scheduleId, message: modeCheck.dryRunNotice });
         }
@@ -57,6 +73,7 @@ async function scheduleManageExecute(raw: unknown): Promise<McpToolResult> {
       case 'delete': {
         if (input.scheduleId === undefined) return fail('scheduleId is required for action=delete');
         const modeCheck = checkMutationAllowed('schedule_manage(delete)');
+        refuseScheduleWriteWhenGated('schedule_manage(delete)', input.scheduleId);
         if (!modeCheck.proceed) {
           return ok({ status: 'dry_run', action: input.action, scheduleId: input.scheduleId, message: modeCheck.dryRunNotice });
         }
