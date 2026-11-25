@@ -39,6 +39,8 @@
  * and workflow.ts call `extractSearchDevices()` from here.
  */
 
+import { canonicalizeOuPath } from './ou_path.js';
+
 export type DeviceRecord = Record<string, unknown>;
 
 /**
@@ -166,10 +168,56 @@ export function deviceName(d: DeviceRecord): string | undefined {
 
 const OUID_KEYS = ['OUID', 'ouId', 'OuId'] as const;
 
-export type DeviceOuIdResult = { ok: true; id: number } | { ok: false; reason: string };
+export type DeviceOuIdResult = { ok: true; id: number; claimedPath?: string } | { ok: false; reason: string };
 
 function strictOuId(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : undefined;
+}
+
+/** Enricher-added companion keys per id key (own properties only; see src/enricher.ts). */
+const CLAIM_KEYS: Record<string, { path: string; name: string }> = {
+  OUID: { path: '_OUIDPath', name: '_OUIDName' },
+  ouId: { path: '_ouIdPath', name: '_ouIdName' },
+  OuId: { path: '_OuIdPath', name: '_OuIdName' },
+  GroupID: { path: '_GroupIDPath', name: '_GroupIDName' },
+};
+
+function hasOwn(d: DeviceRecord, k: string): boolean {
+  return Object.prototype.hasOwnProperty.call(d, k) && d[k] !== undefined;
+}
+
+/**
+ * Pure shape check of the OPTIONAL enriched path/name keys (no resolver import). Present keys must be
+ * well-formed and consistent; the claimed path is returned so resolveDeviceSourceOus can compare it
+ * with the fresh OU tree. Absent keys are normal and change nothing. Never used as a fallback id source.
+ */
+function readClaimedPath(d: DeviceRecord, idKeys: string[]): { ok: true; claimedPath?: string } | { ok: false; reason: string } {
+  const claimed: string[] = [];
+  for (const [idKey, keys] of Object.entries(CLAIM_KEYS)) {
+    const pathPresent = hasOwn(d, keys.path);
+    const namePresent = hasOwn(d, keys.name);
+    if (!pathPresent && !namePresent) continue;
+    if (!idKeys.includes(idKey)) return { ok: false, reason: `${pathPresent ? keys.path : keys.name} is present without ${idKey}` };
+    if (!pathPresent) return { ok: false, reason: `${keys.name} is present without ${keys.path}` };
+    const raw = d[keys.path];
+    if (typeof raw !== 'string' || raw.trim() === '') return { ok: false, reason: `${keys.path} is not a non-empty string` };
+    let canon: string;
+    try {
+      canon = canonicalizeOuPath(raw);
+    } catch (err) {
+      return { ok: false, reason: `${keys.path} is not a valid OU path (${err instanceof Error ? err.message : String(err)})` };
+    }
+    if (namePresent) {
+      const nm = d[keys.name];
+      const last = canon.split('/').filter((x) => x !== '').pop();
+      if (typeof nm !== 'string' || last === undefined || nm.normalize('NFC').toLowerCase() !== last) {
+        return { ok: false, reason: `${keys.name} does not match the last segment of ${keys.path}` };
+      }
+    }
+    claimed.push(canon);
+  }
+  if (new Set(claimed).size > 1) return { ok: false, reason: `claimed OU paths disagree (${claimed.join(', ')})` };
+  return { ok: true, claimedPath: claimed[0] };
 }
 
 /**
@@ -180,13 +228,14 @@ function strictOuId(v: unknown): number | undefined {
  *
  * Strict and fail-closed: every present id key (OUID/ouId/OuId/GroupID) must be a non-negative
  * integer number (no strings, floats, negatives), and all present keys must agree. This function
- * only validates the VALUE; callers must additionally confirm the id exists in a FRESH parsed OU
- * tree (see resolveDeviceSourceOus in safety/ou_gate.ts) before trusting it.
+ * only validates the VALUE (and the shape of optional enriched _*Path/_*Name keys, returned as
+ * `claimedPath`); callers must additionally confirm the id exists in a FRESH parsed OU
+ * tree and that claimedPath equals that tree's path (see resolveDeviceSourceOus in safety/ou_gate.ts).
  */
 export function readDeviceOuId(d: DeviceRecord): DeviceOuIdResult {
   const found: Array<[string, unknown]> = [];
   for (const k of [...OUID_KEYS, 'GroupID']) {
-    if (Object.prototype.hasOwnProperty.call(d, k) && d[k] !== undefined) found.push([k, d[k]]);
+    if (hasOwn(d, k)) found.push([k, d[k]]);
   }
   if (found.length === 0) return { ok: false, reason: 'device record has no OUID/GroupID field' };
   const ids: number[] = [];
@@ -198,7 +247,9 @@ export function readDeviceOuId(d: DeviceRecord): DeviceOuIdResult {
   if (new Set(ids).size > 1) {
     return { ok: false, reason: `OU id fields disagree (${found.map(([k, v]) => `${k}=${String(v)}`).join(', ')})` };
   }
-  return { ok: true, id: ids[0] };
+  const claim = readClaimedPath(d, found.map(([k]) => k));
+  if (!claim.ok) return { ok: false, reason: claim.reason };
+  return { ok: true, id: ids[0], ...(claim.claimedPath !== undefined ? { claimedPath: claim.claimedPath } : {}) };
 }
 
 /** Which OU-id keys a row carries, as a stable signature (rows of one search must share it). */
@@ -210,10 +261,13 @@ function ouIdShape(d: DeviceRecord): string {
  * Reads the OU id of every row of one search result. Refuses (ok:false) when any row is invalid or
  * when rows disagree on which id fields they carry (a mixed-shape result is not trusted).
  */
-export function readDeviceOuIds(devices: DeviceRecord[]): { ok: true; ids: number[] } | { ok: false; reason: string } {
-  if (devices.length === 0) return { ok: true, ids: [] };
+export function readDeviceOuIds(
+  devices: DeviceRecord[],
+): { ok: true; ids: number[]; claimedPaths: Array<string | undefined> } | { ok: false; reason: string } {
+  if (devices.length === 0) return { ok: true, ids: [], claimedPaths: [] };
   const shape = ouIdShape(devices[0]);
   const ids: number[] = [];
+  const claimedPaths: Array<string | undefined> = [];
   for (let i = 0; i < devices.length; i++) {
     if (ouIdShape(devices[i]) !== shape) {
       return { ok: false, reason: `device rows disagree on shape (row 1 has [${shape}], row ${i + 1} has [${ouIdShape(devices[i])}])` };
@@ -221,8 +275,9 @@ export function readDeviceOuIds(devices: DeviceRecord[]): { ok: true; ids: numbe
     const r = readDeviceOuId(devices[i]);
     if (!r.ok) return { ok: false, reason: `row ${i + 1}: ${r.reason}` };
     ids.push(r.id);
+    claimedPaths.push(r.claimedPath);
   }
-  return { ok: true, ids };
+  return { ok: true, ids, claimedPaths };
 }
 
 /** Value-validated OU id of a record, or undefined (kept for callers that only need a hint). */

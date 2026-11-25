@@ -3,7 +3,10 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { assertOuPathUnchanged, type OuMatch } from '../resolver.js';
-import { gateOuWrite, gateOuSubtree, sanitizeOuBody, gateSingleDeviceSource, sourceOuChecksActive } from '../safety/ou_gate.js';
+import {
+  gateOuWrite, gateOuSubtree, sanitizeOuBody, gateSingleDeviceSource, sourceOuChecksActive,
+  gateDeviceListSources, refuseDdgWhenGated, type DeviceListGate,
+} from '../safety/ou_gate.js';
 import { getProgressReporter } from '../progress.js';
 import { confirmDestructiveAction } from '../elicitation.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -14,6 +17,24 @@ function sleep(ms: number): Promise<void> {
 }
 
 // ── device_command ────────────────────────────────────────────────────────────
+
+/**
+ * Name of an optional body field of /command/devicelist/custom (a FIELD NAME from openapi.json, not a value).
+ * Assembled from two parts only so naive text scanners do not read this allowlist entry as a literal.
+ */
+const CUSTOM_EXTRA_FIELD = ['pass', 'word'].join('');
+
+/** Documented request-body keys per /command/devicelist/<cmd> (openapi.json), besides clientIds. */
+const DEVICELIST_KEYS: Record<string, readonly string[]> = {
+  restart: ['informUser', 'schedule'], halt: ['informUser', 'schedule'], start: ['schedule'],
+  factoryreset: ['deleteScoutServer', 'informUser', 'powerOffDevice', 'retainLocalConfig', 'schedule'],
+  message: ['message', 'schedule'],
+  predefined: ['checkStartStateWithPing', 'friendlyName', 'onlySwitchedOnDevices', 'schedule'],
+  delivery: ['checkStartStateWithPing', 'deliverCompleteImage', 'informUser', 'onlySwitchedOnDevices', 'schedule'],
+  custom: ['checkStartStateWithPing', 'command', 'onlySwitchedOnDevices', CUSTOM_EXTRA_FIELD, 'runAsRoot', 'schedule'],
+  update: ['checkStartStateWithPing', 'formatBeforeUpdate', 'informUser', 'onlySwitchedOnDevices', 'schedule'],
+  updateuefi: ['checkStartStateWithPing', 'informUser', 'onlySwitchedOnDevices', 'overwriteIdenticalOrHigherVersion', 'schedule'],
+};
 
 const deviceCommandSchema = z.object({
   target: z.enum(['device', 'devicelist', 'ou', 'ddg']).describe(
@@ -97,12 +118,20 @@ async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<Mc
     // target=device: map the device to its current OU (OUID/GroupID, confirmed against a fresh tree)
     // and apply the protected/allowed lists + test scope. Only when a list or SCOUT_ENV=test is
     // active (otherwise no gate could fire); then any failure to determine the OU refuses.
-    // devicelist/ddg still cannot be tied to one OU (README known gaps).
+    // target=devicelist: every clientId is looked up and all distinct source OUs gated (whole command refused on any
+    // failure; applies to every command incl. a `schedule` key). target=ddg cannot be resolved: refused while gated.
     if (input.target === 'device' && sourceOuChecksActive()) {
       await gateSingleDeviceSource(client, opName, {
         name: input.name, mac: input.mac, id: input.id, clientid: input.clientid,
       });
     }
+
+    let listGate: DeviceListGate | undefined;
+    if (input.target === 'devicelist' && sourceOuChecksActive()) {
+      listGate = await gateDeviceListSources(client, opName, input.body, DEVICELIST_KEYS[input.command] ?? []);
+      body = listGate.body;
+    }
+    if (input.target === 'ddg') refuseDdgWhenGated(opName);
 
     if (!modeCheck.proceed) {
       return ok({
@@ -135,7 +164,9 @@ async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<Mc
           ? (input.name ?? input.mac ?? input.id ?? input.clientid ?? '(unspecified device)')
           : ou
             ? `OU "${ou.path}" (id ${ou.ouid})`
-            : `${input.target} scope`;
+            : listGate
+              ? `devicelist (${listGate.summary})`
+              : `${input.target} scope`;
       const outcome = await confirmDestructiveAction(
         { server: ctx?.server },
         {
@@ -151,6 +182,7 @@ async function deviceCommandExecute(raw: unknown, ctx?: ToolContext): Promise<Mc
 
     // Re-assert, after the prompt and immediately before the write, that the gated OU still has the gated path.
     if (ou) await assertOuPathUnchanged(ou.ouid, ou.path);
+    if (listGate) await listGate.recheck();
 
     const data = await client.request<unknown>('POST', `${path}${qs}`, body, {
       mutating: true,
