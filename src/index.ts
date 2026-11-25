@@ -18,6 +18,7 @@ import { setProgressReporter, clearProgressReporter, createProgressReporter } fr
 import type { ToolContext, McpTool } from './types.js';
 import { loadSavedConfig, setSessionConfig, clearSessionConfig, resolveConfig } from './session.js';
 import { getClient, ScoutError } from './client.js';
+import { MCP_SERVER_VERSION } from './version.js';
 import { eliasTools } from './tools/elias.js';
 import { getEliasWriteTools } from './tools/elias_write.js';
 import { recoverUnknownIntents } from './elias/audit.js';
@@ -195,7 +196,7 @@ const tools: McpTool[] = [
 const toolMap = new Map(tools.map((t) => [t.name, t]));
 
 const server = new Server(
-  { name: 'scout-mcp-server', version: '1.6.0' },
+  { name: 'scout-mcp-server', version: MCP_SERVER_VERSION },
   { capabilities: { tools: {}, resources: {}, prompts: {} } },
 );
 

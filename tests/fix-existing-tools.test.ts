@@ -591,6 +591,12 @@ async function main(): Promise<void> {
     apiReply = () => ({ status: 200, body: { message: 'OK', response: { scoutDBLayer: { status: { result: 0, msg: 'available' } } } } });
     const good = await healthCheckTool.execute({ mode: 'healthcheck', capabilities: false });
     assert(!good.isError && text(good).includes('"healthState": "ok"'), text(good));
+    // MCP server version is reported and equals package.json (single source of truth).
+    const pkgVersion = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8')) as { version: string }).version;
+    assert(
+      (JSON.parse(text(good)) as { mcpServerVersion?: string }).mcpServerVersion === pkgVersion,
+      `mcpServerVersion should be ${pkgVersion}: ${text(good)}`,
+    );
   });
 
   console.log('\nDevice delete/move post-condition');

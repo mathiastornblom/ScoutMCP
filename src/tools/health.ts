@@ -1,3 +1,4 @@
+import { MCP_SERVER_VERSION } from '../version.js';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { getClient } from '../client.js';
@@ -107,7 +108,12 @@ async function execute(raw: unknown): Promise<McpToolResult> {
       // HTTP 200 with the failure in the body — report it as an error, not as a healthy server.
       return fail(`Health check reports an error (HTTP 200, failure in body): ${assessment.problems.join('; ')}`);
     }
-    const out: Record<string, unknown> = { ...data, healthState: assessment.state };
+    const out: Record<string, unknown> = {
+      ...data,
+      healthState: assessment.state,
+      // After the spread so a Scout response can never override our own version.
+      mcpServerVersion: MCP_SERVER_VERSION,
+    };
     if (assessment.problems.length > 0) out.healthProblems = assessment.problems;
     if (process.env.SCOUT_ENABLE_PRIVATE_ENDPOINTS === 'true') {
       out.systemcheckElias = await fetchEliasSystemcheck();
@@ -124,7 +130,9 @@ async function execute(raw: unknown): Promise<McpToolResult> {
     }
     return ok(out);
   } catch (err) {
-    return fail(`Health check failed: ${err instanceof Error ? err.message : String(err)}`);
+    return fail(
+      `Health check failed (scout-mcp ${MCP_SERVER_VERSION}): ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
