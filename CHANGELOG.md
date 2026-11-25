@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-_Nothing yet._
+### Security / Dependencies
+- **Zod 4 migration** (`zod` ^3.22 -> ^4.6, supersedes Dependabot PR #34; resolves GHSA-mrhx-c7xc-m3w5). `zod-to-json-schema` is removed because it does not support Zod 4 (it would silently emit empty tool input schemas). Tool input schemas are now produced by `toInputSchema()` in `src/schema.ts` (`z.toJSONSchema`, draft-7, input side), normalised to the previous shape (`additionalProperties: false`, no `$schema`, no implicit safe-integer bounds).
+- `z.string().uuid()` -> `z.guid()` for label/rule ids: Zod 4's `uuid()` enforces the RFC version/variant nibbles, which Scout GUIDs do not always satisfy.
+- `z.record(z.unknown())` -> `z.record(z.string(), z.unknown())` (single-argument form removed in Zod 4).
+- New `tests/schema-snapshot.test.ts` (in `test:unit`) checks every tool's property names, `required`, enums and descriptions against `tests/fixtures/tool-schemas.json`, generated from the pre-migration output.
+- Visible to MCP clients: validation error text now uses Zod 4 wording (e.g. "Invalid input: expected string, received undefined"). Some failures report the same path twice, and `.int()` now rejects unsafe integers (beyond 2^53) that Zod 3 accepted.
 
 ## 1.6.0 (2026-11-25)
 

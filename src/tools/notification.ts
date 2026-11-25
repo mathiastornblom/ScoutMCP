@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -36,7 +36,7 @@ const notificationManageSchema = z.object({
   ouId: z.number().int().optional().describe('OU ID (target=ou)'),
 
   // Body for devicelist/ddg targets and delivery notifications
-  body: z.record(z.unknown()).optional().describe(
+  body: z.record(z.string(), z.unknown()).optional().describe(
     'Request body: for target=devicelist/ddg contains device list; for delivery type contains delivery options',
   ),
 });
@@ -135,6 +135,6 @@ export const notificationManageTool = {
     'Set or delete notifications in Scout Board. Notifications trigger events on devices when configuration changes, firmware updates, deliveries, or device relocations occur. ' +
     'Targets: device (query params), devicelist/ddg (body with IDs), ou (query params). ' +
     'Types: configurationupdate, delivery, updateuefi, updatefirmware, devicerelocation.',
-  inputSchema: zodToJsonSchema(notificationManageSchema),
+  inputSchema: toInputSchema(notificationManageSchema),
   execute: notificationManageExecute,
 };

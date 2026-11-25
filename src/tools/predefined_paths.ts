@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -122,6 +122,6 @@ export const predefinedPathsTool = {
     'Actions: list (all predefined paths), ' +
     'add (DESTRUCTIVE: add new paths via paths array — each with Path and optional Outdated flag), ' +
     'delete (DESTRUCTIVE: remove paths by entry_ids array of EntryId numbers).',
-  inputSchema: zodToJsonSchema(predefinedPathsSchema),
+  inputSchema: toInputSchema(predefinedPathsSchema),
   execute: predefinedPathsExecute,
 };

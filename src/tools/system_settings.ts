@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
 import {
@@ -86,7 +86,7 @@ const systemSettingsSchema = z.object({
 
   // set_device_name_options field
   name_options: z
-    .record(z.unknown())
+    .record(z.string(), z.unknown())
     .optional()
     .describe(
       'Object containing device naming option fields to update (set_device_name_options). ' +
@@ -95,7 +95,7 @@ const systemSettingsSchema = z.object({
 
   // set_recovery_settings field
   recovery_options: z
-    .record(z.unknown())
+    .record(z.string(), z.unknown())
     .optional()
     .describe(
       'Object containing recovery configuration fields to update (set_recovery_settings). ' +
@@ -307,6 +307,6 @@ export const systemSettingsTool = {
     'get_device_name_options/set_device_name_options (device naming configuration — call get first to see field names), ' +
     'get_recovery_settings/set_recovery_settings (recovery configuration — call get first to see field names), ' +
     'set_device_password (DESTRUCTIVE: change device password — requires old_password, new_password, scout_board_id).',
-  inputSchema: zodToJsonSchema(systemSettingsSchema),
+  inputSchema: toInputSchema(systemSettingsSchema),
   execute: systemSettingsExecute,
 };

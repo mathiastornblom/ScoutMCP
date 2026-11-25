@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
 
@@ -179,6 +179,6 @@ export const systemInfoTool = {
     'recovery_settings (recovery configuration), db_diags (database layer diagnostics), ' +
     'system_check (run system health check), tree_filter (search OU tree by search_value), ' +
     'missed_notifications (fetch missed notifications), auth_user (current authenticated user).',
-  inputSchema: zodToJsonSchema(systemInfoSchema),
+  inputSchema: toInputSchema(systemInfoSchema),
   execute: systemInfoExecute,
 };

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { type McpToolResult, ok, fail } from '../types.js';
 import {
   setSessionConfig,
@@ -207,6 +207,6 @@ export const configureTool = {
     'Citrix Cloud service-principal auth). ' +
     'Pass save=true to persist to ~/.scout-mcp.json for future sessions. ' +
     'Use action=status to inspect current config, action=clear to remove credentials.',
-  inputSchema: zodToJsonSchema(inputSchema),
+  inputSchema: toInputSchema(inputSchema),
   execute,
 };

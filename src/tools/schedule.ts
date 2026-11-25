@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -34,7 +34,7 @@ const scheduleManageSchema = z.object({
   clientid: z.string().optional(),
   // Schedule operations (update/delete)
   scheduleId: z.number().int().optional().describe('Schedule job ID (required for update/delete)'),
-  body: z.record(z.unknown()).optional().describe('Schedule update payload (action=update)'),
+  body: z.record(z.string(), z.unknown()).optional().describe('Schedule update payload (action=update)'),
 });
 
 type ScheduleManageInput = z.infer<typeof scheduleManageSchema>;
@@ -97,6 +97,6 @@ export const scheduleManageTool = {
   description:
     'View and manage scheduled commands in Scout Board. ' +
     'Actions: get_ou (schedules for an OU), get_device (schedules for a device), update (modify schedule), delete (cancel schedule).',
-  inputSchema: zodToJsonSchema(scheduleManageSchema),
+  inputSchema: toInputSchema(scheduleManageSchema),
   execute: scheduleManageExecute,
 };

@@ -8,7 +8,7 @@
  */
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { readDeviceOuId, parseSingleDevice } from '../devices.js';
@@ -284,7 +284,7 @@ export const configResolveTool = {
     'overridesValue, and isExplicitDefault (computed against the eLux config schema). ' +
     'Read-only — no writes. Pass render="table" for an ASCII gpresult-style table. ' +
     'Restrict to one section (e.g. "Security") for faster resolution; omit to resolve all schema sections.',
-  inputSchema: zodToJsonSchema(configResolveSchema),
+  inputSchema: toInputSchema(configResolveSchema),
   execute: configResolveExecute,
 };
 

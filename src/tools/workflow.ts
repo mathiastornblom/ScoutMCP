@@ -15,7 +15,7 @@
  */
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { confirmDestructiveAction, supportsElicitation } from '../elicitation.js';
@@ -279,7 +279,7 @@ export const onboardBranchTool = {
     'Provide parentOuPath or parentOuId to set the parent. ' +
     'If subnetCidr is given, a filter rule is added automatically (requires SCOUT_ENABLE_PRIVATE_ENDPOINTS=true). ' +
     'Gated by SCOUT_MODE (read-only blocks all writes, dry-run plans without executing).',
-  inputSchema: zodToJsonSchema(onboardBranchSchema),
+  inputSchema: toInputSchema(onboardBranchSchema),
   execute: onboardBranchExecute,
 };
 
@@ -494,7 +494,7 @@ export const moveDevicesByFilterTool = {
     'DESTRUCTIVE: moves devices — requires confirm=true (unless dryRun=true). ' +
     'Gated by SCOUT_MODE (read-only blocks all writes, dry-run plans without executing) and ' +
     'SCOUT_MAX_BLAST_RADIUS (default 25, hard ceiling 500) — pass overrideBlastRadius=true to exceed the cap up to the ceiling.',
-  inputSchema: zodToJsonSchema(moveDevicesByFilterSchema),
+  inputSchema: toInputSchema(moveDevicesByFilterSchema),
   execute: moveDevicesByFilterExecute,
 };
 
@@ -515,7 +515,7 @@ const bulkCommandSchema = z.object({
   command: z
     .enum(['restart', 'halt', 'start', 'factoryreset', 'update', 'updateuefi', 'custom', 'predefined', 'delivery', 'message'])
     .describe('Command to send to each matched device'),
-  commandBody: z.record(z.unknown()).optional().describe(
+  commandBody: z.record(z.string(), z.unknown()).optional().describe(
     'Optional body fields for the command (InformUser, Schedule, custom payload, etc.)',
   ),
 
@@ -708,6 +708,6 @@ export const bulkCommandTool = {
     'DESTRUCTIVE: factoryreset and halt are irreversible — always require confirm=true. ' +
     'Gated by SCOUT_MODE (read-only blocks all writes, dry-run plans without executing) and ' +
     'SCOUT_MAX_BLAST_RADIUS (default 25, hard ceiling 500) — pass overrideBlastRadius=true to exceed the cap up to the ceiling.',
-  inputSchema: zodToJsonSchema(bulkCommandSchema),
+  inputSchema: toInputSchema(bulkCommandSchema),
   execute: bulkCommandExecute,
 };

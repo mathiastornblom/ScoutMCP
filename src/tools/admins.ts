@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult, type ToolContext } from '../types.js';
 import { confirmDestructiveAction } from '../elicitation.js';
@@ -403,6 +403,6 @@ export const adminManageTool = {
     'update_admin (POST /admins/modify; admin_id + root_ou/root_ou_fmd/menu_rights/base_rights; main entry only), ' +
     'delete_admin (DELETE /admins?adminName=; admin_name + confirm=true). ' +
     'Widening ELIAS rights needs a recent interactive sign-in (step-up) that an API token cannot provide; the server will refuse.',
-  inputSchema: zodToJsonSchema(adminManageSchema),
+  inputSchema: toInputSchema(adminManageSchema),
   execute: adminManageExecute,
 };

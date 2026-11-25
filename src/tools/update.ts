@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { fetch } from 'undici';
 import { type McpToolResult, ok, fail } from '../types.js';
 
@@ -97,6 +97,6 @@ export const updateTool = {
     'and get instructions for applying the update. ' +
     'Use action=check to compare the running image version against the latest commit on main. ' +
     'Use action=apply to get the exact docker pull command needed to update.',
-  inputSchema: zodToJsonSchema(inputSchema),
+  inputSchema: toInputSchema(inputSchema),
   execute,
 };

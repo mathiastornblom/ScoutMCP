@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -39,7 +39,7 @@ async function appListExecute(raw: unknown): Promise<McpToolResult> {
 export const appListTool = {
   name: 'app_list',
   description: 'List applications from Scout Board. scope=base for global apps, scope=ou for OU-scoped apps (requires ouPath or ouId).',
-  inputSchema: zodToJsonSchema(appListSchema),
+  inputSchema: toInputSchema(appListSchema),
   execute: appListExecute,
 };
 
@@ -54,7 +54,7 @@ const appManageSchema = z.object({
   appId: z.number().int().optional().describe('Application ID (required for delete)'),
   ouPath: z.string().optional().describe('OU path for ou-scoped actions'),
   ouId: z.number().int().optional().describe('OU ID for ou-scoped actions'),
-  body: z.record(z.unknown()).optional().describe('Request body for create/copy/move/set_inheritance'),
+  body: z.record(z.string(), z.unknown()).optional().describe('Request body for create/copy/move/set_inheritance'),
 });
 
 type AppManageInput = z.infer<typeof appManageSchema>;
@@ -177,6 +177,6 @@ export const appManageTool = {
     'Create, delete, copy, move, or configure inheritance for Scout Board applications. ' +
     'DESTRUCTIVE: action=delete permanently removes an application. ' +
     'OU-scoped writes (scope=ou, copy/move, set_inheritance) resolve the OU from the live tree and are checked against SCOUT_PROTECTED_OUS / SCOUT_ALLOWED_OUS; only the resolved OU id is sent.',
-  inputSchema: zodToJsonSchema(appManageSchema),
+  inputSchema: toInputSchema(appManageSchema),
   execute: appManageExecute,
 };

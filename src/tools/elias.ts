@@ -18,7 +18,7 @@
  */
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient, ScoutError, PRIVATE_401_HINT, sanitizeServerText } from '../client.js';
 import { requireCapability } from '../compat/detect.js';
 import { ok, fail, type McpTool, type McpToolResult } from '../types.js';
@@ -288,7 +288,7 @@ export const eliasHealthTool: McpTool = {
   description:
     TOOL_TAG + 'Check whether the ELIAS service is reachable (GET /api/v1/systemcheck/elias). Returns {state}.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(healthSchema),
+  inputSchema: toInputSchema(healthSchema),
   execute: wrap('elias_health', async (raw) => {
     healthSchema.parse(raw ?? {});
     return get<unknown>('elias_health', '/api/v1/systemcheck/elias');
@@ -306,7 +306,7 @@ export const eliasContainerListTool: McpTool = {
     'List ELIAS containers (GET /api/v1/containers): id, name, displayName, distribution, created, ' +
     'isUpdating, hasRecoverySystem, storageState. Large lists are capped by `limit`.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(containerListSchema),
+  inputSchema: toInputSchema(containerListSchema),
   execute: wrap('elias_container_list', async (raw) => {
     const { limit, offset } = containerListSchema.parse(raw ?? {});
     const data = await get<unknown>('elias_container_list', '/api/v1/containers');
@@ -327,7 +327,7 @@ export const eliasContainerFilesTool: McpTool = {
     'List files in an ELIAS container (GET /api/v1/containers/{id}/files) with per-category counts. ' +
     'Returns id, name, extension, category, size, date.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(containerFilesSchema),
+  inputSchema: toInputSchema(containerFilesSchema),
   execute: wrap('elias_container_files', async (raw) => {
     const { containerId, limit, offset } = containerFilesSchema.parse(raw);
     const data = await get<unknown>(
@@ -360,7 +360,7 @@ export const eliasRightsTool: McpTool = {
     "Show the current user's ELIAS rights (view, upload, delete, manageContainers, runSolver, sign). " +
     'Global when containerId is omitted, otherwise for that container.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(rightsSchema),
+  inputSchema: toInputSchema(rightsSchema),
   execute: wrap('elias_rights', async (raw) => {
     const { containerId } = rightsSchema.parse(raw ?? {});
     const path =
@@ -390,7 +390,7 @@ export const eliasPackageListTool: McpTool = {
     'List EPM packages in a container (GET /api/v1/epms/getAll/{id}); with `name`, list the FPMs of one ' +
     'EPM (GET /api/v1/epms/{id}/{name}.epm/fpms). Minimal projection (id, name, version, buildTime); descriptions are omitted. Paginated via limit/offset.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(packageListSchema),
+  inputSchema: toInputSchema(packageListSchema),
   execute: wrap('elias_package_list', async (raw) => {
     const { containerId, name, limit, offset } = packageListSchema.parse(raw);
     const cid = cseg(containerId);
@@ -425,7 +425,7 @@ export const eliasImageListTool: McpTool = {
     TOOL_TAG +
     'List IDF images in a container (GET /api/v1/images/getAll/{id}): id, name, imageSize, locked, created, modified.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(imageListSchema),
+  inputSchema: toInputSchema(imageListSchema),
   execute: wrap('elias_image_list', async (raw) => {
     const { containerId, limit, offset } = imageListSchema.parse(raw);
     const data = await get<unknown>('elias_image_list', `/api/v1/images/getAll/${cseg(containerId)}`);
@@ -455,7 +455,7 @@ export const eliasCertificateListTool: McpTool = {
     'List certificates in a container (GET /api/v1/certificates/getAll/{id}). Summary only ' +
     '(PEM, key and signature blobs omitted; use elias_certificate_get with includePem).',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(certListSchema),
+  inputSchema: toInputSchema(certListSchema),
   execute: wrap('elias_certificate_list', async (raw) => {
     const { containerId, limit, offset } = certListSchema.parse(raw);
     const data = await get<unknown>(
@@ -484,7 +484,7 @@ export const eliasCertificateGetTool: McpTool = {
     'signing certificate, metadata only (GET /api/v1/certificates/signing/{id}). If no signing certificate is set the ' +
     'server answers 404; this tool then reports {signingCertificate:"none"} if the container exists (checked via the container list), otherwise an error or "none-or-container-not-found".',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(certGetObject),
+  inputSchema: toInputSchema(certGetObject),
   execute: wrap('elias_certificate_get', async (raw) => {
     const { containerId, certificateId, signing, includePem } = certGetSchema.parse(raw);
     const cid = cseg(containerId);
@@ -532,7 +532,7 @@ export const eliasUploadStatusTool: McpTool = {
     'Read the processing status of an existing upload (GET /api/v1/files/upload/{id}/status): ' +
     'parse state and extracted/parsed/imported counters. Does not start or complete uploads.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(uploadStatusSchema),
+  inputSchema: toInputSchema(uploadStatusSchema),
   execute: wrap('elias_upload_status', async (raw) => {
     const { uploadId } = uploadStatusSchema.parse(raw);
     const data = await get<Rec>('elias_upload_status', `/api/v1/files/upload/${seg(EliasGuid, uploadId)}/status`);
@@ -555,7 +555,7 @@ export const eliasContainerGetTool: McpTool = {
   name: 'elias_container_get',
   description: TOOL_TAG + 'Get one ELIAS container (GET /api/v1/containers/{id}). Response is redacted and size-capped.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(containerGetSchema),
+  inputSchema: toInputSchema(containerGetSchema),
   execute: wrap('elias_container_get', async (raw) => {
     const { containerId } = containerGetSchema.parse(raw);
     return get<unknown>('elias_container_get', `/api/v1/containers/${cseg(containerId)}`);
@@ -568,7 +568,7 @@ export const eliasContainerCapabilitiesTool: McpTool = {
   description:
     TOOL_TAG + 'Show ELIAS container capabilities (GET /api/v1/containers/capabilities). Response is redacted and size-capped.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(capabilitiesSchema),
+  inputSchema: toInputSchema(capabilitiesSchema),
   execute: wrap('elias_container_capabilities', async (raw) => {
     const { limit, offset } = capabilitiesSchema.parse(raw ?? {});
     return genericShape(await get<unknown>('elias_container_capabilities', '/api/v1/containers/capabilities'), limit, offset);
@@ -630,7 +630,7 @@ export const eliasContainerRulesTool: McpTool = {
     'List the rules of an ELIAS container (GET /api/v1/containers/{id}/rules). Returns {total, summary (counts per type/category), items (one page, per-rule text shortened)}; ' +
     'page with limit/offset, widen text with textMaxChars. Large containers can have thousands of rules, so output is always summarised and size-capped, never dropped. Redacted.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(rulesSchema),
+  inputSchema: toInputSchema(rulesSchema),
   execute: wrap('elias_container_rules', async (raw) => {
     const { containerId, limit, offset, textMaxChars } = rulesSchema.parse(raw);
     return shapeRules(await get<unknown>('elias_container_rules', `/api/v1/containers/${cseg(containerId)}/rules`), limit, offset, textMaxChars);
@@ -648,7 +648,7 @@ export const eliasPackageVersionsTool: McpTool = {
   description:
     TOOL_TAG + 'List versions of a package (GET /api/v1/epms/{containerId}/{id}/versions). Paginated, redacted, size-capped.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(pkgSubSchema),
+  inputSchema: toInputSchema(pkgSubSchema),
   execute: wrap('elias_package_versions', async (raw) => {
     const { containerId, id, limit, offset } = pkgSubSchema.parse(raw);
     const path = `/api/v1/epms/${cseg(containerId)}/${seg(EliasName, id)}/versions`;
@@ -661,7 +661,7 @@ export const eliasPackageDependenciesTool: McpTool = {
   description:
     TOOL_TAG + 'List dependencies of a package (GET /api/v1/epms/{containerId}/{id}/dependencies). Paginated, redacted, size-capped.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(pkgSubSchema),
+  inputSchema: toInputSchema(pkgSubSchema),
   execute: wrap('elias_package_dependencies', async (raw) => {
     const { containerId, id, limit, offset } = pkgSubSchema.parse(raw);
     const path = `/api/v1/epms/${cseg(containerId)}/${seg(EliasName, id)}/dependencies`;
@@ -677,7 +677,7 @@ export const eliasImageGetTool: McpTool = {
   name: 'elias_image_get',
   description: TOOL_TAG + 'Get one IDF image record (GET /api/v1/images/{containerId}/{id}). Redacted and size-capped.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(imageGetSchema),
+  inputSchema: toInputSchema(imageGetSchema),
   execute: wrap('elias_image_get', async (raw) => {
     const { containerId, id } = imageGetSchema.parse(raw);
     return get<unknown>('elias_image_get', `/api/v1/images/${cseg(containerId)}/${seg(EliasName, id)}`);
@@ -698,7 +698,7 @@ export const eliasMyRolesTool: McpTool = {
     'A read behind a POST: nothing is created or changed. Returns {<id>: {view, upload, delete, manageContainers, runSolver, sign}}; ' +
     'a mis-spelled id answers all-false, so pass ids exactly as elias_container_list shows them.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(myRolesSchema),
+  inputSchema: toInputSchema(myRolesSchema),
   execute: wrap('elias_my_roles', async (raw) => {
     const { containerIds } = myRolesSchema.parse(raw);
     const body = { containerIds: containerIds.map((c) => c.toUpperCase()) };

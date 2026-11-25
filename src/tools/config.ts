@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult, type ToolContext } from '../types.js';
 import { confirmDestructiveAction } from '../elicitation.js';
@@ -83,7 +83,7 @@ export const configGetTool = {
     'Read configuration from Scout Board for base, OU, or device scope. ' +
     'Provide target (base|ou|device) and section (e.g. general, firmware, network/lan). ' +
     'Requires ouPath/ouId for target=ou, device identifier for target=device.',
-  inputSchema: zodToJsonSchema(configGetSchema),
+  inputSchema: toInputSchema(configGetSchema),
   execute: configGetExecute,
 };
 
@@ -92,7 +92,7 @@ export const configGetTool = {
 const configUpdateSchema = z.object({
   target: z.enum(['base', 'ou', 'device']),
   section: z.string().describe('Config section path (same values as config_get)'),
-  body: z.record(z.unknown()).describe('Configuration payload to write'),
+  body: z.record(z.string(), z.unknown()).describe('Configuration payload to write'),
   // OU identification
   ouPath: z.string().optional(),
   ouId: z.number().int().optional(),
@@ -403,7 +403,7 @@ export const configUpdateTool = {
     'out-of-range values fail with the allowed range, newer-sinceVersion keys warn but do not block) unless skipValidation=true. ' +
     'Fleet-wide writes (target=ou, or deviceIds with more than one device) require confirmation: ' +
     'an interactive yes/no prompt if the client supports MCP elicitation, otherwise confirm=true.',
-  inputSchema: zodToJsonSchema(configUpdateSchema),
+  inputSchema: toInputSchema(configUpdateSchema),
   execute: configUpdateExecute,
 };
 
@@ -680,6 +680,6 @@ export const configCompareTool = {
     'mode=device-ou / device-base / ou-ou / ou-parent: inheritance-aware comparison using the RSoP engine — ' +
     'returns a symmetric diff (keys present on only one side, keys with differing effective values), each ' +
     'annotated with setAt (which level set that value). Entirely read-only.',
-  inputSchema: zodToJsonSchema(configCompareSchema),
+  inputSchema: toInputSchema(configCompareSchema),
   execute: configCompareExecute,
 };

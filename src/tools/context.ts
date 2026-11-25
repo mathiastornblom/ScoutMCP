@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { ok, fail, type McpToolResult } from '../types.js';
 import { resolveWriteTarget } from '../resolver.js';
 import { getWorkingOu, setWorkingOu, clearWorkingOu } from '../context.js';
@@ -82,6 +82,6 @@ export const contextTool = {
     'the working OU when no explicit path is given. ' +
     'action=get_ou shows what is currently set. action=clear_ou unsets it. ' +
     'The working OU is session-scoped and cleared on server restart.',
-  inputSchema: zodToJsonSchema(contextSchema),
+  inputSchema: toInputSchema(contextSchema),
   execute: contextExecute,
 };

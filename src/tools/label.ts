@@ -1,13 +1,13 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
 
 const labelManageSchema = z.object({
   action: z.enum(['list', 'get', 'create', 'update', 'delete']),
-  labelId: z.string().uuid().optional().describe('Label UUID (required for get/update/delete)'),
-  body: z.record(z.unknown()).optional().describe('Label fields for create/update'),
+  labelId: z.guid().optional().describe('Label UUID (required for get/update/delete)'),
+  body: z.record(z.string(), z.unknown()).optional().describe('Label fields for create/update'),
 });
 
 type LabelManageInput = z.infer<typeof labelManageSchema>;
@@ -77,6 +77,6 @@ export const labelManageTool = {
   description:
     'Manage dynamic configuration labels in Scout Board. ' +
     'Actions: list, get, create, update, delete. Labels are used with Rules to drive dynamic device configuration.',
-  inputSchema: zodToJsonSchema(labelManageSchema),
+  inputSchema: toInputSchema(labelManageSchema),
   execute: labelManageExecute,
 };

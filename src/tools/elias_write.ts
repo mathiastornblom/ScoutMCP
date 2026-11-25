@@ -14,7 +14,7 @@
  */
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, type McpTool, type McpToolResult } from '../types.js';
 import {
@@ -88,7 +88,7 @@ export const eliasContainerCreateTool: McpTool = {
     'Pass confirm=true unless the client asks for interactive confirmation. An UNKNOWN outcome is an error: ' +
     'do not repeat the call, check elias_container_list first.',
   annotations: WRITE_ANNOTATIONS,
-  inputSchema: zodToJsonSchema(containerCreateInput),
+  inputSchema: toInputSchema(containerCreateInput),
   execute: async (raw, ctx): Promise<McpToolResult> => {
     const result = await runEliasWrite(containerCreateSpec, raw, { client: getClient(), server: ctx?.server });
     return formatWriteResult('elias_container_create', result);
@@ -152,7 +152,7 @@ export const eliasWriteStatusTool: McpTool = {
     'registered and why not, body-evidence status, and unresolved audit intents. No network call is made. Never returns ' +
     'secrets or local paths.',
   annotations: READ_ONLY,
-  inputSchema: zodToJsonSchema(statusSchema),
+  inputSchema: toInputSchema(statusSchema),
   execute: async (raw): Promise<McpToolResult> => {
     const cfg = loadEliasWriteConfig();
     if (!cfg.privateEndpoints || cfg.tier === 'off') {

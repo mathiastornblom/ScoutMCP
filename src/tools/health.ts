@@ -1,6 +1,6 @@
 import { MCP_SERVER_VERSION, MCP_BUILD } from '../version.js';
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { resolveConfig } from '../session.js';
 import { detectCapabilities } from '../compat/detect.js';
@@ -194,6 +194,6 @@ export const healthCheckTool = {
   name: 'health_check',
   description:
     'Check Scout Board server availability. Use mode=ping for a quick unauthenticated check, or mode=healthcheck for authenticated system status including optional license, subscription, server, and database details.',
-  inputSchema: zodToJsonSchema(inputSchema),
+  inputSchema: toInputSchema(inputSchema),
   execute,
 };

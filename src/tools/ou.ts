@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, buildQuery, type McpToolResult } from '../types.js';
 import { resolveOuRef, invalidateOuCache, resolveWriteTarget, assertOuPathUnchanged, type OuMatch } from '../resolver.js';
@@ -139,7 +139,7 @@ export const ouGetTool = {
   description:
     'Read OU information from Scout Board. Modes: get (single OU by path or id), root (root OU), search (find OUs by term), subordinate (direct children of an OU), structure (full tree view), device_status (status of devices in an OU). ' +
     'Use ouRef to identify OUs by name, partial name, path, or ID — no need to look up IDs first.',
-  inputSchema: zodToJsonSchema(ouGetSchema),
+  inputSchema: toInputSchema(ouGetSchema),
   execute: ouGetExecute,
 };
 
@@ -185,7 +185,7 @@ const ouManageSchema = z.object({
   exportDevices: z.boolean().optional(),
 
   // structure_import body fields
-  importPayload: z.record(z.unknown()).optional().describe('Export payload to import (structure_import)'),
+  importPayload: z.record(z.string(), z.unknown()).optional().describe('Export payload to import (structure_import)'),
   dryRun: z.boolean().optional().describe('Preview import without applying changes'),
 });
 
@@ -485,6 +485,6 @@ export const ouManageTool = {
     'In SCOUT_ENV=test mode, every write target/destination must be under SCOUT_TEST_OU_PATH (checked on the resolved path). ' +
     'Gated by SCOUT_MODE (read-only blocks all writes, dry-run plans without executing); ' +
     'rename/delete/move/converttobase of a top-level OU and structure_import require SCOUT_ALLOW_BASE_WRITES=true; all OU targets are checked against SCOUT_PROTECTED_OUS / SCOUT_ALLOWED_OUS.',
-  inputSchema: zodToJsonSchema(ouManageSchema),
+  inputSchema: toInputSchema(ouManageSchema),
   execute: ouManageExecute,
 };

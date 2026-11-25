@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -226,6 +226,6 @@ export const predefinedCommandsTool = {
     'auth (authenticate with password to enable execution), ' +
     'list_templates (available command templates), ' +
     'modify_templates (update template usage via template_entries).',
-  inputSchema: zodToJsonSchema(predefinedCommandsSchema),
+  inputSchema: toInputSchema(predefinedCommandsSchema),
   execute: predefinedCommandsExecute,
 };

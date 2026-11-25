@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toInputSchema } from '../schema.js';
 import { getClient } from '../client.js';
 import { ok, fail, type McpToolResult } from '../types.js';
 import { checkMutationAllowed, isDryRunSkip, GuardrailError } from '../safety/guardrails.js';
@@ -13,9 +13,9 @@ const ruleManageSchema = z.object({
     'list/get/create/update/delete=CRUD on rules; validate=check expression syntax; ' +
     'link_label/update_label_priority/unlink_label=manage label associations',
   ),
-  ruleId: z.string().uuid().optional().describe('Rule UUID (required for get/update/delete/link_label/update_label_priority/unlink_label)'),
-  labelId: z.string().uuid().optional().describe('Label UUID (required for link_label/update_label_priority/unlink_label)'),
-  body: z.record(z.unknown()).optional().describe('Request body for create/update/validate/link_label/update_label_priority'),
+  ruleId: z.guid().optional().describe('Rule UUID (required for get/update/delete/link_label/update_label_priority/unlink_label)'),
+  labelId: z.guid().optional().describe('Label UUID (required for link_label/update_label_priority/unlink_label)'),
+  body: z.record(z.string(), z.unknown()).optional().describe('Request body for create/update/validate/link_label/update_label_priority'),
 });
 
 type RuleManageInput = z.infer<typeof ruleManageSchema>;
@@ -123,6 +123,6 @@ export const ruleManageTool = {
   description:
     'Manage dynamic configuration rules in Scout Board. Rules use condition expressions to assign labels to devices. ' +
     'Actions: list, get, create, update, delete, validate (expression syntax check), link_label, update_label_priority, unlink_label.',
-  inputSchema: zodToJsonSchema(ruleManageSchema),
+  inputSchema: toInputSchema(ruleManageSchema),
   execute: ruleManageExecute,
 };
