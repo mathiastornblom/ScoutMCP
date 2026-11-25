@@ -2,19 +2,22 @@
 
 ## Unreleased
 
-### Added
-- Build identifier: `health_check` returns `mcpBuild` (`version`, `gitSha`, `builtAt`, `build` e.g. `1.6.0+a1b2c3d`) and MCP `serverInfo.version` is now the build string. Baked in via Docker build args `GIT_SHA`/`BUILD_DATE`; `npm run docker:build` sets them locally.
-- `health_check` now returns `mcpServerVersion` (the version of this MCP server). The version is read from `package.json` (`src/version.ts`) and also feeds MCP `serverInfo`, so the two cannot drift.
-
-### Fixed
-- Startup login no longer blocks the MCP handshake (cold Scout servers can take >30s to log in); credentials are cleared only on explicit rejection (400/401/403). Login timeout is 90s. (PR #42)
-
-### Changed
-- Integration suite aligned with the 1.6.0 gates; run with `SCOUT_MODE=write SCOUT_ALLOWED_OUS=/MCP-Test npm test` (PR #43).
+_Nothing yet._
 
 ## 1.6.0 (2026-11-25)
 
-Verified live against Scout Board 26.11.0 (read-only plus `dry-run`; no write was sent). Every change below went through independent Security and QA review (`.agents/`).
+Verified live against Scout Board 26.11.0 (read-only and `dry-run`, plus the integration suite with writes confined to `/MCP-Test`). Every change below went through independent Security and QA review (`.agents/`).
+
+### Added (after the first 1.6.0 merge, same release)
+- **Build identifier:** `health_check` returns `mcpBuild` (`version`, `gitSha`, `builtAt`, `build`, e.g. `1.6.0+a1b2c3d`) and MCP `serverInfo.version` is the build string. Baked in via Docker build args `GIT_SHA`/`BUILD_DATE`; `npm run docker:build` sets them locally (PR #48).
+- `health_check` returns `mcpServerVersion`, read from `package.json` (`src/version.ts`) so it cannot drift from `serverInfo` (PR #44).
+- **OU gating of the remaining command surfaces (PR #46):** `device_command` / `notification_manage` device lists are looked up and gated per device (GUID-normalised, fresh OU tree, server ids re-forwarded, key allowlist, recheck before the POST); `ddg` and `schedule_manage` update/delete are refused while OU gates are active; `devicerelocation` destinations are gated and required; device rows' `_GroupIDPath` must match the fresh-tree path of `GroupID`.
+
+### Fixed (after the first 1.6.0 merge)
+- Startup login no longer blocks the MCP handshake (cold Scout servers can take >30s to log in); credentials are cleared only on explicit rejection (400/401/403). Login timeout 90s (PR #42). Citrix Cloud exchange gets the same headroom; a late rejection no longer wipes credentials set via `scout_configure` (PR #47).
+
+### Changed (after the first 1.6.0 merge)
+- Integration suite aligned with the 1.6.0 gates and run live for the first time with writes confined to `/MCP-Test`: 129 passed, 0 failed, 1 skipped. Run with `SCOUT_MODE=write SCOUT_ALLOWED_OUS=/MCP-Test npm test` (PR #43).
 
 ### Added
 - **Safety layer** (`src/safety/guardrails.ts`): `SCOUT_MODE` (read-only | dry-run | write, default read-only), Base-write lock, blast-radius cap, protected/allowed OU lists, private-writes-in-production lock, circuit breaker, kill switch, append-only audit log, snapshot-before-mutate.
